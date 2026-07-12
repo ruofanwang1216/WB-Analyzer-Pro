@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python3 main.py)",
+      "Bash(python /Users/skyewang/Documents/WB-analyzer/test_core.py)",
+      "Bash(python3 -c ':*)",
+      "Bash(python -c ':*)",
+      "Bash(python main.py)",
+      "Bash(python -c \"from gui.main_window import MainWindow; print\\('import ok'\\)\")",
+      "Bash(python -c \"from gui.results_panel import ResultsPanel; print\\('import ok'\\)\")",
+      "Bash(python3 -m py_compile gui/figure_canvas.py gui/figure_mode_window.py gui/layout_editor_commands.py gui/layout_editor_items.py gui/layout_editor_scene.py)",
+      "Bash(QT_QPA_PLATFORM=offscreen python3 -m unittest test_layout_editor test_core test_image_transform test_auto_detect)",
+      "Bash(python3 -m py_compile core/figure_project.py core/template_engine.py gui/figure_canvas.py gui/figure_mode_window.py)",
+      "Bash(find /Users/skyewang/Documents/WB-analyzer -name \".DS_Store\" -type f -exec du -h {} \\\\;)",
+      "Bash(find /Users/skyewang/Documents/WB-analyzer -type d -name \"__pycache__\" -exec du -sh {} \\\\;)",
+      "Bash(python3)",
+      "Bash(find /Users/skyewang/Documents/WB-analyzer -name \"*.py\" -type f ! -path \"*/.venv/*\" -exec grep -l \"^[[:space:]]*#.*def\\\\|^[[:space:]]*#.*class\\\\|^[[:space:]]*#.*import\\\\|^[[:space:]]*#.*=\\\\|^[[:space:]]*#.*if\\\\|^[[:space:]]*#.*for\" {} \\\\;)",
+      "Bash(awk '/^from core.layout_engine/,/^[^#]/ { if \\(/SCREEN_SCALE/ && !/import/ && !/^#/\\) print NR\": \"$0 }' /Users/skyewang/Documents/WB-analyzer/gui/figure_canvas.py)",
+      "Bash(find /Users/skyewang/Documents/WB-analyzer -name \".DS_Store\" -not -path \"*/.venv/*\" -delete)",
+      "Bash(find /Users/skyewang/Documents/WB-analyzer -name \"__pycache__\" -not -path \"*/.venv/*\" -type d -exec rm -rf {} +)",
+      "Bash(python3 -c \"from utils.persistence import AppPersistence; print\\('persistence OK'\\)\")",
+      "Bash(python3 check_env.py)",
+      "Bash(python -c ' *)",
+      "Bash(bash run.sh)",
+      "Bash(osascript -e 'tell application \"Terminal\" *)"
+    ]
+  }
+}
