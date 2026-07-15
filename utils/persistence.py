@@ -7,7 +7,7 @@ from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 
-from config.settings import APP_NAME, VERSION, PROJECT_FOLDER_NAME
+from config.settings import APP_NAME, DEFAULT_PROJECT_DIR, VERSION
 from utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -16,14 +16,14 @@ log = get_logger(__name__)
 class AppPersistence:
     """
     Owns lightweight app persistence:
-    - stable project folder under ~/Documents/WB_AllInOne
+    - stable project folder under ~/Library/Application Support/WB Analyzer Pro
     - minimal config.json for app/debug/UI state
     - remembered defaults for user-triggered exports
     """
 
     def __init__(self, project_dir: Path | None = None) -> None:
         env_override = os.environ.get("WB_PROJECT_DIR", "").strip()
-        root = project_dir or (Path(env_override).expanduser() if env_override else (Path.home() / "Documents" / PROJECT_FOLDER_NAME))
+        root = project_dir or (Path(env_override).expanduser() if env_override else DEFAULT_PROJECT_DIR)
         self._project_dir = root.expanduser().resolve()
         self._config_path = self._project_dir / "config.json"
         try:

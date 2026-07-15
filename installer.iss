@@ -1,10 +1,10 @@
 ; Inno Setup script for WB Analyzer Pro
 ; Build (on Windows, after `pyinstaller pyinstaller.spec` has produced dist\WBAnalyzerPro\):
 ;   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
-; Output: dist_installer\WBAnalyzerPro-Setup.exe
+; Output: dist_installer\WBAnalyzerPro-Setup-Windows.exe
 
 #define MyAppName "WB Analyzer Pro"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.2.1"
 #define MyAppPublisher "WB-Lab"
 #define MyAppExeName "WBAnalyzerPro.exe"
 
@@ -17,7 +17,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=dist_installer
-OutputBaseFilename=WBAnalyzerPro-Setup
+OutputBaseFilename=WBAnalyzerPro-Setup-Windows
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

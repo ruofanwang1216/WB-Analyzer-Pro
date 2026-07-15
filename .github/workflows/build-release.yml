@@ -1,0 +1,107 @@
+name: Build Installers
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller pyinstaller.spec --noconfirm
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WBAnalyzerPro-Setup-Windows
+          path: dist_installer\WBAnalyzerPro-Setup-Windows.exe
+          retention-days: 30
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller pyinstaller.spec --noconfirm
+
+      - name: Build .dmg installer
+        run: |
+          mkdir -p dist_installer dmg_staging
+          cp -R "dist/WBAnalyzerPro.app" dmg_staging/
+          ln -s /Applications dmg_staging/Applications
+          hdiutil create -volname "WB Analyzer Pro" \
+            -srcfolder dmg_staging \
+            -ov -format UDZO \
+            "dist_installer/WBAnalyzerPro-Setup-macOS.dmg"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WBAnalyzerPro-Setup-macOS
+          path: dist_installer/WBAnalyzerPro-Setup-macOS.dmg
+          retention-days: 30
+
+  release:
+    needs: [build-windows, build-macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          name: WBAnalyzerPro-Setup-Windows
+          path: release-assets
+
+      - name: Download macOS installer
+        uses: actions/download-artifact@v4
+        with:
+          name: WBAnalyzerPro-Setup-macOS
+          path: release-assets
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

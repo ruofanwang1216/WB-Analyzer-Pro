@@ -1,10 +1,12 @@
 from pathlib import Path
 
 APP_NAME = "WB Analyzer Pro"
-VERSION = "0.1.0"
+VERSION = "0.2.1"
 
-PROJECT_FOLDER_NAME = "WB_AllInOne"
-DEFAULT_PROJECT_DIR = Path.home() / "Documents" / PROJECT_FOLDER_NAME
+PROJECT_FOLDER_NAME = APP_NAME
+# App-managed settings belong in macOS Application Support, not the user's
+# Documents folder. This avoids an unnecessary privacy prompt on first launch.
+DEFAULT_PROJECT_DIR = Path.home() / "Library" / "Application Support" / PROJECT_FOLDER_NAME
 DEFAULT_CONFIG_PATH = DEFAULT_PROJECT_DIR / "config.json"
 
 SUPPORTED_IMAGE_EXTS = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}

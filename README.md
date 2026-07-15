@@ -37,7 +37,7 @@ python3 check_env.py
 ## Project Folder And Persistence
 
 ```
-~/Documents/WB_AllInOne/
+~/Library/Application Support/WB Analyzer Pro/
 └── config.json            # lightweight app/debug/UI state
 ```
 

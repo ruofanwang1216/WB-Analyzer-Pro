@@ -1,17 +1,22 @@
 # -*- mode: python ; coding: utf-8 -*-
 #
-# PyInstaller build spec for WB Analyzer Pro (Windows).
+# PyInstaller build spec for WB Analyzer Pro. Shared across Windows and macOS -
+# the platform-specific bits (the macOS .app BUNDLE step) are gated on
+# sys.platform so the same spec file works in both CI jobs.
 #
-# Build (on Windows, inside a venv with requirements.txt + pyinstaller installed):
+# Build (inside a venv with requirements.txt + pyinstaller installed):
 #   pyinstaller pyinstaller.spec --noconfirm
 #
-# Output: dist/WBAnalyzerPro/WBAnalyzerPro.exe (+ supporting files)
+# Output:
+#   Windows: dist/WBAnalyzerPro/WBAnalyzerPro.exe (+ supporting files)
+#   macOS:   dist/WBAnalyzerPro.app
 
 import sys
 from pathlib import Path
 
 block_cipher = None
 project_root = Path(SPECPATH)
+app_icon = project_root / "assets" / "WBAnalyzerPro.icns"
 
 # Bundle the vendored WB-TIFF-exporter helper modules (used by the optional
 # "upload/convert" feature in gui/main_window.py). These are plain .py files
@@ -76,7 +81,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon=str(app_icon) if app_icon.exists() else None,
 )
 
 coll = COLLECT(
@@ -89,3 +94,19 @@ coll = COLLECT(
     upx_exclude=[],
     name="WBAnalyzerPro",
 )
+
+# macOS only: wrap the COLLECT output into a proper .app bundle. PyInstaller
+# ignores this on Windows/Linux builds, so the same spec file is safe there.
+if sys.platform == "darwin":
+    app = BUNDLE(
+        coll,
+        name="WBAnalyzerPro.app",
+        icon=str(app_icon) if app_icon.exists() else None,
+        bundle_identifier="com.wblab.wbanalyzerpro",
+        info_plist={
+            "CFBundleName": "WB Analyzer Pro",
+            "CFBundleDisplayName": "WB Analyzer Pro",
+            "CFBundleShortVersionString": "0.2.1",
+            "NSHighResolutionCapable": True,
+        },
+    )
