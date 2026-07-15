@@ -5,6 +5,7 @@ import copy
 from dataclasses import dataclass, field
 import math
 from pathlib import Path
+import re
 
 from PySide6.QtCore import Qt, Signal, QPoint, QRect, QSize, QTimer
 from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QPdfWriter, QRegion, QImage, QFont, QFontMetrics
@@ -37,6 +38,35 @@ from PySide6.QtWidgets import (
 import numpy as np
 import pandas as pd
 
+from utils.i18n import LANG_EN, LANG_ZH_CN, tr, tr_display
+
+
+def _translate_widget_tree(root: QWidget, language: str) -> None:
+    """Translate static controls in a figure-generation widget tree.
+
+    Combobox display labels are intentionally left alone: several use their
+    visible English value as an internal style key.
+    """
+    for label in root.findChildren(QLabel):
+        label.setText(tr_display(label.text(), language))
+        label.setToolTip(tr_display(label.toolTip(), language))
+    for button in root.findChildren(QPushButton):
+        button.setText(tr_display(button.text(), language))
+        button.setToolTip(tr_display(button.toolTip(), language))
+    for checkbox in root.findChildren(QCheckBox):
+        checkbox.setText(tr_display(checkbox.text(), language))
+        checkbox.setToolTip(tr_display(checkbox.toolTip(), language))
+    for list_widget in root.findChildren(QListWidget):
+        for index in range(list_widget.count()):
+            item = list_widget.item(index)
+            item.setText(tr_display(item.text(), language))
+    for spin in root.findChildren(QSpinBox):
+        spin.setPrefix(tr_display(spin.prefix(), language))
+        spin.setSuffix(tr_display(spin.suffix(), language))
+    for spin in root.findChildren(QDoubleSpinBox):
+        spin.setPrefix(tr_display(spin.prefix(), language))
+        spin.setSuffix(tr_display(spin.suffix(), language))
+
 class _DSpin(QDoubleSpinBox):
     """QDoubleSpinBox that selects all text on click for easy replacement."""
     def mousePressEvent(self, event):
@@ -66,7 +96,13 @@ class FigureTypeDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(320)
         self._selection: str | None = None
+        self._language = LANG_EN
         self._build_ui()
+
+    def set_language(self, language: str) -> None:
+        self._language = language
+        self.setWindowTitle(tr("Figure Generation", language))
+        _translate_widget_tree(self, language)
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -131,7 +167,13 @@ class ColumnSetupDialog(QDialog):
         self.setWindowTitle("Column Setup")
         self.setModal(True)
         self.setMinimumWidth(300)
+        self._language = LANG_EN
         self._build_ui()
+
+    def set_language(self, language: str) -> None:
+        self._language = language
+        self.setWindowTitle(tr("Column Setup", language))
+        _translate_widget_tree(self, language)
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -320,8 +362,14 @@ class FigureControlDialog(QDialog):
         self.setWindowTitle("Figure Modification Panel")
         self.resize(640, 420)
         self._cfg = style_config
+        self._language = LANG_EN
         self._color_buttons: dict[str, QPushButton] = {}
         self._build_ui(initial_section)
+
+    def set_language(self, language: str) -> None:
+        self._language = language
+        self.setWindowTitle(tr("Figure Modification Panel", language))
+        _translate_widget_tree(self, language)
 
     def _build_ui(self, initial_section: str) -> None:
         root = QHBoxLayout(self)
@@ -1574,18 +1622,19 @@ class _FiguresDialog(QDialog):
         parent=None,
     ) -> None:
         super().__init__(parent)
+        self._language = LANG_EN
+        self._negative_control_name = negative_control_name
+        self._baseline_mean = baseline_mean
         self.setWindowTitle("Figures Generation")
         self.resize(840, 560)
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(8)
 
-        note = QLabel(
-            f"Normalization baseline: {negative_control_name} "
-            f"(mean Target/Loading = {baseline_mean:.4g})"
-        )
-        note.setStyleSheet("font-size: 11px; color: #4D6171;")
-        root.addWidget(note)
+        self._note = QLabel()
+        self._note.setStyleSheet("font-size: 11px; color: #4D6171;")
+        self._refresh_note()
+        root.addWidget(self._note)
 
         plot = _PrismBarPlotWidget(
             group_names=group_names,
@@ -1602,6 +1651,20 @@ class _FiguresDialog(QDialog):
         buttons.accepted.connect(self.accept)
         root.addWidget(buttons)
 
+    def _refresh_note(self) -> None:
+        self._note.setText(tr(
+            "Normalization baseline: {control} (mean Target/Loading = {baseline})",
+            self._language,
+            control=self._negative_control_name,
+            baseline=f"{self._baseline_mean:.4g}",
+        ))
+
+    def set_language(self, language: str) -> None:
+        self._language = language
+        self.setWindowTitle(tr("Figures Generation", language))
+        _translate_widget_tree(self, language)
+        self._refresh_note()
+
 
 class ColumnTableWindow(QMainWindow):
     """Editable Prism-style column table window."""
@@ -1610,6 +1673,7 @@ class ColumnTableWindow(QMainWindow):
 
     def __init__(self, samples: int, replicates: int, parent=None) -> None:
         super().__init__(parent)
+        self._language = LANG_EN
         self._samples = samples
         self._replicates = replicates
         self._table: QTableWidget | None = None
@@ -1638,6 +1702,46 @@ class ColumnTableWindow(QMainWindow):
         self.setWindowTitle("Column Table")
         self.resize(840, 520)
         self._build_ui()
+
+    def set_language(self, language: str) -> None:
+        """Update visible table terminology while retaining the underlying data."""
+        self._language = language
+        self.setWindowTitle(tr("Column Table", language))
+        root = self._content_widget or self.centralWidget()
+        if root is not None:
+            _translate_widget_tree(root, language)
+        if self._figure_preview_host is not None:
+            _translate_widget_tree(self._figure_preview_host, language)
+        self._refresh_table_language()
+        if self._figure_control_dialog is not None:
+            self._figure_control_dialog.set_language(language)
+        for dialog in self._figure_dialogs:
+            dialog.set_language(language)
+
+    def _display_group_name(self, name: str) -> str:
+        if self._language != LANG_ZH_CN:
+            return name
+        match = re.fullmatch(r"Group\s+(.+)", name)
+        return tr("Group {name}", self._language, name=match.group(1)) if match else name
+
+    def _refresh_table_language(self) -> None:
+        if self._table is None:
+            return
+        headers = [tr("Replicate", self._language), tr("Band Type", self._language)]
+        headers.extend(self._display_group_name(name) for name in self._group_names)
+        self._table.setHorizontalHeaderLabels(headers)
+        for rep_index in range(self._replicates):
+            top_row = rep_index * self._ROWS_PER_REPLICATE
+            labels = (
+                (top_row, 0, tr("Replicate {number}", self._language, number=rep_index + 1)),
+                (top_row, 1, tr("Target band", self._language)),
+                (top_row + 1, 1, tr("Loading control", self._language)),
+                (top_row + 2, 1, tr("Normalized result", self._language)),
+            )
+            for row, column, text in labels:
+                item = self._table.item(row, column)
+                if item is not None:
+                    item.setText(text)
 
     def _build_ui(self) -> None:
         central = QWidget(self)
@@ -2039,6 +2143,7 @@ class ColumnTableWindow(QMainWindow):
                 initial_section=section,
                 parent=self,
             )
+            self._figure_control_dialog.set_language(self._language)
             self._figure_control_dialog.styleChanged.connect(self._on_style_config_changed)
             self._figure_control_dialog.undoRequested.connect(self._on_figure_style_undo_clicked)
             self._figure_control_dialog.confirmRequested.connect(self._on_figure_style_confirm_clicked)
@@ -2255,6 +2360,7 @@ class ColumnTableWindow(QMainWindow):
 
     def _on_reset_table_clicked(self) -> None:
         chooser = FigureTypeDialog(self)
+        chooser.set_language(self._language)
         if chooser.exec() != QDialog.DialogCode.Accepted:
             return
         selection = chooser.selection
@@ -2269,6 +2375,7 @@ class ColumnTableWindow(QMainWindow):
             return
 
         setup = ColumnSetupDialog(self)
+        setup.set_language(self._language)
         if setup.exec() != QDialog.DialogCode.Accepted:
             return
         values = setup.get_input()
@@ -2319,6 +2426,7 @@ class ColumnTableWindow(QMainWindow):
             self._replace_host_widget(self._figure_preview_host, placeholder)
 
         self._build_ui()
+        self.set_language(self._language)
         self.panelFocusRequested.emit("table")
 
     def _on_export_figure_clicked(self) -> None:
@@ -2765,6 +2873,7 @@ class ColumnTableWindow(QMainWindow):
             style_config=self._figure_style_config,
             parent=self,
         )
+        dialog.set_language(self._language)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         def _cleanup_dialog(_obj=None, closed_dialog=dialog) -> None:
             self._figure_dialogs = [d for d in self._figure_dialogs if d is not closed_dialog]

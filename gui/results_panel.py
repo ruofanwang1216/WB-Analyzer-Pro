@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QLabel, QFileDialog, QMessageBox, QHeaderView,
 )
+from utils.i18n import LANG_EN, tr
 
 _COLS = ["Run", "Band", "Lane", "Area", "Mean", "Min", "Max", "IntDen", "RawIntDen"]
 _METRICS = ["Area", "Mean", "Min", "Max", "IntDen", "RawIntDen"]
@@ -179,6 +180,7 @@ class ResultsPanel(QWidget):
         export_dir_changed: Callable[[Path], None] | None = None,
     ) -> None:
         super().__init__(parent)
+        self._language = LANG_EN
         self._default_export_dir_provider = default_export_dir_provider
         self._export_dir_changed = export_dir_changed
         self._all_rows: list[dict[str, Any]] = []   # one entry per measured ROI
@@ -286,6 +288,15 @@ class ResultsPanel(QWidget):
         self._table.setHorizontalHeader(header)
         root.addWidget(self._table)
 
+    def set_language(self, language: str) -> None:
+        self._language = language
+        self._title.setText(tr("Results", language))
+        self._delete_btn.setText(tr("Delete", language))
+        self._export_btn.setText(tr("Export Results", language))
+        self._clear_btn.setText(tr("Clear", language))
+        if self._all_rows:
+            self._refresh_table()
+
     # ── Public API ─────────────────────────────────────────────────────────────
 
     def show_results(self, df: pd.DataFrame) -> None:
@@ -372,7 +383,7 @@ class ResultsPanel(QWidget):
         self._table.setRowCount(len(_METRICS))
         self._table.setColumnCount(1 + len(visible_entries))
 
-        metric_header = QTableWidgetItem("Metric")
+        metric_header = QTableWidgetItem(tr("Metric", self._language))
         metric_header.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self._table.setHorizontalHeaderItem(0, metric_header)
 
@@ -391,7 +402,7 @@ class ResultsPanel(QWidget):
                 checked_sections.add(col_idx)
 
         for row_idx, metric in enumerate(_METRICS):
-            metric_item = QTableWidgetItem(metric)
+            metric_item = QTableWidgetItem(tr(metric, self._language))
             metric_item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
             self._table.setItem(row_idx, 0, metric_item)
 

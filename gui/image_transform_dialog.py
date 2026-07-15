@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.image_transform import ImageTransformParams, MAX_16BIT_VALUE
+from utils.i18n import LANG_EN, tr
 
 
 class ImageTransformDialog(QDialog):
@@ -30,15 +31,16 @@ class ImageTransformDialog(QDialog):
         self.setMinimumWidth(420)
 
         self._updating = False
+        self._language = LANG_EN
 
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
 
-        note = QLabel("Analyze follows the current Low / High / Gamma. Invert remains preview-only.")
-        note.setWordWrap(True)
-        note.setStyleSheet("color: #526675; font-size: 11px;")
-        root.addWidget(note)
+        self._note = QLabel("Analyze follows the current Low / High / Gamma. Invert remains preview-only.")
+        self._note.setWordWrap(True)
+        self._note.setStyleSheet("color: #526675; font-size: 11px;")
+        root.addWidget(self._note)
 
         controls = QFrame()
         controls.setStyleSheet(
@@ -64,6 +66,7 @@ class ImageTransformDialog(QDialog):
         self._invert_checkbox.setToolTip("Show bright signal as dark bands on a light background")
         self._invert_checkbox.setStyleSheet("color: #334D5C; font-size: 11px; font-weight: 600;")
 
+        self._control_labels = []
         self._add_control_row(grid, 0, "Low", self._low_slider, self._low_spin)
         self._add_control_row(grid, 1, "High", self._high_slider, self._high_spin)
         self._add_control_row(grid, 2, "Gamma", self._gamma_slider, self._gamma_spin)
@@ -99,6 +102,18 @@ class ImageTransformDialog(QDialog):
         self._reset_btn.clicked.connect(self.resetRequested.emit)
         self._close_btn.clicked.connect(self.close)
 
+    def set_language(self, language: str) -> None:
+        self._language = language
+        self.setWindowTitle(tr("Image Transform", language))
+        self._note.setText(tr("Analyze follows the current Low / High / Gamma. Invert remains preview-only.", language))
+        self._invert_checkbox.setText(tr("Invert display", language))
+        self._invert_checkbox.setToolTip(tr("Show bright signal as dark bands on a light background", language))
+        for label, source in zip(self._control_labels, ("Low", "High", "Gamma")):
+            label.setText(tr(source, language))
+        self._auto_btn.setText(tr("Auto Scale", language))
+        self._reset_btn.setText(tr("Reset", language))
+        self._close_btn.setText(tr("Close", language))
+
     @staticmethod
     def _make_int_control(minimum: int, maximum: int, value: int) -> tuple[QSlider, QSpinBox]:
         slider = QSlider(Qt.Orientation.Horizontal)
@@ -110,9 +125,10 @@ class ImageTransformDialog(QDialog):
         spin.setMaximumWidth(92)
         return slider, spin
 
-    @staticmethod
-    def _add_control_row(grid: QGridLayout, row: int, label: str, slider, spin) -> None:
-        grid.addWidget(QLabel(label), row, 0)
+    def _add_control_row(self, grid: QGridLayout, row: int, label: str, slider, spin) -> None:
+        label_widget = QLabel(label)
+        self._control_labels.append(label_widget)
+        grid.addWidget(label_widget, row, 0)
         grid.addWidget(slider, row, 1)
         grid.addWidget(spin, row, 2)
 

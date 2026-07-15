@@ -12,6 +12,7 @@ from core.image_transform import (
     auto_scale_range_16,
     border_median_fill_value,
     default_inverted_for_pil_image,
+    flip_display_pixels_to_file,
     image_array_to_uint16_luminance,
     rotate_display_pixels_to_file,
     transform_pixel_16_to_8,
@@ -118,6 +119,20 @@ class ImageTransformTests(unittest.TestCase):
         self.assertFalse(transform.inverted)
         self.assertGreaterEqual(int(rotated[0, 0]), 250)
         self.assertLessEqual(int(rotated.min()), 30)
+
+    def test_flip_display_pixels_flips_the_visible_image(self) -> None:
+        pixels = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.uint8)
+
+        with TemporaryDirectory() as tmpdir:
+            vertical_path = Path(tmpdir) / "vertical.tif"
+            horizontal_path = Path(tmpdir) / "horizontal.tif"
+            flip_display_pixels_to_file(pixels, vertical_path, vertical=True)
+            flip_display_pixels_to_file(pixels, horizontal_path, vertical=False)
+
+            with Image.open(vertical_path) as image:
+                self.assertEqual(np.array(image).tolist(), [[4, 5, 6], [1, 2, 3]])
+            with Image.open(horizontal_path) as image:
+                self.assertEqual(np.array(image).tolist(), [[3, 2, 1], [6, 5, 4]])
 
 
 if __name__ == "__main__":

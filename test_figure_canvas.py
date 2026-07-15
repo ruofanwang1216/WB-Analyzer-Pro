@@ -841,26 +841,60 @@ class FigureModeStructureTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication([])
 
-    def test_sidebar_swaps_template_and_structure_groups_without_rebinding_them(self) -> None:
+    def test_sidebar_combines_template_and_structure_controls_in_layout_group(self) -> None:
         window = FigureModeWindow()
 
-        self.assertEqual(window._grp1.title_text(), "Saved Template")
-        self.assertEqual(window._grp2.title_text(), "Create a template")
-        self.assertEqual(window._grp4.title_text(), "Draw Band with ROI")
+        self.assertEqual(window._grp1.title_text(), "Layout")
+        self.assertEqual(window._grp4.title_text(), "Draw Band with ROI-Hit Enter")
         self.assertEqual(window._grp5.title_text(), "Saved Blot Files")
 
-        self.assertIs(window._sidebar_layout.itemAt(1).widget(), window._grp2)
-        self.assertIs(window._sidebar_layout.itemAt(2).widget(), window._grp1)
-        self.assertIs(window._sidebar_layout.itemAt(3).widget(), window._grp4)
-        self.assertIs(window._sidebar_layout.itemAt(4).widget(), window._grp5)
-        self.assertIs(window._sidebar_layout.itemAt(5).widget(), window._grp6)
+        self.assertIs(window._sidebar_layout.itemAt(1).widget(), window._grp1)
+        self.assertIs(window._sidebar_layout.itemAt(2).widget(), window._grp4)
+        self.assertIs(window._sidebar_layout.itemAt(3).widget(), window._grp5)
+        self.assertIs(window._sidebar_layout.itemAt(4).widget(), window._grp6)
+        self.assertFalse(window._grp4.isHidden())
+        self.assertFalse(window._grp4._expanded)
 
         self.assertIsNotNone(window._panels_spin)
         self.assertIsNotNone(window._template_list)
         self.assertIsNotNone(window._blot_file_list)
-        labels = [label.text() for label in window._grp2.findChildren(QLabel)]
+        labels = [label.text() for label in window._grp1.findChildren(QLabel)]
         self.assertIn("Blots", labels)
         self.assertNotIn("Blots / panel:", labels)
+
+    def test_roi_controls_expand_only_for_selected_blot_frame(self) -> None:
+        window = FigureModeWindow()
+        window._on_apply_structure()
+
+        self.assertFalse(window._grp4._expanded)
+
+        window._on_canvas_blot_selected(SourceRef(panel_idx=0, slot_idx=0))
+        self.assertTrue(window._grp4._expanded)
+
+        window._on_canvas_blot_selection_cleared()
+        self.assertFalse(window._grp4._expanded)
+
+    def test_new_overlay_text_is_selected_and_enables_font_controls(self) -> None:
+        window = FigureModeWindow()
+
+        text = window._canvas.add_overlay_text_box()
+        self._app.processEvents()
+
+        self.assertTrue(text.isSelected())
+        self.assertTrue(window._toolbar_font_family_combo.isEnabled())
+        self.assertTrue(window._toolbar_font_menu_btn.isEnabled())
+        self.assertTrue(window._toolbar_font_size_combo.isEnabled())
+        self.assertFalse(window._selection_detail_toolbar.isHidden())
+        self.assertFalse(window._text_rotation_spin.isHidden())
+        self.assertTrue(window._line_width_spin.isHidden())
+
+        window._toolbar_font_size_combo.setCurrentText("18")
+        self.assertEqual(text.font().pointSizeF(), 18.0)
+
+        window._canvas.add_overlay_line()
+        self._app.processEvents()
+        self.assertTrue(window._text_rotation_spin.isHidden())
+        self.assertFalse(window._line_width_spin.isHidden())
 
     def test_apply_structure_resizes_current_project_in_place(self) -> None:
         window = FigureModeWindow()

@@ -1131,6 +1131,9 @@ class FigureCanvas(QGraphicsView):
         )
         self._scene.addItem(item)
         self._overlay_items.append(item)
+        self._scene.clearSelection()
+        item.setSelected(True)
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
         return item
 
     def add_overlay_line(self) -> _OverlayLineItem:
@@ -1140,6 +1143,9 @@ class FigureCanvas(QGraphicsView):
         item = _OverlayLineItem(QLineF(center.x() - 60, center.y(), center.x() + 60, center.y()))
         self._scene.addItem(item)
         self._overlay_items.append(item)
+        self._scene.clearSelection()
+        item.setSelected(True)
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
         return item
 
     def add_overlay_blot_frame(self) -> _OverlayBlotItem:
@@ -1734,6 +1740,9 @@ class FigureCanvas(QGraphicsView):
                 item = _OverlayLineItem(QLineF(sp.x() - 60, sp.y(), sp.x() + 60, sp.y()))
             self._scene.addItem(item)
             self._overlay_items.append(item)
+            self._scene.clearSelection()
+            item.setSelected(True)
+            self.setFocus(Qt.FocusReason.MouseFocusReason)
             event.accept()
             return
 

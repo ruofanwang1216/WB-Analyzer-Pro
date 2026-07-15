@@ -4,7 +4,7 @@
 ; Output: dist_installer\WBAnalyzerPro-Setup-Windows.exe
 
 #define MyAppName "WB Analyzer Pro"
-#define MyAppVersion "0.2.1"
+#define MyAppVersion "0.2.2"
 #define MyAppPublisher "WB-Lab"
 #define MyAppExeName "WBAnalyzerPro.exe"
 

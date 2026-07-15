@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Callable
 
 from PySide6.QtCore import Qt, QPointF, QSize, QSizeF, QSignalBlocker, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap
+from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QGroupBox,
     QHBoxLayout, QLabel, QMessageBox, QPushButton,
@@ -46,6 +46,7 @@ from core.figure_project import (
 from core.layout_engine import LayoutEngine, LayoutResult, pt_to_scene
 from core.template_engine import TemplateEngine
 from gui.figure_canvas import FigureCanvas
+from utils.i18n import LANG_EN, tr, tr_display
 
 # Toolbar button height cap — keeps the annotation bar compact
 _TOOLBAR_BTN_H = 26
@@ -125,7 +126,10 @@ class _CollapseGroup(QWidget):
         return self._title_label.text()
 
     def _toggle(self) -> None:
-        self._expanded = not self._expanded
+        self.set_expanded(not self._expanded)
+
+    def set_expanded(self, expanded: bool) -> None:
+        self._expanded = bool(expanded)
         self._body.setVisible(self._expanded)
         self._toggle_btn.setText("▾" if self._expanded else "▸")
 
@@ -161,6 +165,7 @@ class FigureModeWindow(QWidget):
         self._canvas_undo_stack: list[dict] = []
         self._restoring_canvas_undo = False
         self._canvas_undo_queued = False
+        self._language = LANG_EN
 
         # Dynamic sidebar sub-widgets rebuilt when project structure changes
         self._step4_slot_widgets: list[QWidget] = []
@@ -190,6 +195,55 @@ class FigureModeWindow(QWidget):
         self._context_controls_widget = widget
         if widget is not None:
             self._sidebar_layout.insertWidget(1, widget)
+
+    def set_language(self, language: str) -> None:
+        """Refresh the WB image-layout workspace without touching project data."""
+        self._language = language
+
+        for label in self.findChildren(QLabel):
+            label.setText(tr_display(label.text(), language))
+            label.setToolTip(tr_display(label.toolTip(), language))
+        for button in self.findChildren(QPushButton):
+            button.setText(tr_display(button.text(), language))
+            button.setToolTip(tr_display(button.toolTip(), language))
+        for button in self.findChildren(QToolButton):
+            button.setText(tr_display(button.text(), language))
+            button.setToolTip(tr_display(button.toolTip(), language))
+        for combo in self.findChildren(QComboBox):
+            for index in range(combo.count()):
+                combo.setItemText(index, tr_display(combo.itemText(index), language))
+            combo.setToolTip(tr_display(combo.toolTip(), language))
+        for spin in self.findChildren(QDoubleSpinBox):
+            spin.setSuffix(tr_display(spin.suffix(), language))
+            spin.setToolTip(tr_display(spin.toolTip(), language))
+        for action in self.findChildren(QAction):
+            action.setText(tr_display(action.text(), language))
+            action.setToolTip(tr_display(action.toolTip(), language))
+
+        # Template names that encode layout counts are rendered naturally in
+        # Chinese; the stored name is never modified.
+        for index in range(self._template_list.count()):
+            item = self._template_list.item(index)
+            template_id = str(item.data(Qt.ItemDataRole.UserRole) or "")
+            try:
+                template = TemplateEngine.get_template(template_id)
+            except KeyError:
+                continue
+            row = self._template_list.itemWidget(item)
+            label = row.findChild(_TemplateNameLabel) if row is not None else None
+            if label is not None:
+                label.setText(self._localized_template_name(template.display_name, template.is_user_template))
+
+        # The selected target is regenerated as the user interacts with the
+        # canvas, so refresh it through its source-aware helper as well.
+        self._refresh_selected_slot_label()
+
+    def _localized_template_name(self, name: str, _is_user_template: bool) -> str:
+        if self._language != "zh_CN":
+            return name
+        translated = re.sub(r"\b(\d+) panels?\b", r"\1 个版面", name, flags=re.IGNORECASE)
+        translated = re.sub(r"\b(\d+) blots?\b", r"\1 张印迹图", translated, flags=re.IGNORECASE)
+        return re.sub(r"\b(\d+) lanes?\b", r"\1 条泳道", translated, flags=re.IGNORECASE)
 
     # ── UI construction ───────────────────────────────────────────────────
 
@@ -223,12 +277,12 @@ class FigureModeWindow(QWidget):
 
         # Step groups
         self._grp1 = self._build_step1()
-        self._grp2 = self._build_step2()
         self._grp4 = self._build_apply_roi_step()
         self._grp5 = self._build_saved_blot_files_step()
         self._grp6 = self._build_step6()
+        self._grp4.set_expanded(False)
 
-        for grp in (self._grp2, self._grp1, self._grp4, self._grp5, self._grp6):
+        for grp in (self._grp1, self._grp4, self._grp5, self._grp6):
             sidebar_layout.addWidget(grp)
         sidebar_layout.addStretch()
 
@@ -274,8 +328,12 @@ class FigureModeWindow(QWidget):
     # ── Saved template library ────────────────────────────────────────────
 
     def _build_step1(self) -> _CollapseGroup:
-        grp = _CollapseGroup("Saved Template")
+        grp = _CollapseGroup("Layout")
         bl = grp.body_layout()
+
+        saved_label = QLabel("Use a saved template")
+        saved_label.setStyleSheet("color:#5C7167; font-size:9px; font-weight:600;")
+        bl.addWidget(saved_label)
 
         # Template list
         self._template_list = QListWidget()
@@ -295,6 +353,14 @@ class FigureModeWindow(QWidget):
         apply_btn.clicked.connect(self._on_apply_template)
         bl.addWidget(apply_btn)
 
+        create_label = QLabel("Or create a new layout")
+        create_label.setStyleSheet(
+            "color:#5C7167; font-size:9px; font-weight:600; "
+            "border-top:1px solid #CDDCD4; padding-top:7px;"
+        )
+        bl.addWidget(create_label)
+        self._add_structure_controls(bl)
+
         return grp
 
     def _populate_template_list(self) -> None:
@@ -313,7 +379,9 @@ class FigureModeWindow(QWidget):
         row_layout = QHBoxLayout(row_widget)
         row_layout.setContentsMargins(6, 0, 4, 0)
         row_layout.setSpacing(4)
-        lbl = _TemplateNameLabel(tmpl.display_name, tmpl.id)
+        lbl = _TemplateNameLabel(
+            self._localized_template_name(tmpl.display_name, tmpl.is_user_template), tmpl.id
+        )
         lbl.setStyleSheet("font-size:10px; color:#1E2D3F;")
         if tmpl.is_user_template:
             lbl.setCursor(Qt.CursorShape.IBeamCursor)
@@ -407,8 +475,7 @@ class FigureModeWindow(QWidget):
 
     # ── Create template structure ─────────────────────────────────────────
 
-    def _build_step2(self) -> _CollapseGroup:
-        grp = _CollapseGroup("Create a template")
+    def _add_structure_controls(self, layout: QVBoxLayout) -> None:
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)
         form.setSpacing(6)
@@ -428,12 +495,12 @@ class FigureModeWindow(QWidget):
         self._lanes_spin.setValue(4)
         form.addRow("Lanes:", self._lanes_spin)
 
-        grp.body_layout().addLayout(form)
+        layout.addLayout(form)
 
         apply_btn = QPushButton("Apply Structure")
         apply_btn.setStyleSheet(_APPLY_BTN_STYLE)
         apply_btn.clicked.connect(self._on_apply_structure)
-        grp.body_layout().addWidget(apply_btn)
+        layout.addWidget(apply_btn)
 
         add_blot_btn = QPushButton("Add Blot Frame")
         add_blot_btn.setStyleSheet(_SMALL_BTN_STYLE)
@@ -441,39 +508,31 @@ class FigureModeWindow(QWidget):
             "Add a free-position blot frame. Select it, draw a WB ROI, then press Return/Enter to fill it."
         )
         add_blot_btn.clicked.connect(self._on_add_blot_frame)
-        grp.body_layout().addWidget(add_blot_btn)
-
-        return grp
+        layout.addWidget(add_blot_btn)
 
     # ── Draw band with ROI ────────────────────────────────────────────────
 
     def _build_apply_roi_step(self) -> _CollapseGroup:
-        grp = _CollapseGroup("Draw Band with ROI")
-
+        grp = _CollapseGroup("Draw Band with ROI-Hit Enter")
         self._selected_slot_lbl = QLabel("Selected target: none")
-        self._selected_slot_lbl.setWordWrap(True)
-        self._selected_slot_lbl.setStyleSheet("color:#334; font-size:10px; font-weight:600;")
-        grp.body_layout().addWidget(self._selected_slot_lbl)
-
-        hint = QLabel(
-            "Select a blot frame in the preview, draw the ROI on the WB image, then press Return/Enter."
-        )
-        hint.setWordWrap(True)
-        hint.setStyleSheet("color:#667; font-size:9px;")
-        grp.body_layout().addWidget(hint)
 
         fixed_row = QHBoxLayout()
         fixed_row.setContentsMargins(0, 0, 0, 0)
         fixed_row.setSpacing(6)
 
-        fix_btn = QPushButton("Fix ROI")
+        fix_btn = QPushButton("Fix This ROI")
         fix_btn.setStyleSheet(_SMALL_BTN_STYLE)
         fix_btn.setToolTip("Capture the current ROI size, or arm the next drawn ROI as the fixed size.")
         fix_btn.clicked.connect(self._on_add_fixed_roi_clicked)
         fixed_row.addWidget(fix_btn)
 
-        cancel_btn = QPushButton("Cancel fixed ROI")
-        cancel_btn.setStyleSheet(_SMALL_BTN_STYLE)
+        cancel_btn = QToolButton()
+        cancel_btn.setText("Cancel")
+        cancel_btn.setStyleSheet(
+            "QToolButton { background: transparent; border: none; color: #587267; "
+            "font-size: 10px; padding: 4px; } "
+            "QToolButton:hover { color: #1E3D2F; text-decoration: underline; }"
+        )
         cancel_btn.setToolTip("Return all WB image windows to freehand ROI drawing.")
         cancel_btn.clicked.connect(self._on_cancel_fixed_roi_clicked)
         fixed_row.addWidget(cancel_btn)
@@ -798,19 +857,32 @@ class FigureModeWindow(QWidget):
 
     def _refresh_selected_slot_label(self) -> None:
         if self._active_slot_ref is None or self._active_slot_ref.panel_idx is None or self._active_slot_ref.slot_idx is None:
-            self._selected_slot_lbl.setText("Selected target: none")
+            self._selected_slot_lbl.setText(tr("Selected target: none", self._language))
+            self._update_roi_step_visibility()
             return
         slot = self._get_slot(self._active_slot_ref.panel_idx, self._active_slot_ref.slot_idx)
         if slot is None:
-            self._selected_slot_lbl.setText("Selected target: none")
+            self._selected_slot_lbl.setText(tr("Selected target: none", self._language))
+            self._update_roi_step_visibility()
             return
         panel_label = ""
         if self._project is not None and len(self._project.panels) > 1:
             panel = self._project.panels[self._active_slot_ref.panel_idx]
             panel_label = f"Panel {panel.panel_letter} - "
-        self._selected_slot_lbl.setText(
-            f"Selected target: {panel_label}[{self._active_slot_ref.slot_idx + 1}] {slot.label}"
+        target = f"{panel_label}[{self._active_slot_ref.slot_idx + 1}] {slot.label}"
+        self._selected_slot_lbl.setText(tr("Selected target: {target}", self._language, target=target))
+        self._update_roi_step_visibility()
+
+    def _update_roi_step_visibility(self) -> None:
+        has_structured_slot = (
+            self._active_slot_ref is not None
+            and self._active_slot_ref.panel_idx is not None
+            and self._active_slot_ref.slot_idx is not None
         )
+        has_floating_slot = bool(self._canvas.selected_overlay_blot_items())
+        has_target = has_structured_slot or has_floating_slot
+        self._grp4.setVisible(True)
+        self._grp4.set_expanded(has_target)
 
     def _on_canvas_blot_selected(self, ref: SourceRef) -> None:
         if ref.panel_idx is None or ref.slot_idx is None:
@@ -828,7 +900,8 @@ class FigureModeWindow(QWidget):
         item = self._canvas.add_overlay_blot_frame()
         item.setFocus()
         self._active_slot_ref = None
-        self._selected_slot_lbl.setText("Selected target: added blot frame")
+        self._selected_slot_lbl.setText(tr("Selected target: added blot frame", self._language))
+        self._update_roi_step_visibility()
         self._on_canvas_selection_changed()
 
     def _on_canvas_view_interacted(self) -> None:
@@ -933,7 +1006,7 @@ class FigureModeWindow(QWidget):
     # ── Step 4: Export ────────────────────────────────────────────────────
 
     def _build_step6(self) -> _CollapseGroup:
-        grp = _CollapseGroup("Step 4 — Export")
+        grp = _CollapseGroup("Export Figure")
         bl = grp.body_layout()
 
         pdf_btn = QPushButton("Export PDF")
@@ -1050,28 +1123,55 @@ class FigureModeWindow(QWidget):
         row2.addWidget(font_lbl)
 
         self._toolbar_font_family_combo = QFontComboBox()
-        self._toolbar_font_family_combo.setFixedWidth(130)
+        self._toolbar_font_family_combo.setFixedWidth(104)
         self._toolbar_font_family_combo.setFixedHeight(_TOOLBAR_BTN_H)
-        self._toolbar_font_family_combo.setStyleSheet("font-size:9px;")
+        self._toolbar_font_family_combo.setStyleSheet(
+            "QFontComboBox { font-size:9px; padding:0 18px 0 5px; "
+            "background:#FFFFFF; border:1px solid #B0C8BB; border-radius:4px; }"
+            "QFontComboBox::drop-down { width:18px; border-left:1px solid #C7D8D0; }"
+        )
         self._toolbar_font_family_combo.setEnabled(False)
         self._toolbar_font_family_combo.currentFontChanged.connect(
             lambda f: self._apply_toolbar_font(family=f.family())
         )
         row2.addWidget(self._toolbar_font_family_combo)
 
-        self._toolbar_font_size_spin = QDoubleSpinBox()
-        self._toolbar_font_size_spin.setRange(4.0, 72.0)
-        self._toolbar_font_size_spin.setSingleStep(1.0)
-        self._toolbar_font_size_spin.setDecimals(1)
-        self._toolbar_font_size_spin.setValue(12.0)
-        self._toolbar_font_size_spin.setFixedWidth(58)
-        self._toolbar_font_size_spin.setFixedHeight(_TOOLBAR_BTN_H)
-        self._toolbar_font_size_spin.setStyleSheet("font-size:9px;")
-        self._toolbar_font_size_spin.setEnabled(False)
-        self._toolbar_font_size_spin.valueChanged.connect(
-            lambda v: self._apply_toolbar_font(size=v)
+        self._toolbar_font_menu_btn = QToolButton()
+        self._toolbar_font_menu_btn.setText("▾")
+        self._toolbar_font_menu_btn.setToolTip("Choose font")
+        self._toolbar_font_menu_btn.setFixedSize(18, _TOOLBAR_BTN_H)
+        self._toolbar_font_menu_btn.setStyleSheet(
+            "QToolButton { border:1px solid #B0C8BB; border-radius:4px; "
+            "background:#EBF3EE; color:#2D4A3D; font-size:11px; }"
+            "QToolButton:hover { background:#CDDFD5; }"
         )
-        row2.addWidget(self._toolbar_font_size_spin)
+        self._toolbar_font_menu_btn.setEnabled(False)
+        self._toolbar_font_menu_btn.clicked.connect(self._toolbar_font_family_combo.showPopup)
+        row2.addWidget(self._toolbar_font_menu_btn)
+
+        size_lbl = QLabel("Size:")
+        size_lbl.setStyleSheet("font-size:9px; color:#3D4D56;")
+        row2.addWidget(size_lbl)
+
+        self._toolbar_font_size_combo = QComboBox()
+        self._toolbar_font_size_combo.setEditable(True)
+        self._toolbar_font_size_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self._toolbar_font_size_combo.addItems(
+            ["6", "7", "8", "9", "10", "11", "12", "14", "16", "18", "20", "24", "28", "36", "48", "72"]
+        )
+        self._toolbar_font_size_combo.setCurrentText("12")
+        self._toolbar_font_size_combo.setFixedWidth(52)
+        self._toolbar_font_size_combo.setFixedHeight(_TOOLBAR_BTN_H)
+        self._toolbar_font_size_combo.setStyleSheet(
+            "QComboBox { font-size:9px; padding:0 16px 0 5px; "
+            "background:#FFFFFF; border:1px solid #B0C8BB; border-radius:4px; }"
+            "QComboBox::drop-down { width:16px; border-left:1px solid #C7D8D0; }"
+        )
+        self._toolbar_font_size_combo.setEnabled(False)
+        self._toolbar_font_size_combo.currentTextChanged.connect(
+            self._on_toolbar_font_size_changed
+        )
+        row2.addWidget(self._toolbar_font_size_combo)
 
         def _fmt_btn(text: str, tip: str) -> QToolButton:
             btn = QToolButton()
@@ -1104,6 +1204,8 @@ class FigureModeWindow(QWidget):
         self._underline_btn.toggled.connect(lambda v: self._apply_toolbar_font(underline=v))
         self._underline_btn.setEnabled(False)
         row2.addWidget(self._underline_btn)
+
+        # Continue Row 2 with text-box layout controls.
 
         self._align_text_boxes_combo = QComboBox()
         self._align_text_boxes_combo.setToolTip("Align selected text boxes")
@@ -1152,9 +1254,15 @@ class FigureModeWindow(QWidget):
         self._text_inside_right_btn.setEnabled(False)
         row2.addWidget(self._text_inside_right_btn)
 
-        rotation_lbl = QLabel("Rotate:")
-        rotation_lbl.setStyleSheet("font-size:9px; color:#3D4D56;")
-        row2.addWidget(rotation_lbl)
+        # ── Row 3: selection-only rotation and line controls ─────────────
+        self._selection_detail_toolbar = QWidget()
+        row4 = QHBoxLayout(self._selection_detail_toolbar)
+        row4.setContentsMargins(0, 0, 0, 0)
+        row4.setSpacing(4)
+
+        self._rotation_label = QLabel("Rotate:")
+        self._rotation_label.setStyleSheet("font-size:9px; color:#3D4D56;")
+        row4.addWidget(self._rotation_label)
 
         self._text_rotation_spin = QDoubleSpinBox()
         self._text_rotation_spin.setRange(-180.0, 180.0)
@@ -1167,17 +1275,17 @@ class FigureModeWindow(QWidget):
         self._text_rotation_spin.setStyleSheet("font-size:9px;")
         self._text_rotation_spin.setEnabled(False)
         self._text_rotation_spin.valueChanged.connect(self._apply_toolbar_text_rotation)
-        row2.addWidget(self._text_rotation_spin)
+        row4.addWidget(self._text_rotation_spin)
 
-        sep3 = QFrame()
-        sep3.setFrameShape(QFrame.Shape.VLine)
-        sep3.setStyleSheet("QFrame { color:#AABDB4; }")
-        sep3.setFixedWidth(1)
-        row2.addWidget(sep3)
+        self._selection_detail_separator = QFrame()
+        self._selection_detail_separator.setFrameShape(QFrame.Shape.VLine)
+        self._selection_detail_separator.setStyleSheet("QFrame { color:#AABDB4; }")
+        self._selection_detail_separator.setFixedWidth(1)
+        row4.addWidget(self._selection_detail_separator)
 
-        line_w_lbl = QLabel("Line:")
-        line_w_lbl.setStyleSheet("font-size:9px; color:#3D4D56;")
-        row2.addWidget(line_w_lbl)
+        self._line_width_label = QLabel("Line:")
+        self._line_width_label.setStyleSheet("font-size:9px; color:#3D4D56;")
+        row4.addWidget(self._line_width_label)
 
         self._line_width_spin = QDoubleSpinBox()
         self._line_width_spin.setRange(0.5, 10.0)
@@ -1190,7 +1298,7 @@ class FigureModeWindow(QWidget):
         self._line_width_spin.setStyleSheet("font-size:9px;")
         self._line_width_spin.setEnabled(False)
         self._line_width_spin.valueChanged.connect(self._apply_selected_line_width)
-        row2.addWidget(self._line_width_spin)
+        row4.addWidget(self._line_width_spin)
 
         self._match_size_btn = QToolButton()
         self._match_size_btn.setText("Same Size")
@@ -1213,7 +1321,10 @@ class FigureModeWindow(QWidget):
         row2.addWidget(self._match_size_btn)
 
         row2.addStretch()
+        row4.addStretch()
         vbox.addLayout(row2)
+        self._selection_detail_toolbar.setVisible(False)
+        vbox.addWidget(self._selection_detail_toolbar)
         return outer
 
     # ── Annotation / format handlers ──────────────────────────────────────
@@ -1340,6 +1451,14 @@ class FigureModeWindow(QWidget):
             self._text_style_overrides.update(styles)
             self._apply_text_style_overrides_to_layout()
 
+    def _on_toolbar_font_size_changed(self, text: str) -> None:
+        try:
+            size = float(text.strip())
+        except ValueError:
+            return
+        if 4.0 <= size <= 72.0:
+            self._apply_toolbar_font(size=size)
+
     def _apply_selected_line_width(self, width: float) -> None:
         self._canvas.set_selected_line_width(width)
 
@@ -1394,11 +1513,12 @@ class FigureModeWindow(QWidget):
         has_floating_blot = bool(self._canvas.selected_overlay_blot_items())
         if has_floating_blot:
             self._active_slot_ref = None
-            self._selected_slot_lbl.setText("Selected target: added blot frame")
+            self._selected_slot_lbl.setText(tr("Selected target: added blot frame", self._language))
         elif not has_blot and self._active_slot_ref is None:
             self._refresh_selected_slot_label()
         can_align_or_size = has_text or has_blot or has_floating_blot
-        for w in (self._toolbar_font_family_combo, self._toolbar_font_size_spin,
+        for w in (self._toolbar_font_family_combo, self._toolbar_font_menu_btn,
+                  self._toolbar_font_size_combo,
                   self._bold_btn, self._italic_btn, self._underline_btn,
                   self._text_inside_left_btn,
                   self._text_inside_center_btn, self._text_inside_right_btn,
@@ -1411,9 +1531,9 @@ class FigureModeWindow(QWidget):
             self._toolbar_font_family_combo.blockSignals(True)
             self._toolbar_font_family_combo.setCurrentFont(font)
             self._toolbar_font_family_combo.blockSignals(False)
-            self._toolbar_font_size_spin.blockSignals(True)
-            self._toolbar_font_size_spin.setValue(font.pointSizeF())
-            self._toolbar_font_size_spin.blockSignals(False)
+            self._toolbar_font_size_combo.blockSignals(True)
+            self._toolbar_font_size_combo.setCurrentText(f"{font.pointSizeF():g}")
+            self._toolbar_font_size_combo.blockSignals(False)
             self._bold_btn.blockSignals(True)
             self._bold_btn.setChecked(font.bold())
             self._bold_btn.blockSignals(False)
@@ -1437,6 +1557,13 @@ class FigureModeWindow(QWidget):
             self._line_width_spin.blockSignals(True)
             self._line_width_spin.setValue(sel_line.pen().widthF())
             self._line_width_spin.blockSignals(False)
+        self._rotation_label.setVisible(has_text)
+        self._text_rotation_spin.setVisible(has_text)
+        self._line_width_label.setVisible(sel_line is not None)
+        self._line_width_spin.setVisible(sel_line is not None)
+        self._selection_detail_separator.setVisible(has_text and sel_line is not None)
+        self._selection_detail_toolbar.setVisible(has_text or sel_line is not None)
+        self._update_roi_step_visibility()
 
     def _on_save_template(self) -> bool:
         if self._project is None:
@@ -1787,6 +1914,7 @@ class FigureModeWindow(QWidget):
                 self._canvas._restore_overlay_from_data(overlay_data)
             self._rebuild_step4()
             self._recompute_and_refresh()
+            self._grp1.set_expanded(False)
             return
 
         # Built-in template
@@ -1809,6 +1937,7 @@ class FigureModeWindow(QWidget):
 
         self._rebuild_step4()
         self._recompute_and_refresh()
+        self._grp1.set_expanded(False)
 
     def _on_apply_structure(self) -> None:
         if not self._confirm_save_current_template_before_apply():
@@ -1838,6 +1967,7 @@ class FigureModeWindow(QWidget):
             )
         self._rebuild_step4()
         self._recompute_and_refresh()
+        self._grp1.set_expanded(False)
 
     @staticmethod
     def _panel_anchor_scene_y(layout: LayoutResult, panel_idx: int) -> float | None:

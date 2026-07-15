@@ -131,6 +131,39 @@ def rotate_display_pixels_to_file(
     if pixels.ndim != 2 or pixels.size == 0:
         raise ValueError("Custom rotate requires a non-empty 2D display image.")
 
+    fill_value = int(round(float(border_median_fill_value(pixels))))
+    rotated_img = Image.fromarray(pixels, mode="L").rotate(
+        float(angle_deg),
+        resample=Image.Resampling.BICUBIC,
+        expand=True,
+        fillcolor=fill_value,
+    )
+    return _save_display_image(rotated_img, target_path)
+
+
+def flip_display_pixels_to_file(
+    display_pixels: np.ndarray,
+    target_path: str | Path,
+    *,
+    vertical: bool,
+) -> ImageTransformParams:
+    """Flip the visible 8-bit grayscale buffer and save it as an image."""
+    pixels = np.ascontiguousarray(
+        np.asarray(display_pixels).clip(0, 255).astype(np.uint8)
+    )
+    if pixels.ndim != 2 or pixels.size == 0:
+        raise ValueError("Image flip requires a non-empty 2D display image.")
+
+    operation = (
+        Image.Transpose.FLIP_TOP_BOTTOM
+        if vertical
+        else Image.Transpose.FLIP_LEFT_RIGHT
+    )
+    return _save_display_image(Image.fromarray(pixels, mode="L").transpose(operation), target_path)
+
+
+def _save_display_image(image: Image.Image, target_path: str | Path) -> ImageTransformParams:
+    """Save a display-ready grayscale image with normalized TIFF metadata."""
     target = Path(target_path)
     save_format = {
         ".tif": "TIFF",
@@ -139,14 +172,6 @@ def rotate_display_pixels_to_file(
         ".jpg": "JPEG",
         ".jpeg": "JPEG",
     }.get(target.suffix.lower(), "TIFF")
-
-    fill_value = int(round(float(border_median_fill_value(pixels))))
-    rotated_img = Image.fromarray(pixels, mode="L").rotate(
-        float(angle_deg),
-        resample=Image.Resampling.BICUBIC,
-        expand=True,
-        fillcolor=fill_value,
-    )
 
     save_kwargs: dict[str, object] = {}
     if save_format == "TIFF":
@@ -160,7 +185,7 @@ def rotate_display_pixels_to_file(
         save_kwargs["quality"] = 100
         save_kwargs["subsampling"] = 0
 
-    rotated_img.save(target, format=save_format, **save_kwargs)
+    image.save(target, format=save_format, **save_kwargs)
     return ImageTransformParams(inverted=False)
 
 

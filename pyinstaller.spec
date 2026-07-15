@@ -106,7 +106,7 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "WB Analyzer Pro",
             "CFBundleDisplayName": "WB Analyzer Pro",
-            "CFBundleShortVersionString": "0.2.1",
+            "CFBundleShortVersionString": "0.2.2",
             "NSHighResolutionCapable": True,
         },
     )

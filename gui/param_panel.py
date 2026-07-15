@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QSizePolicy, QSlider,
     QListWidget, QListWidgetItem, QInputDialog, QToolButton,
 )
+from utils.i18n import LANG_EN, tr
 
 _ACTIVE_BTN = """
     QPushButton {
@@ -142,6 +143,7 @@ class ParamPanel(QWidget):
         self._fixed_roi_cancel_requested: Callable[[], None] | None = None
         self._fixed_roi_size_selected: Callable[[dict[str, Any]], None] | None = None
         self._fixed_roi_profiles: list[dict[str, Any]] = []
+        self._language = LANG_EN
         self._build_ui()
 
     # ── Build ──────────────────────────────────────────────────────────────────
@@ -244,7 +246,8 @@ class ParamPanel(QWidget):
         root.setSpacing(10)
 
         # ── Manual Rotation ───────────────────────────────────────────────────
-        rotate_group = QGroupBox("Manual Rotation")
+        self._rotate_group = QGroupBox("Manual Rotation")
+        rotate_group = self._rotate_group
         rotate_layout = QVBoxLayout(rotate_group)
         rotate_layout.setContentsMargins(8, 6, 8, 8)
         rotate_layout.setSpacing(6)
@@ -285,7 +288,8 @@ class ParamPanel(QWidget):
         manual_layout.setSpacing(6)
 
         # Lane Settings sub-section
-        lane_section_label = QLabel("Lane Settings")
+        self._lane_section_label = QLabel("Lane Settings")
+        lane_section_label = self._lane_section_label
         lane_section_label.setStyleSheet(
             "color: #A0B4C0; font-size: 9px; font-weight: bold; letter-spacing: 0.5px;"
         )
@@ -315,12 +319,14 @@ class ParamPanel(QWidget):
         lane_row.addWidget(self.lane_count)
         lane_row.addWidget(lane_dec)
         lane_row.addWidget(lane_inc)
-        lane_form.addRow(QLabel("Lanes:"))
+        self._lanes_label = QLabel("Lanes:")
+        lane_form.addRow(self._lanes_label)
         lane_form.addRow(lane_row)
 
         manual_layout.addLayout(lane_form)
 
-        fixed_label = QLabel("Fixed ROI")
+        self._fixed_label = QLabel("Fixed ROI")
+        fixed_label = self._fixed_label
         fixed_label.setStyleSheet(
             "color: #A0B4C0; font-size: 9px; font-weight: bold; letter-spacing: 0.5px;"
         )
@@ -330,12 +336,14 @@ class ParamPanel(QWidget):
         fixed_row.setContentsMargins(0, 0, 0, 0)
         fixed_row.setSpacing(6)
 
-        fix_btn = QPushButton("Fix ROI")
+        self._fix_btn = QPushButton("Fix ROI")
+        fix_btn = self._fix_btn
         fix_btn.setToolTip("Capture the current lane ROI size, or arm the next drawn ROI as the fixed size.")
         fix_btn.clicked.connect(self._on_add_fixed_roi_clicked)
         fixed_row.addWidget(fix_btn)
 
-        cancel_btn = QPushButton("Cancel fixed ROI")
+        self._cancel_fixed_btn = QPushButton("Cancel fixed ROI")
+        cancel_btn = self._cancel_fixed_btn
         cancel_btn.setToolTip("Return Manual mode to freehand ROI drawing.")
         cancel_btn.clicked.connect(self._on_cancel_fixed_roi_clicked)
         fixed_row.addWidget(cancel_btn)
@@ -367,6 +375,26 @@ class ParamPanel(QWidget):
         root.addWidget(self._help_note)
 
     # ── Validation ─────────────────────────────────────────────────────────────
+
+    def set_language(self, language: str) -> None:
+        """Refresh user-facing WB terminology without changing analysis state."""
+        self._language = language
+        self._rotate_group.setTitle(tr("Manual Rotation", language))
+        self._btn_custom_rotate.setText(tr("Custom Rotate", language))
+        self._btn_rotate.setText(tr("Rotate", language))
+        self._btn_cancel_rotate.setText(tr("Cancel", language))
+        self._roi_group.setTitle(tr("ROI Settings", language))
+        self._lane_section_label.setText(tr("Lane Settings", language))
+        self._lanes_label.setText(tr("Lanes:", language))
+        self._fixed_label.setText(tr("Fixed ROI", language))
+        self._fix_btn.setText(tr("Fix ROI", language))
+        self._cancel_fixed_btn.setText(tr("Cancel fixed ROI", language))
+        self._fix_btn.setToolTip(tr("Capture the current lane ROI size, or arm the next drawn ROI as the fixed size.", language))
+        self._cancel_fixed_btn.setToolTip(tr("Return Manual mode to freehand ROI drawing.", language))
+        self._help_note.setText(tr(
+            "Manual: draw lane ROI → draw band ROI → Analyze\nHold Space + drag to pan. Scroll to zoom.",
+            language,
+        ))
 
     # ── Public API ─────────────────────────────────────────────────────────────
 

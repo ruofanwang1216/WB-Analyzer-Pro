@@ -68,6 +68,7 @@ class AppPersistence:
             "ui": {
                 "mode": "manual",
                 "files_panel_collapsed": False,
+                "language": "en",
             },
             "debug": {
                 "last_analysis": None,
@@ -138,12 +139,20 @@ class AppPersistence:
     def remember_tiff_export_dir(self, directory: Path) -> None:
         self.update_config(paths={"last_tiff_export_dir": str(directory.expanduser().resolve())})
 
-    def remember_ui_state(self, *, mode: str | None = None, files_panel_collapsed: bool | None = None) -> None:
+    def remember_ui_state(
+        self,
+        *,
+        mode: str | None = None,
+        files_panel_collapsed: bool | None = None,
+        language: str | None = None,
+    ) -> None:
         ui_payload: dict[str, Any] = {}
         if mode is not None:
             ui_payload["mode"] = mode
         if files_panel_collapsed is not None:
             ui_payload["files_panel_collapsed"] = bool(files_panel_collapsed)
+        if language in {"en", "zh_CN"}:
+            ui_payload["language"] = language
         if ui_payload:
             self.update_config(ui=ui_payload)
 

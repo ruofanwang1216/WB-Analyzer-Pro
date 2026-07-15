@@ -14,13 +14,15 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QSplitter, QVBoxLayout, QStackedWidget,
     QToolBar, QStatusBar, QDockWidget, QFileDialog, QMessageBox,
     QHBoxLayout, QToolButton, QPushButton, QFrame, QSizePolicy, QCheckBox,
-    QLabel, QListWidget, QListWidgetItem, QDialog, QGridLayout,
+    QLabel, QListWidget, QListWidgetItem, QDialog, QGridLayout, QMenu, QComboBox,
 )
 
 from config.settings import APP_NAME
 from core.band_detector import group_auto_detected_rows
 from core.image_transform import (
     ImageTransformParams,
+    flip_display_pixels_to_file,
+    image_transform_from_dict,
     image_transform_to_dict,
     rotate_display_pixels_to_file,
 )
@@ -31,6 +33,7 @@ from gui.param_panel import ParamPanel
 from gui.results_panel import ResultsPanel
 from utils.logger import get_logger
 from utils.persistence import AppPersistence
+from utils.i18n import LANG_EN, LANG_ZH_CN, tr
 
 log = get_logger(__name__)
 
@@ -150,6 +153,28 @@ class _ImagePanelWidget(QFrame):
                 border-color: #7DA897;
                 color: #2A5E48;
             }
+            QToolButton#panel_rotate_btn {
+                background-color: rgba(245, 248, 250, 225);
+                border: 1px solid #9FB3BE;
+                border-radius: 7px;
+                color: #405967;
+                min-width: 22px;
+                max-width: 22px;
+                min-height: 18px;
+                max-height: 18px;
+                padding: 0px;
+                font-size: 13px;
+                font-weight: 700;
+            }
+            QToolButton#panel_rotate_btn:hover {
+                background-color: #D4EDE4;
+                border-color: #7DA897;
+                color: #2A5E48;
+            }
+            QToolButton#panel_rotate_btn::menu-indicator {
+                image: none;
+                width: 0px;
+            }
         """)
 
         root = QVBoxLayout(self)
@@ -163,6 +188,19 @@ class _ImagePanelWidget(QFrame):
         self.transform_btn.setObjectName("panel_transform_btn")
         self.transform_btn.setToolTip("Image Transform: Low / High / Gamma")
         top_row.addWidget(self.transform_btn)
+        self.rotate_btn = QToolButton()
+        self.rotate_btn.setObjectName("panel_rotate_btn")
+        self.rotate_btn.setText("↻")
+        self.rotate_btn.setToolTip("Rotate Image")
+        self.rotate_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        rotate_menu = QMenu(self.rotate_btn)
+        self.rotate_custom_action = rotate_menu.addAction("Custom Rotate-Hit Enter")
+        self.flip_vertical_action = rotate_menu.addAction("Flip Vertically")
+        self.flip_horizontal_action = rotate_menu.addAction("Flip Horizontally")
+        rotate_menu.addSeparator()
+        self.undo_image_operation_action = rotate_menu.addAction("Undo Image Operation")
+        self.rotate_btn.setMenu(rotate_menu)
+        top_row.addWidget(self.rotate_btn)
         self.select_checkbox = QCheckBox()
         self.select_checkbox.setObjectName("panel_select_checkbox")
         self.select_checkbox.setToolTip("Select this image for Auto Detect")
@@ -271,12 +309,15 @@ class MainWindow(QMainWindow):
                 "lane_rects": [],
                 "band_roi": None,
                 "auto_detections": [],
+                "image_operation_history": [],
             }
             for _ in range(_MAX_IMAGE_PANELS)
         ]
         self._current_mode = "manual"
         self._persistence = AppPersistence()
         self._persistence.update_config()
+        saved_language = self._persistence.read_config().get("ui", {}).get("language", LANG_EN)
+        self._language = saved_language if saved_language in {LANG_EN, LANG_ZH_CN} else LANG_EN
 
         # Worker thread references (kept to avoid GC)
         self._worker: MeasurementWorker | None = None
@@ -304,6 +345,7 @@ class MainWindow(QMainWindow):
         self._apply_persisted_ui_preferences()
         self._connect_signals()
         self._register_shortcuts()
+        self._set_language(self._language, persist=False)
         self.canvas.set_interaction_mode(self._current_mode)
 
     # ── UI construction ────────────────────────────────────────────────────────
@@ -412,15 +454,21 @@ class MainWindow(QMainWindow):
             QToolButton#tb_reset_btn:hover {
                 background-color: #DCE7E1;
             }
+            QComboBox#language_selector {
+                background-color: #F5F8FA;
+                border: 1px solid #B6C8D5;
+                border-radius: 8px;
+                color: #345060;
+                padding: 5px 8px;
+                min-width: 92px;
+                font-weight: 600;
+            }
         """)
         self.addToolBar(tb)
 
         self._act_open = QAction("Upload Files", self)
         self._act_open.setShortcut(QKeySequence.StandardKey.Open)
 
-        self._act_clear_roi = QAction("Clear ROI", self)
-
-        self._act_reset_zoom = QAction("Fit View", self)
         self._act_image_transform = QAction("Image Transform", self)
 
         self._act_analyze = QAction("Analyze", self)
@@ -446,20 +494,24 @@ class MainWindow(QMainWindow):
         gap1.setFixedWidth(8)
         tb.addWidget(gap1)
 
-        # Section 1: Clear ROI, Fit View, Analyze
-        section1 = QFrame()
-        section1.setObjectName("section1_group")
-        section1_layout = QHBoxLayout(section1)
-        section1_layout.setContentsMargins(8, 4, 8, 4)
-        section1_layout.setSpacing(6)
-        section1_layout.addWidget(_make_action_button(self._act_clear_roi, "section_btn"))
-        section1_layout.addWidget(_make_action_button(self._act_reset_zoom, "section_btn"))
-        section1_layout.addWidget(_make_action_button(self._act_analyze, "analyze_btn"))
-        tb.addWidget(section1)
+        # Analyze belongs to the densitometry workspace.  Keep its toolbar
+        # group hidden until that workspace is selected.
+        self._analyze_toolbar_group = QFrame()
+        self._analyze_toolbar_group.setObjectName("section1_group")
+        analyze_layout = QHBoxLayout(self._analyze_toolbar_group)
+        analyze_layout.setContentsMargins(8, 4, 8, 4)
+        analyze_layout.setSpacing(6)
+        analyze_layout.addWidget(_make_action_button(self._act_analyze, "analyze_btn"))
+        self._analyze_toolbar_group.setVisible(False)
+        self._analyze_toolbar_action = tb.addWidget(self._analyze_toolbar_group)
+        self._analyze_toolbar_action.setVisible(False)
 
         gap2 = QWidget()
         gap2.setFixedWidth(8)
-        tb.addWidget(gap2)
+        gap2.setVisible(False)
+        self._analyze_toolbar_gap = gap2
+        self._analyze_toolbar_gap_action = tb.addWidget(gap2)
+        self._analyze_toolbar_gap_action.setVisible(False)
 
         # Section 2: Figure Generation
         section2 = QFrame()
@@ -481,6 +533,15 @@ class MainWindow(QMainWindow):
         stretch = QWidget()
         stretch.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         tb.addWidget(stretch)
+
+        # Keep language selection immediately to the left of Export All, as a
+        # global control rather than a per-workspace preference.
+        self._language_combo = QComboBox()
+        self._language_combo.setObjectName("language_selector")
+        self._language_combo.addItem("English", LANG_EN)
+        self._language_combo.addItem("中文", LANG_ZH_CN)
+        self._language_combo.setToolTip("Language")
+        tb.addWidget(self._language_combo)
 
         export_all_btn = _make_action_button(self._act_export_all, "tb_export_all_btn")
         tb.addWidget(export_all_btn)
@@ -641,10 +702,10 @@ class MainWindow(QMainWindow):
         self._wb_plot_workspace_layout = QVBoxLayout(self._wb_plot_workspace_host)
         self._wb_plot_workspace_layout.setContentsMargins(0, 0, 0, 0)
         self._wb_plot_workspace_layout.setSpacing(0)
-        wb_placeholder = QLabel("WB Plot Figure Generation will appear here.")
-        wb_placeholder.setStyleSheet("color: #6E8494; font-size: 11px; padding: 10px;")
-        wb_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._wb_plot_workspace_layout.addWidget(wb_placeholder)
+        self._wb_plot_placeholder = QLabel("WB Plot Figure Generation will appear here.")
+        self._wb_plot_placeholder.setStyleSheet("color: #6E8494; font-size: 11px; padding: 10px;")
+        self._wb_plot_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._wb_plot_workspace_layout.addWidget(self._wb_plot_placeholder)
 
         self._figure_workspace_stack.addWidget(self._densitometry_figure_page)
         self._figure_workspace_stack.addWidget(self._wb_plot_workspace_host)
@@ -759,6 +820,56 @@ class MainWindow(QMainWindow):
         if isinstance(collapsed, bool):
             self._set_files_panel_collapsed(collapsed)
 
+    def _set_language(self, language: str, *, persist: bool = True) -> None:
+        """Apply the display language while keeping analysis data untouched."""
+        if language not in {LANG_EN, LANG_ZH_CN}:
+            language = LANG_EN
+        self._language = language
+        combo_index = self._language_combo.findData(language)
+        if combo_index >= 0 and self._language_combo.currentIndex() != combo_index:
+            self._language_combo.blockSignals(True)
+            self._language_combo.setCurrentIndex(combo_index)
+            self._language_combo.blockSignals(False)
+
+        self._language_combo.setToolTip(tr("Language", language))
+        self._act_open.setText(tr("Upload Files", language))
+        self._act_image_transform.setText(tr("Image Transform", language))
+        self._act_analyze.setText(tr("Analyze", language))
+        self._act_export_all.setText(tr("Export All", language))
+        self._act_reset.setText(tr("Reset All", language))
+        self._figure_generation_btn.setText(tr("Densitometry Figure Generation", language))
+        self._wb_plot_generation_btn.setText(tr("WB Plot Figure Generation", language))
+        self._files_title.setText(tr("Uploaded Files", language))
+        self._export_all_tiffs_btn.setText(tr("Export All TIFFs", language))
+        if self._embedded_column_table is None:
+            self._figure_table_placeholder.setText(tr("Figure Generation table will appear here.", language))
+            self._figure_preview_placeholder.setText(tr("Generated figure preview will appear here.", language))
+        else:
+            self._embedded_column_table.set_language(language)
+        self._wb_plot_placeholder.setText(tr("WB Plot Figure Generation will appear here.", language))
+        self.param_panel.set_language(language)
+        self.results_panel.set_language(language)
+        if self._image_transform_dialog is not None:
+            self._image_transform_dialog.set_language(language)
+        if self._figure_mode_window is not None:
+            self._figure_mode_window.set_language(language)
+
+        for panel in self._image_panels:
+            panel.transform_btn.setToolTip(tr("Image Transform: Low / High / Gamma", language))
+            panel.rotate_btn.setToolTip(tr("Rotate Image", language))
+            panel.select_checkbox.setToolTip(tr("Select this image for Auto Detect", language))
+            panel.remove_btn.setToolTip(tr("Remove image", language))
+            panel.rotate_custom_action.setText(tr("Custom Rotate-Hit Enter", language))
+            panel.flip_vertical_action.setText(tr("Flip Vertically", language))
+            panel.flip_horizontal_action.setText(tr("Flip Horizontally", language))
+            panel.undo_image_operation_action.setText(tr("Undo Image Operation", language))
+        if persist:
+            self._persistence.remember_ui_state(language=language)
+
+    def _on_language_changed(self, index: int) -> None:
+        language = self._language_combo.itemData(index)
+        self._set_language(str(language))
+
     def _toggle_files_panel(self) -> None:
         self._set_files_panel_collapsed(not self._files_panel_collapsed)
 
@@ -797,12 +908,19 @@ class MainWindow(QMainWindow):
             return
         self.param_panel.set_wb_plot_simplified(True)
         self._set_wb_plot_roi_only(True)
-        self._figure_mode_window.set_context_controls_widget(self.param_panel)
+        self._figure_mode_window.set_context_controls_widget(None)
         self._param_panel_host.setVisible(False)
 
     def _set_wb_plot_roi_only(self, enabled: bool) -> None:
         for panel in self._image_panels:
             panel.canvas.set_wb_plot_roi_only(enabled)
+
+    def _set_analyze_toolbar_visible(self, visible: bool) -> None:
+        """Show Analyze only while the densitometry workspace is selected."""
+        self._analyze_toolbar_action.setVisible(visible)
+        self._analyze_toolbar_gap_action.setVisible(visible)
+        self._analyze_toolbar_group.setVisible(visible)
+        self._analyze_toolbar_gap.setVisible(visible)
 
     def _show_figure_workspace(self, page: str = "densitometry") -> None:
         self._figure_workspace.setVisible(True)
@@ -867,20 +985,24 @@ class MainWindow(QMainWindow):
         content.setParent(self._figure_table_host)
         self._figure_table_host_layout.addWidget(content)
 
-        preview_placeholder = QLabel("Generated figure preview will appear here.")
-        preview_placeholder.setStyleSheet("color: #6E8494; font-size: 11px; padding: 10px;")
-        preview_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._figure_preview_host_layout.addWidget(preview_placeholder)
+        self._embedded_preview_placeholder = QLabel(
+            tr("Generated figure preview will appear here.", self._language)
+        )
+        self._embedded_preview_placeholder.setStyleSheet("color: #6E8494; font-size: 11px; padding: 10px;")
+        self._embedded_preview_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._figure_preview_host_layout.addWidget(self._embedded_preview_placeholder)
 
         table_window.setParent(self)
         table_window.set_figure_preview_host(self._figure_preview_host)
         table_window.panelFocusRequested.connect(self._on_workspace_panel_focus_requested)
         self._embedded_column_table = table_window
+        table_window.set_language(self._language)
         self._figure_windows = [table_window]
         self._show_figure_workspace("densitometry")
         self._set_workspace_focus_target("table")
 
     def _on_figure_generation_clicked(self) -> None:
+        self._set_analyze_toolbar_visible(True)
         self._mode_container.setCurrentIndex(0)
         self._show_figure_workspace("densitometry")
         if self._embedded_column_table is not None:
@@ -889,6 +1011,7 @@ class MainWindow(QMainWindow):
             return
 
         chooser = FigureTypeDialog(self)
+        chooser.set_language(self._language)
         if chooser.exec() != QDialog.DialogCode.Accepted:
             return
 
@@ -904,6 +1027,7 @@ class MainWindow(QMainWindow):
             return
 
         setup = ColumnSetupDialog(self)
+        setup.set_language(self._language)
         if setup.exec() != QDialog.DialogCode.Accepted:
             return
 
@@ -921,6 +1045,7 @@ class MainWindow(QMainWindow):
             replicates=setup_values.replicates,
             parent=self,
         )
+        table_window.set_language(self._language)
         self._mount_column_table_in_workspace(table_window)
         self._status_bar.showMessage(
             f"Opened integrated Column table workspace: {setup_values.samples} sample(s) × {setup_values.replicates} replicate(s).",
@@ -1102,6 +1227,7 @@ class MainWindow(QMainWindow):
 
     def _set_panel_transform_enabled(self, slot_index: int, enabled: bool) -> None:
         self._image_panels[slot_index].transform_btn.setEnabled(enabled)
+        self._image_panels[slot_index].rotate_btn.setEnabled(enabled)
 
     def _refresh_image_panel_layout(self) -> None:
         loaded = self._loaded_slot_indices()
@@ -1175,6 +1301,7 @@ class MainWindow(QMainWindow):
         slot["lane_rects"] = []
         slot["band_roi"] = None
         slot["auto_detections"] = []
+        slot["image_operation_history"] = []
         self._reset_canvas_widget(self._image_panels[slot_index].canvas)
         self._image_panels[slot_index].set_filename("")
 
@@ -1195,6 +1322,24 @@ class MainWindow(QMainWindow):
             return
         self._set_active_slot_from_interaction(slot_index)
         self._show_image_transform_dialog()
+
+    def _on_panel_custom_rotate_requested(self, slot_index: int) -> None:
+        if slot_index not in self._loaded_slot_indices():
+            return
+        self._set_active_slot_from_interaction(slot_index)
+        self._on_custom_rotate_requested()
+
+    def _on_panel_flip_requested(self, slot_index: int, *, vertical: bool) -> None:
+        if slot_index not in self._loaded_slot_indices():
+            return
+        self._set_active_slot_from_interaction(slot_index)
+        self._on_flip_image_requested(vertical=vertical)
+
+    def _on_panel_undo_image_operation_requested(self, slot_index: int) -> None:
+        if slot_index not in self._loaded_slot_indices():
+            return
+        self._set_active_slot_from_interaction(slot_index)
+        self._on_undo_image_operation_requested()
 
     def _set_active_slot_from_interaction(self, slot_index: int) -> None:
         loaded = self._loaded_slot_indices()
@@ -1312,6 +1457,7 @@ class MainWindow(QMainWindow):
 
         if self._image_transform_dialog is None:
             self._image_transform_dialog = ImageTransformDialog(self)
+            self._image_transform_dialog.set_language(self._language)
             self._image_transform_dialog.paramsChanged.connect(self._apply_image_transform_params)
             self._image_transform_dialog.autoScaleRequested.connect(self._auto_scale_image_transform)
             self._image_transform_dialog.resetRequested.connect(self._reset_image_transform)
@@ -1425,12 +1571,14 @@ class MainWindow(QMainWindow):
 
     def _on_wb_plot_mode(self) -> None:
         """Show WB Plot generation beside the active WB image viewer."""
+        self._set_analyze_toolbar_visible(False)
         self._mode_container.setCurrentIndex(0)
         if self._figure_mode_window is None:
             from gui.figure_mode_window import FigureModeWindow
 
             self._clear_container_layout(self._wb_plot_workspace_host)
             self._figure_mode_window = FigureModeWindow(self._wb_plot_workspace_host)
+            self._figure_mode_window.set_language(self._language)
             self._figure_mode_window.set_active_image_provider(self._active_wb_plot_source)
             self._figure_mode_window.set_fixed_roi_request_handler(self._on_add_fixed_wb_plot_roi)
             self._figure_mode_window.set_fixed_roi_cancel_handler(self._on_cancel_fixed_wb_plot_roi)
@@ -1641,6 +1789,9 @@ class MainWindow(QMainWindow):
                 self._analyze_return_shortcuts.append(shortcut)
 
     def _trigger_analyze_from_return_shortcut(self) -> None:
+        if self.canvas.is_rotation_mode():
+            self._on_rotate_requested()
+            return
         if self._is_wb_plot_workspace_active() and self._figure_mode_window is not None:
             if self._figure_mode_window.apply_roi_to_selected_slot():
                 self._status_bar.showMessage("Applied active WB ROI to the selected plot target.", 3000)
@@ -1659,12 +1810,11 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self._act_open.triggered.connect(self._upload_files)
-        self._act_clear_roi.triggered.connect(self._clear_roi)
-        self._act_reset_zoom.triggered.connect(self._reset_zoom_active)
         self._act_image_transform.triggered.connect(self._show_image_transform_dialog)
         self._act_analyze.triggered.connect(self._run_analysis)
         self._act_export_all.triggered.connect(self._export_all)
         self._act_reset.triggered.connect(self._reset_all)
+        self._language_combo.currentIndexChanged.connect(self._on_language_changed)
 
         for idx, panel in enumerate(self._image_panels):
             panel.canvas.roi_changed.connect(lambda roi, i=idx: self._on_roi_changed_for_slot(i, roi))
@@ -1677,6 +1827,18 @@ class MainWindow(QMainWindow):
             panel.select_checkbox.toggled.connect(lambda checked, i=idx: self._on_panel_checkbox_toggled(i, checked))
             panel.remove_btn.clicked.connect(lambda _, i=idx: self._on_panel_remove_requested(i))
             panel.transform_btn.clicked.connect(lambda _, i=idx: self._on_panel_transform_requested(i))
+            panel.rotate_custom_action.triggered.connect(
+                lambda _=False, i=idx: self._on_panel_custom_rotate_requested(i)
+            )
+            panel.flip_vertical_action.triggered.connect(
+                lambda _=False, i=idx: self._on_panel_flip_requested(i, vertical=True)
+            )
+            panel.flip_horizontal_action.triggered.connect(
+                lambda _=False, i=idx: self._on_panel_flip_requested(i, vertical=False)
+            )
+            panel.undo_image_operation_action.triggered.connect(
+                lambda _=False, i=idx: self._on_panel_undo_image_operation_requested(i)
+            )
 
         self._files_list.itemClicked.connect(self._on_uploaded_file_clicked)
         self._export_all_tiffs_btn.clicked.connect(self._export_all_tiffs)
@@ -1868,6 +2030,7 @@ class MainWindow(QMainWindow):
             self._slot_states[target_slot]["lane_rects"] = []
             self._slot_states[target_slot]["band_roi"] = None
             self._slot_states[target_slot]["auto_detections"] = []
+            self._slot_states[target_slot]["image_operation_history"] = []
             self._slot_states[target_slot]["selected"] = len(loaded) == 0
 
             if clear_results_on_first and len(loaded) == 0:
@@ -2103,11 +2266,14 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Rotation", "No image is loaded in the selected window.")
             return
 
+        self.canvas.setFocus()
         self._act_analyze.setEnabled(False)
         self.param_panel.set_rotation_mode_active(True)
         self.param_panel.set_rotation_angle(self.canvas.get_rotation_angle())
         self._refresh_detection_actions()
-        self._status_bar.showMessage("Custom rotation mode enabled — drag to align the red crosshair with the WB bands.")
+        self._status_bar.showMessage(
+            "Custom rotation mode enabled — drag to align the red crosshair, then press Return/Enter to apply."
+        )
 
     def _on_cancel_rotate_requested(self) -> None:
         if self._active_slot_index is None or self._image_path is None:
@@ -2116,6 +2282,132 @@ class MainWindow(QMainWindow):
         self._refresh_detection_actions()
         self._refresh_rotation_controls()
         self._status_bar.showMessage("Custom rotation canceled.")
+
+    def _image_operation_snapshot(self) -> dict | None:
+        if self._active_slot_index is None or self._image_path is None:
+            return None
+        return {
+            "path": self._image_path,
+            "filename": self._image_panels[self._active_slot_index].filename_label.text(),
+            "display_transform": image_transform_to_dict(
+                self.canvas.get_image_transform_params()
+            ),
+        }
+
+    def _operation_output_path(self, operation: str) -> Path:
+        source_path = Path(self._image_path or "image.tif").expanduser().resolve()
+        suffix = source_path.suffix if source_path.suffix else ".tif"
+        return self._conversion_cache_dir / (
+            f"{source_path.stem}_{operation}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{suffix}"
+        )
+
+    def _commit_image_operation(
+        self,
+        output_path: Path,
+        display_transform: ImageTransformParams,
+        snapshot: dict,
+        status: str,
+    ) -> None:
+        if self._active_slot_index is None:
+            return
+        slot_index = self._active_slot_index
+        panel_canvas = self._image_panels[slot_index].canvas
+        self._load_rotated_image_preserving_transform(
+            panel_canvas,
+            str(output_path),
+            display_transform,
+        )
+        panel_canvas.cancel_rotation_mode()
+        self._image_panels[slot_index].set_filename(output_path.name)
+
+        self._image_path = str(output_path)
+        slot = self._slot_states[slot_index]
+        slot.setdefault("image_operation_history", []).append(snapshot)
+        slot["path"] = self._image_path
+        slot["lane_rects"] = []
+        slot["band_roi"] = None
+        slot["auto_detections"] = []
+        self._lane_rects.clear()
+        self._band_roi = None
+        self._auto_detections = []
+        self.param_panel.set_auto_edit_enabled(False)
+        self.canvas.set_auto_edit_mode(False)
+        self._refresh_detection_actions()
+        self._refresh_rotation_controls()
+        self._status_bar.showMessage(status)
+
+    def _on_flip_image_requested(self, *, vertical: bool) -> None:
+        if self._active_slot_index is None or self._image_path is None:
+            QMessageBox.information(self, "Select Image", "Please select an image first.")
+            return
+        if self.canvas.is_rotation_mode():
+            self.canvas.cancel_rotation_mode()
+        snapshot = self._image_operation_snapshot()
+        if snapshot is None:
+            return
+        direction = "vertical" if vertical else "horizontal"
+        output_path = self._operation_output_path(f"flip_{direction}")
+        try:
+            display_transform = flip_display_pixels_to_file(
+                self.canvas.current_display_pixels(),
+                output_path,
+                vertical=vertical,
+            )
+            self._commit_image_operation(
+                output_path,
+                display_transform,
+                snapshot,
+                f"Image flipped {direction}. Use Rotate → Undo Image Operation to revert.",
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Image Flip Error", f"Failed to flip image:\n{exc}")
+            log.error("Image flip failed: %s", exc)
+
+    def _on_undo_image_operation_requested(self) -> None:
+        if self._active_slot_index is None or self._image_path is None:
+            return
+        if self.canvas.is_rotation_mode():
+            self.canvas.cancel_rotation_mode()
+            self._refresh_detection_actions()
+            self._refresh_rotation_controls()
+            self._status_bar.showMessage("Custom rotation canceled.")
+            return
+        slot = self._slot_states[self._active_slot_index]
+        history = slot.setdefault("image_operation_history", [])
+        if not history:
+            self._status_bar.showMessage("No image operation to undo.", 3000)
+            return
+        snapshot = history.pop()
+        previous_path = str(snapshot["path"])
+        previous_transform = image_transform_from_dict(snapshot.get("display_transform"))
+        try:
+            self._load_rotated_image_preserving_transform(
+                self.canvas,
+                previous_path,
+                previous_transform,
+            )
+        except Exception as exc:
+            history.append(snapshot)
+            QMessageBox.critical(self, "Undo Image Operation", f"Failed to restore image:\n{exc}")
+            log.error("Image operation undo failed: %s", exc)
+            return
+
+        self._image_path = previous_path
+        slot["path"] = previous_path
+        slot["lane_rects"] = []
+        slot["band_roi"] = None
+        slot["auto_detections"] = []
+        self._lane_rects.clear()
+        self._band_roi = None
+        self._auto_detections = []
+        self._image_panels[self._active_slot_index].set_filename(
+            str(snapshot.get("filename") or Path(previous_path).name)
+        )
+        self.param_panel.set_auto_edit_enabled(False)
+        self.canvas.set_auto_edit_mode(False)
+        self._refresh_detection_actions()
+        self._refresh_rotation_controls()
+        self._status_bar.showMessage("Undid the last image operation.")
 
     def _on_rotate_requested(self) -> None:
         if self._active_slot_index is None or self._image_path is None:
@@ -2144,10 +2436,10 @@ class MainWindow(QMainWindow):
             return
 
         source_path = Path(self._image_path).expanduser().resolve()
-        suffix = source_path.suffix if source_path.suffix else ".tif"
-        rotated_path = self._conversion_cache_dir / (
-            f"{source_path.stem}_rot_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{suffix}"
-        )
+        snapshot = self._image_operation_snapshot()
+        if snapshot is None:
+            return
+        rotated_path = self._operation_output_path("rot")
 
         try:
             applied_rotation = float(angle_deg)
@@ -2162,30 +2454,11 @@ class MainWindow(QMainWindow):
                 rotated_path,
                 angle_deg=angle_deg,
             )
-            panel_canvas = self._image_panels[self._active_slot_index].canvas
-            self._load_rotated_image_preserving_transform(
-                panel_canvas,
-                str(rotated_path),
+            self._commit_image_operation(
+                rotated_path,
                 rotated_display_transform,
-            )
-            self._image_panels[self._active_slot_index].set_filename(Path(rotated_path).name)
-            panel_canvas.cancel_rotation_mode()
-
-            self._image_path = str(rotated_path)
-            slot = self._slot_states[self._active_slot_index]
-            slot["path"] = self._image_path
-            slot["lane_rects"] = []
-            slot["band_roi"] = None
-            slot["auto_detections"] = []
-            self._lane_rects.clear()
-            self._band_roi = None
-            self._auto_detections = []
-            self.param_panel.set_auto_edit_enabled(False)
-            self.canvas.set_auto_edit_mode(False)
-            self._refresh_detection_actions()
-            self._refresh_rotation_controls()
-            self._status_bar.showMessage(
-                f"Rotation applied ({angle_deg:+.2f}° reference). Image is deskewed and ready for ROI/analysis."
+                snapshot,
+                f"Rotation applied ({angle_deg:+.2f}° reference). Use Rotate → Undo Image Operation to revert.",
             )
         except Exception as e:
             QMessageBox.critical(self, "Rotation Error", f"Failed to rotate image:\n{e}")
@@ -2293,6 +2566,7 @@ class MainWindow(QMainWindow):
             self._slot_states[idx]["lane_rects"] = []
             self._slot_states[idx]["band_roi"] = None
             self._slot_states[idx]["auto_detections"] = []
+            self._slot_states[idx]["image_operation_history"] = []
 
         self._refresh_image_panel_layout()
         self._current_mode = self.param_panel.get_mode()
