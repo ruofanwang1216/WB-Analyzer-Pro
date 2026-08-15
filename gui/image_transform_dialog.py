@@ -16,7 +16,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from core.image_transform import ImageTransformParams, MAX_16BIT_VALUE
+from core.image_transform import (
+    ImageTransformParams,
+    MAX_16BIT_VALUE,
+    MAX_TONE_VALUE,
+    MIN_TONE_VALUE,
+)
 from utils.i18n import LANG_EN, tr
 
 
@@ -37,11 +42,6 @@ class ImageTransformDialog(QDialog):
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
 
-        self._note = QLabel("Analyze follows the current Low / High / Gamma. Invert remains preview-only.")
-        self._note.setWordWrap(True)
-        self._note.setStyleSheet("color: #526675; font-size: 11px;")
-        root.addWidget(self._note)
-
         controls = QFrame()
         controls.setStyleSheet(
             "QFrame { background-color: #F4F8FA; border: 1px solid #CEDDE6; border-radius: 8px; }"
@@ -52,8 +52,18 @@ class ImageTransformDialog(QDialog):
         grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(8)
 
-        self._low_slider, self._low_spin = self._make_int_control(0, MAX_16BIT_VALUE, 0)
-        self._high_slider, self._high_spin = self._make_int_control(0, MAX_16BIT_VALUE, MAX_16BIT_VALUE)
+        # The unmodified image range sits at the midpoint of both controls:
+        # Low 0 in [-65535, 65535], High 65535 in [0, 131070].
+        self._low_slider, self._low_spin = self._make_int_control(
+            MIN_TONE_VALUE,
+            MAX_16BIT_VALUE,
+            0,
+        )
+        self._high_slider, self._high_spin = self._make_int_control(
+            0,
+            MAX_TONE_VALUE,
+            MAX_16BIT_VALUE,
+        )
         self._gamma_slider = QSlider(Qt.Orientation.Horizontal)
         self._gamma_slider.setRange(10, 400)
         self._gamma_slider.setValue(100)
@@ -105,7 +115,6 @@ class ImageTransformDialog(QDialog):
     def set_language(self, language: str) -> None:
         self._language = language
         self.setWindowTitle(tr("Image Transform", language))
-        self._note.setText(tr("Analyze follows the current Low / High / Gamma. Invert remains preview-only.", language))
         self._invert_checkbox.setText(tr("Invert display", language))
         self._invert_checkbox.setToolTip(tr("Show bright signal as dark bands on a light background", language))
         for label, source in zip(self._control_labels, ("Low", "High", "Gamma")):

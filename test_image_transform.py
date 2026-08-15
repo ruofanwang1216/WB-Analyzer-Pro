@@ -42,6 +42,13 @@ class ImageTransformTests(unittest.TestCase):
 
         self.assertEqual(transform_pixels_16_to_8(pixels, params).tolist(), [255, 128, 0])
 
+    def test_extended_tone_range_supports_adjustment_beyond_both_source_ends(self) -> None:
+        pixels = np.array([0, 65535], dtype=np.uint16)
+        params = ImageTransformParams(low=-65535, high=131070, gamma=1.0)
+
+        self.assertEqual(params.sanitized(), params)
+        self.assertEqual(transform_pixels_16_to_8(pixels, params).tolist(), [85, 170])
+
     def test_auto_scale_trims_low_and_high_extremes(self) -> None:
         pixels = np.array([0] * 10 + list(range(100, 200)) + [65535] * 10, dtype=np.uint16)
 

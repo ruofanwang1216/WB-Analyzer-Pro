@@ -10,6 +10,8 @@ from PIL import Image, TiffImagePlugin
 
 
 MAX_16BIT_VALUE = 65535
+MIN_TONE_VALUE = -MAX_16BIT_VALUE
+MAX_TONE_VALUE = MAX_16BIT_VALUE * 2
 
 
 @dataclass(frozen=True)
@@ -20,8 +22,11 @@ class ImageTransformParams:
     inverted: bool = False
 
     def sanitized(self) -> "ImageTransformParams":
-        low = max(0, min(MAX_16BIT_VALUE, int(round(self.low))))
-        high = max(0, min(MAX_16BIT_VALUE, int(round(self.high))))
+        # Keep the source range (0..65535) at the center of each tone control.
+        # Values outside the source range are useful: they let users expand the
+        # displayed dynamic range instead of only being able to clip it inward.
+        low = max(MIN_TONE_VALUE, min(MAX_16BIT_VALUE, int(round(self.low))))
+        high = max(0, min(MAX_TONE_VALUE, int(round(self.high))))
         gamma = max(0.1, min(4.0, float(self.gamma)))
         if high <= low:
             high = min(MAX_16BIT_VALUE, low + 1)

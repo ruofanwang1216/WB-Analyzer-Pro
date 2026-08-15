@@ -7,11 +7,24 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
-from PySide6.QtCore import Qt, QObject, QThread, Signal, QRectF, QSize, QSizeF, QEvent
-from PySide6.QtGui import QAction, QKeySequence, QShortcut, QCloseEvent
+from PIL import Image
+from PySide6.QtCore import Qt, QObject, QThread, Signal, QRectF, QSize, QSizeF, QPointF, QEvent
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QCloseEvent,
+    QIcon,
+    QKeySequence,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QSplitter, QVBoxLayout, QStackedWidget,
+    QApplication, QMainWindow, QWidget, QSplitter, QVBoxLayout, QStackedWidget,
     QToolBar, QStatusBar, QDockWidget, QFileDialog, QMessageBox,
     QHBoxLayout, QToolButton, QPushButton, QFrame, QSizePolicy, QCheckBox,
     QLabel, QListWidget, QListWidgetItem, QDialog, QGridLayout, QMenu, QComboBox,
@@ -31,6 +44,7 @@ from gui.image_canvas import ImageCanvas
 from gui.image_transform_dialog import ImageTransformDialog
 from gui.param_panel import ParamPanel
 from gui.results_panel import ResultsPanel
+from gui.tutorial import TutorialController, TutorialModeDialog
 from utils.logger import get_logger
 from utils.persistence import AppPersistence
 from utils.i18n import LANG_EN, LANG_ZH_CN, tr
@@ -38,6 +52,218 @@ from utils.i18n import LANG_EN, LANG_ZH_CN, tr
 log = get_logger(__name__)
 
 _MAX_IMAGE_PANELS = 4
+
+
+def _folder_open_icon(size: int = 22) -> QIcon:
+    """Return a compact outline folder icon matching the Import Images control."""
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.scale(size / 24.0, size / 24.0)
+    pen = QPen(QColor("#29483B"), 1.8)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    folder_back = QPainterPath()
+    folder_back.moveTo(3.0, 19.0)
+    folder_back.lineTo(3.0, 6.0)
+    folder_back.cubicTo(3.0, 4.7, 3.7, 4.0, 5.0, 4.0)
+    folder_back.lineTo(9.0, 4.0)
+    folder_back.lineTo(11.2, 7.0)
+    folder_back.lineTo(19.0, 7.0)
+    folder_back.cubicTo(20.3, 7.0, 21.0, 7.7, 21.0, 9.0)
+    folder_back.lineTo(21.0, 10.5)
+    painter.drawPath(folder_back)
+
+    folder_front = QPainterPath()
+    folder_front.moveTo(3.2, 18.8)
+    folder_front.lineTo(5.7, 11.8)
+    folder_front.cubicTo(6.1, 10.7, 6.8, 10.2, 8.0, 10.2)
+    folder_front.lineTo(20.5, 10.2)
+    folder_front.cubicTo(21.8, 10.2, 22.2, 11.0, 21.8, 12.2)
+    folder_front.lineTo(19.4, 19.0)
+    folder_front.cubicTo(19.0, 20.2, 18.2, 20.7, 17.0, 20.7)
+    folder_front.lineTo(5.0, 20.7)
+    folder_front.cubicTo(3.7, 20.7, 2.8, 20.0, 3.2, 18.8)
+    painter.drawPath(folder_front)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def _zoom_icon(*, zoom_in: bool, size: int = 18) -> QIcon:
+    """Return a compact magnifier icon for an image-panel zoom control."""
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.scale(size / 18.0, size / 18.0)
+    pen = QPen(QColor("#405967"), 1.6)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawEllipse(QRectF(2.5, 2.0, 9.5, 9.5))
+    painter.drawLine(QPointF(10.2, 10.0), QPointF(15.2, 15.0))
+    painter.drawLine(QPointF(5.0, 6.75), QPointF(9.5, 6.75))
+    if zoom_in:
+        painter.drawLine(QPointF(7.25, 4.5), QPointF(7.25, 9.0))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def _image_operation_icon(operation: str, size: int = 18) -> QIcon:
+    """Draw compact, font-independent arrows for the image operation menu."""
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.scale(size / 18.0, size / 18.0)
+    pen = QPen(QColor("#26322D"), 1.65)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    if operation == "flip-horizontal":
+        painter.drawLine(QPointF(3.0, 9.0), QPointF(15.0, 9.0))
+        painter.drawLine(QPointF(3.0, 9.0), QPointF(6.0, 6.0))
+        painter.drawLine(QPointF(3.0, 9.0), QPointF(6.0, 12.0))
+        painter.drawLine(QPointF(15.0, 9.0), QPointF(12.0, 6.0))
+        painter.drawLine(QPointF(15.0, 9.0), QPointF(12.0, 12.0))
+    elif operation == "flip-vertical":
+        painter.drawLine(QPointF(9.0, 3.0), QPointF(9.0, 15.0))
+        painter.drawLine(QPointF(9.0, 3.0), QPointF(6.0, 6.0))
+        painter.drawLine(QPointF(9.0, 3.0), QPointF(12.0, 6.0))
+        painter.drawLine(QPointF(9.0, 15.0), QPointF(6.0, 12.0))
+        painter.drawLine(QPointF(9.0, 15.0), QPointF(12.0, 12.0))
+    elif operation == "custom-rotate":
+        # One continuous, two-headed curved arrow mirrors the reference icon
+        # while remaining crisp on systems without the corresponding glyph.
+        curve = QPainterPath(QPointF(3.0, 12.5))
+        curve.cubicTo(4.0, 5.0, 14.0, 5.0, 15.0, 12.5)
+        painter.drawPath(curve)
+        painter.drawLine(QPointF(3.0, 12.5), QPointF(3.2, 8.7))
+        painter.drawLine(QPointF(3.0, 12.5), QPointF(6.7, 11.7))
+        painter.drawLine(QPointF(15.0, 12.5), QPointF(14.8, 8.7))
+        painter.drawLine(QPointF(15.0, 12.5), QPointF(11.3, 11.7))
+    elif operation == "undo":
+        path = QPainterPath(QPointF(5.0, 6.0))
+        path.cubicTo(13.5, 4.0, 15.0, 8.2, 14.0, 12.0)
+        painter.drawPath(path)
+        painter.drawLine(QPointF(5.0, 6.0), QPointF(8.2, 3.8))
+        painter.drawLine(QPointF(5.0, 6.0), QPointF(7.7, 8.7))
+
+    painter.end()
+    return QIcon(pixmap)
+
+
+def _infer_auto_fit_dark_on_light(
+    image_path: str,
+    search_roi: QRectF | None,
+) -> bool:
+    """Infer whether the rough ROI contains dark bands on a light background."""
+    try:
+        with Image.open(image_path) as image:
+            pixels = np.asarray(image)
+        if pixels.ndim == 3:
+            rgb = pixels[:, :, :3].astype(np.float64)
+            pixels = (
+                0.299 * rgb[:, :, 0]
+                + 0.587 * rgb[:, :, 1]
+                + 0.114 * rgb[:, :, 2]
+            )
+        else:
+            pixels = pixels.astype(np.float64)
+        if pixels.ndim != 2 or pixels.size == 0:
+            return False
+
+        if search_roi is not None:
+            height, width = pixels.shape
+            left = max(0, min(width - 1, int(search_roi.left())))
+            top = max(0, min(height - 1, int(search_roi.top())))
+            right = max(left + 1, min(width, int(np.ceil(search_roi.right()))))
+            bottom = max(top + 1, min(height, int(np.ceil(search_roi.bottom()))))
+            pixels = pixels[top:bottom, left:right]
+        if pixels.size == 0:
+            return False
+
+        border = np.concatenate((
+            pixels[0, :].reshape(-1),
+            pixels[-1, :].reshape(-1),
+            pixels[:, 0].reshape(-1),
+            pixels[:, -1].reshape(-1),
+        ))
+        background = float(np.median(border))
+        low = float(np.percentile(pixels, 5.0))
+        high = float(np.percentile(pixels, 95.0))
+        dark_contrast = max(0.0, background - low)
+        light_contrast = max(0.0, high - background)
+        return dark_contrast > light_contrast
+    except Exception:
+        log.exception("Could not infer WB Auto-Fit polarity; using light-on-dark first")
+        return False
+
+
+def _run_auto_fit_guided_with_polarity_fallback(
+    image_path: str,
+    *,
+    search_roi: QRectF | None,
+    expected_lane_count: int | None,
+    sensitivity: float = 0.5,
+) -> tuple[list[dict], dict]:
+    """Detect a figure strip and retry with reversed polarity when needed."""
+    from core.band_detector import auto_detect_guided
+
+    common = {
+        "sensitivity": sensitivity,
+        "search_rect": search_roi,
+        "expected_lane_count": expected_lane_count,
+        "target_band_row": None,
+        "expected_rows_per_lane": None,
+        "return_metadata": True,
+    }
+    primary_dark_on_light = _infer_auto_fit_dark_on_light(
+        image_path, search_roi
+    )
+    detections, metadata = auto_detect_guided(
+        image_path,
+        dark_on_light=primary_dark_on_light,
+        **common,
+    )
+    total_bands = sum(len(lane.get("bands", [])) for lane in detections)
+    if total_bands > 0:
+        metadata = dict(metadata)
+        metadata["detected_polarity"] = (
+            "dark_on_light" if primary_dark_on_light else "light_on_dark"
+        )
+        return detections, metadata
+
+    reversed_detections, reversed_metadata = auto_detect_guided(
+        image_path,
+        dark_on_light=not primary_dark_on_light,
+        **common,
+    )
+    reversed_total = sum(
+        len(lane.get("bands", [])) for lane in reversed_detections
+    )
+    if reversed_total > total_bands:
+        reversed_metadata = dict(reversed_metadata)
+        reversed_metadata["detected_polarity"] = (
+            "light_on_dark" if primary_dark_on_light else "dark_on_light"
+        )
+        return reversed_detections, reversed_metadata
+
+    metadata = dict(metadata)
+    metadata["detected_polarity"] = (
+        "dark_on_light" if primary_dark_on_light else "light_on_dark"
+    )
+    return detections, metadata
 
 
 # ── Background measurement worker ──────────────────────────────────────────
@@ -80,6 +306,59 @@ class MeasurementWorker(QObject):
             self.finished.emit(results)
         except Exception as e:
             self.error.emit(str(e))
+
+
+class UploadConversionWorker(QObject):
+    """Convert Image Lab documents without blocking the Qt event loop."""
+
+    progress = Signal(str)
+    finished = Signal(list)
+    error = Signal(str)
+
+    def __init__(
+        self,
+        exporter,
+        document_paths: list[Path],
+        output_dir: Path,
+    ) -> None:
+        super().__init__()
+        self.exporter = exporter
+        self.document_paths = list(document_paths)
+        self.output_dir = output_dir
+
+    def run(self) -> None:
+        try:
+            results = self.exporter.export_documents(
+                self.document_paths,
+                self.output_dir,
+                debug=False,
+                log=self.progress.emit,
+            )
+            self.finished.emit(results)
+        except Exception as exc:
+            log.exception("Background upload conversion failed")
+            self.error.emit(str(exc))
+
+
+class _PanelSelectionCheckBox(QCheckBox):
+    """Image selector that adds a small red tick to the existing checked style."""
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if not self.isChecked():
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        pen = QPen(QColor("#D74A43"), 1.8)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        left = (self.width() - 14.0) / 2.0
+        top = (self.height() - 14.0) / 2.0
+        painter.drawLine(QPointF(left + 3.2, top + 7.2), QPointF(left + 5.8, top + 9.8))
+        painter.drawLine(QPointF(left + 5.8, top + 9.8), QPointF(left + 10.8, top + 4.2))
+        painter.end()
 
 
 class _ImagePanelWidget(QFrame):
@@ -175,6 +454,23 @@ class _ImagePanelWidget(QFrame):
                 image: none;
                 width: 0px;
             }
+            QToolButton#panel_zoom_btn {
+                background-color: rgba(245, 248, 250, 225);
+                border: 1px solid #9FB3BE;
+                border-radius: 7px;
+                min-width: 22px;
+                max-width: 22px;
+                min-height: 18px;
+                max-height: 18px;
+                padding: 0px;
+            }
+            QToolButton#panel_zoom_btn:hover {
+                background-color: #D4EDE4;
+                border-color: #7DA897;
+            }
+            QToolButton#panel_zoom_btn:pressed {
+                background-color: #C5E2D7;
+            }
         """)
 
         root = QVBoxLayout(self)
@@ -193,18 +489,41 @@ class _ImagePanelWidget(QFrame):
         self.rotate_btn.setText("↻")
         self.rotate_btn.setToolTip("Rotate Image")
         self.rotate_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        rotate_menu = QMenu(self.rotate_btn)
-        self.rotate_custom_action = rotate_menu.addAction("Custom Rotate-Hit Enter")
-        self.flip_vertical_action = rotate_menu.addAction("Flip Vertically")
-        self.flip_horizontal_action = rotate_menu.addAction("Flip Horizontally")
-        rotate_menu.addSeparator()
-        self.undo_image_operation_action = rotate_menu.addAction("Undo Image Operation")
-        self.rotate_btn.setMenu(rotate_menu)
+        self.rotate_menu = QMenu(self.rotate_btn)
+        self.rotate_menu.setToolTipsVisible(True)
+        self.flip_horizontal_action = self.rotate_menu.addAction(
+            _image_operation_icon("flip-horizontal"), "Horizontal"
+        )
+        self.flip_vertical_action = self.rotate_menu.addAction(
+            _image_operation_icon("flip-vertical"), "Vertical"
+        )
+        self.rotate_menu.addSeparator()
+        self.rotate_custom_action = self.rotate_menu.addAction(
+            _image_operation_icon("custom-rotate"), "Custom"
+        )
+        self.rotate_custom_action.setToolTip("Press Enter/Return to apply")
+        self.rotate_menu.addSeparator()
+        self.undo_image_operation_action = self.rotate_menu.addAction(
+            _image_operation_icon("undo"), "Undo"
+        )
+        self.rotate_btn.setMenu(self.rotate_menu)
         top_row.addWidget(self.rotate_btn)
-        self.select_checkbox = QCheckBox()
+        self.select_checkbox = _PanelSelectionCheckBox()
         self.select_checkbox.setObjectName("panel_select_checkbox")
-        self.select_checkbox.setToolTip("Select this image for Auto Detect")
+        self.select_checkbox.setToolTip("Select this image")
         top_row.addWidget(self.select_checkbox)
+        self.zoom_out_btn = QToolButton()
+        self.zoom_out_btn.setObjectName("panel_zoom_btn")
+        self.zoom_out_btn.setIcon(_zoom_icon(zoom_in=False))
+        self.zoom_out_btn.setIconSize(QSize(18, 18))
+        self.zoom_out_btn.setToolTip("Zoom out image")
+        top_row.addWidget(self.zoom_out_btn)
+        self.zoom_in_btn = QToolButton()
+        self.zoom_in_btn.setObjectName("panel_zoom_btn")
+        self.zoom_in_btn.setIcon(_zoom_icon(zoom_in=True))
+        self.zoom_in_btn.setIconSize(QSize(18, 18))
+        self.zoom_in_btn.setToolTip("Zoom in image")
+        top_row.addWidget(self.zoom_in_btn)
         self.filename_label = QLabel("")
         self.filename_label.setObjectName("panel_filename_label")
         self.filename_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -322,6 +641,9 @@ class MainWindow(QMainWindow):
         # Worker thread references (kept to avoid GC)
         self._worker: MeasurementWorker | None = None
         self._worker_thread: QThread | None = None
+        self._upload_worker: UploadConversionWorker | None = None
+        self._upload_thread: QThread | None = None
+        self._pending_upload: dict[str, list[Path]] | None = None
         self._direct_exporter = None
         self._supported_upload_exts: set[str] = {".scn", ".sscn", ".mscn", ".smscn"}
         self._direct_tiff_exts: set[str] = {".tif", ".tiff"}
@@ -338,10 +660,12 @@ class MainWindow(QMainWindow):
         self._embedded_column_table: ColumnTableWindow | None = None
         self._figure_mode_window = None
         self._workspace_focus_target: str = "image"
+        self._home_mode_active = True
         self._analyze_return_shortcuts: list[QShortcut] = []
         self._image_transform_dialog: ImageTransformDialog | None = None
 
         self._build_ui()
+        self._tutorial_controller = TutorialController(self)
         self._apply_persisted_ui_preferences()
         self._connect_signals()
         self._register_shortcuts()
@@ -367,7 +691,7 @@ class MainWindow(QMainWindow):
                 border: 1px solid #B8CCC1;
                 border-radius: 8px;
                 color: #2F4B3F;
-                padding: 6px 12px;
+                padding: 7px 13px;
                 font-weight: 600;
             }
             QToolButton#tb_open_btn:hover {
@@ -433,27 +757,6 @@ class MainWindow(QMainWindow):
             QPushButton#wb_plot_generation_btn:hover {
                 background-color: #BBB4C8;
             }
-            QToolButton#tb_export_all_btn {
-                background-color: #DCE9F2;
-                border: 1px solid #B6C8D5;
-                border-radius: 8px;
-                color: #345060;
-                padding: 6px 12px;
-                font-weight: 600;
-            }
-            QToolButton#tb_export_all_btn:hover {
-                background-color: #CFDFEA;
-            }
-            QToolButton#tb_reset_btn {
-                background-color: #E7EEEA;
-                border: 1px solid #C3D1CA;
-                border-radius: 8px;
-                color: #4E6056;
-                padding: 6px 12px;
-            }
-            QToolButton#tb_reset_btn:hover {
-                background-color: #DCE7E1;
-            }
             QComboBox#language_selector {
                 background-color: #F5F8FA;
                 border: 1px solid #B6C8D5;
@@ -463,10 +766,23 @@ class MainWindow(QMainWindow):
                 min-width: 92px;
                 font-weight: 600;
             }
+            QPushButton#tutorial_btn {
+                background-color: #FFF7E3;
+                border: 1px solid #D7B86A;
+                border-radius: 8px;
+                color: #655020;
+                padding: 6px 11px;
+                font-weight: 600;
+            }
+            QPushButton#tutorial_btn:hover {
+                background-color: #F8EBC8;
+                border-color: #C99E39;
+            }
         """)
         self.addToolBar(tb)
 
-        self._act_open = QAction("Upload Files", self)
+        self._act_open = QAction("Import Images", self)
+        self._act_open.setIcon(_folder_open_icon())
         self._act_open.setShortcut(QKeySequence.StandardKey.Open)
 
         self._act_image_transform = QAction("Image Transform", self)
@@ -474,9 +790,6 @@ class MainWindow(QMainWindow):
         self._act_analyze = QAction("Analyze", self)
         self._act_analyze.setShortcut(QKeySequence("Ctrl+Return"))
         self._act_analyze.setEnabled(False)
-
-        self._act_export_all = QAction("Export All", self)
-        self._act_reset = QAction("Reset All", self)
 
         def _make_action_button(action: QAction, name: str) -> QToolButton:
             btn = QToolButton()
@@ -486,9 +799,11 @@ class MainWindow(QMainWindow):
             btn.setAutoRaise(False)
             return btn
 
-        # Standalone Upload Files
         open_btn = _make_action_button(self._act_open, "tb_open_btn")
-        tb.addWidget(open_btn)
+        self._open_toolbar_btn = open_btn
+        open_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        open_btn.setIconSize(QSize(22, 22))
+        self._open_toolbar_action = tb.addWidget(open_btn)
 
         gap1 = QWidget()
         gap1.setFixedWidth(8)
@@ -501,7 +816,11 @@ class MainWindow(QMainWindow):
         analyze_layout = QHBoxLayout(self._analyze_toolbar_group)
         analyze_layout.setContentsMargins(8, 4, 8, 4)
         analyze_layout.setSpacing(6)
-        analyze_layout.addWidget(_make_action_button(self._act_analyze, "analyze_btn"))
+        self._analyze_toolbar_btn = _make_action_button(
+            self._act_analyze,
+            "analyze_btn",
+        )
+        analyze_layout.addWidget(self._analyze_toolbar_btn)
         self._analyze_toolbar_group.setVisible(False)
         self._analyze_toolbar_action = tb.addWidget(self._analyze_toolbar_group)
         self._analyze_toolbar_action.setVisible(False)
@@ -513,43 +832,42 @@ class MainWindow(QMainWindow):
         self._analyze_toolbar_gap_action = tb.addWidget(gap2)
         self._analyze_toolbar_gap_action.setVisible(False)
 
-        # Section 2: Figure Generation
-        section2 = QFrame()
-        section2.setObjectName("section2_group")
-        section2_layout = QHBoxLayout(section2)
-        section2_layout.setContentsMargins(8, 4, 8, 4)
-        section2_layout.setSpacing(6)
+        # Preserve the existing workspace controls.  They are hidden only on Home.
+        self._workspace_toolbar_group = QFrame()
+        self._workspace_toolbar_group.setObjectName("section2_group")
+        workspace_layout = QHBoxLayout(self._workspace_toolbar_group)
+        workspace_layout.setContentsMargins(8, 4, 8, 4)
+        workspace_layout.setSpacing(6)
         self._figure_generation_btn = QPushButton("Densitometry Figure Generation")
         self._figure_generation_btn.setObjectName("figure_generation_btn")
         self._figure_generation_btn.clicked.connect(self._on_figure_generation_clicked)
-        section2_layout.addWidget(self._figure_generation_btn)
+        workspace_layout.addWidget(self._figure_generation_btn)
         self._wb_plot_generation_btn = QPushButton("WB Plot Figure Generation")
         self._wb_plot_generation_btn.setObjectName("wb_plot_generation_btn")
         self._wb_plot_generation_btn.clicked.connect(self._on_wb_plot_mode)
-        section2_layout.addWidget(self._wb_plot_generation_btn)
-        tb.addWidget(section2)
+        workspace_layout.addWidget(self._wb_plot_generation_btn)
+        self._workspace_toolbar_action = tb.addWidget(self._workspace_toolbar_group)
+        self._workspace_toolbar_action.setVisible(True)
 
-        # Push Reset All to the far right.
+        self._tutorial_btn = QPushButton("New User Tutorial")
+        self._tutorial_btn.setObjectName("tutorial_btn")
+        self._tutorial_toolbar_action = tb.addWidget(self._tutorial_btn)
+
+        # Keep language selection anchored at the far right.
         stretch = QWidget()
         stretch.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         tb.addWidget(stretch)
 
-        # Keep language selection immediately to the left of Export All, as a
-        # global control rather than a per-workspace preference.
         self._language_combo = QComboBox()
         self._language_combo.setObjectName("language_selector")
         self._language_combo.addItem("English", LANG_EN)
         self._language_combo.addItem("中文", LANG_ZH_CN)
         self._language_combo.setToolTip("Language")
-        tb.addWidget(self._language_combo)
+        self._language_toolbar_action = tb.addWidget(self._language_combo)
 
-        export_all_btn = _make_action_button(self._act_export_all, "tb_export_all_btn")
-        tb.addWidget(export_all_btn)
-
-        reset_btn = _make_action_button(self._act_reset, "tb_reset_btn")
-        tb.addWidget(reset_btn)
-
-        # Central splitter: files panel (left) + image viewer area + param panel (right)
+        # Central splitter: files rail + ROI settings + image/figure workspace.
+        # The first two panels share the left-side interaction area: expanding
+        # Uploaded Files hides ROI Settings; collapsing it reveals ROI Settings.
         self._main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self._main_splitter.setChildrenCollapsible(False)
 
@@ -728,19 +1046,24 @@ class MainWindow(QMainWindow):
         self._param_panel_layout.setContentsMargins(0, 0, 0, 0)
         self._param_panel_layout.setSpacing(0)
         self._param_panel_layout.addWidget(self.param_panel)
-        self._main_splitter.addWidget(self._param_panel_host)
+        self._main_splitter.insertWidget(1, self._param_panel_host)
         self._main_splitter.setStretchFactor(0, 0)
-        self._main_splitter.setStretchFactor(1, 1)
-        self._main_splitter.setStretchFactor(2, 0)
+        self._main_splitter.setStretchFactor(1, 0)
+        self._main_splitter.setStretchFactor(2, 1)
         self._files_panel.setMinimumWidth(self._files_panel_min_width)
         self._files_panel.setMaximumWidth(self._files_panel_max_width)
-        self._main_splitter.setSizes([self._files_panel_last_width, 990, 150])
+        self._main_splitter.setSizes([self._files_panel_last_width, 150, 990])
 
-        # ── Mode container: stack[0] = densitometry (existing _main_splitter)
-        # stack[1] = WB Plot (added lazily on first click, see _on_wb_plot_mode)
+        # ── App shell: Home is the existing blank interactive image canvas.
         self._mode_container = QStackedWidget()
-        self._mode_container.addWidget(self._main_splitter)   # stack[0]
-        self.setCentralWidget(self._mode_container)           # called ONCE
+        self._mode_container.addWidget(self._main_splitter)
+        self._mode_container.setCurrentWidget(self._main_splitter)
+        self.setCentralWidget(self._mode_container)
+
+        # Match the Home reference: collapsed file rail, full blank canvas, and
+        # no analysis/figure side panels until a tool is chosen.
+        self._set_files_panel_collapsed(True, persist=False)
+        self._param_panel_host.setVisible(False)
 
         # Results dock (bottom)
         self.results_panel = ResultsPanel(
@@ -755,19 +1078,29 @@ class MainWindow(QMainWindow):
         )
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
         dock.setMinimumHeight(180)
+        dock.setVisible(False)
 
         # Status bar
         self._status_bar = QStatusBar()
         self.setStatusBar(self._status_bar)
         self._refresh_image_panel_layout()
-        self._status_bar.showMessage("Upload files to begin.")
+        self._status_bar.showMessage("Choose a tool or import images.")
 
-    def _set_files_panel_collapsed(self, collapsed: bool) -> None:
+    def _set_files_panel_collapsed(
+        self,
+        collapsed: bool,
+        *,
+        persist: bool = True,
+    ) -> None:
         if self._main_splitter is None:
             return
 
         if collapsed == self._files_panel_collapsed:
+            self._sync_param_panel_visibility()
             return
+
+        sizes = self._main_splitter.sizes()
+        total = max(sum(sizes), self._main_splitter.width(), 1)
 
         if collapsed:
             current_width = self._files_panel.width()
@@ -781,11 +1114,6 @@ class MainWindow(QMainWindow):
             self._export_all_tiffs_btn.setVisible(False)
             self._files_panel.setMinimumWidth(self._files_panel_collapsed_width)
             self._files_panel.setMaximumWidth(self._files_panel_collapsed_width)
-            sizes = self._main_splitter.sizes()
-            total = max(sum(sizes), 1)
-            right = sizes[2] if len(sizes) > 2 else max(220, total // 4)
-            middle = max(200, total - right - self._files_panel_collapsed_width)
-            self._main_splitter.setSizes([self._files_panel_collapsed_width, middle, right])
             self._files_toggle_btn.setText("▶")
             self._files_toggle_btn.setToolTip("Expand Uploaded Files panel")
         else:
@@ -798,16 +1126,28 @@ class MainWindow(QMainWindow):
                 self._files_panel_min_width,
                 min(self._files_panel_last_width, self._files_panel_max_width),
             )
-            sizes = self._main_splitter.sizes()
-            total = max(sum(sizes), 1)
-            right = sizes[2] if len(sizes) > 2 else max(220, total // 4)
-            middle = max(200, total - right - restored_width)
-            self._main_splitter.setSizes([restored_width, middle, right])
             self._files_toggle_btn.setText("◀")
             self._files_toggle_btn.setToolTip("Collapse Uploaded Files panel")
 
         self._files_panel_collapsed = collapsed
-        self._persistence.remember_ui_state(files_panel_collapsed=collapsed)
+        self._sync_param_panel_visibility()
+        files_width = (
+            self._files_panel_collapsed_width if collapsed else restored_width
+        )
+        roi_width = self.param_panel.width() if self._param_panel_host.isVisible() else 0
+        workspace_width = max(200, total - files_width - roi_width)
+        self._main_splitter.setSizes([files_width, roi_width, workspace_width])
+        if persist:
+            self._persistence.remember_ui_state(files_panel_collapsed=collapsed)
+
+    def _sync_param_panel_visibility(self) -> None:
+        """Show ROI Settings only in the collapsed-files densitometry layout."""
+        show_roi = (
+            self._files_panel_collapsed
+            and not self._home_mode_active
+            and not self._is_wb_plot_workspace_active()
+        )
+        self._param_panel_host.setVisible(show_roi)
 
     def _apply_persisted_ui_preferences(self) -> None:
         config = self._persistence.read_config()
@@ -818,7 +1158,7 @@ class MainWindow(QMainWindow):
             self._current_mode = self.param_panel.get_mode()
         collapsed = ui.get("files_panel_collapsed")
         if isinstance(collapsed, bool):
-            self._set_files_panel_collapsed(collapsed)
+            self._set_files_panel_collapsed(collapsed, persist=False)
 
     def _set_language(self, language: str, *, persist: bool = True) -> None:
         """Apply the display language while keeping analysis data untouched."""
@@ -832,43 +1172,191 @@ class MainWindow(QMainWindow):
             self._language_combo.blockSignals(False)
 
         self._language_combo.setToolTip(tr("Language", language))
-        self._act_open.setText(tr("Upload Files", language))
+        self._act_open.setText(tr("Import Images", language))
         self._act_image_transform.setText(tr("Image Transform", language))
         self._act_analyze.setText(tr("Analyze", language))
-        self._act_export_all.setText(tr("Export All", language))
-        self._act_reset.setText(tr("Reset All", language))
-        self._figure_generation_btn.setText(tr("Densitometry Figure Generation", language))
-        self._wb_plot_generation_btn.setText(tr("WB Plot Figure Generation", language))
+        self._figure_generation_btn.setText(
+            tr("Densitometry Figure Generation", language)
+        )
+        self._wb_plot_generation_btn.setText(
+            tr("WB Plot Figure Generation", language)
+        )
+        self._tutorial_btn.setText(tr("New User Tutorial", language))
         self._files_title.setText(tr("Uploaded Files", language))
         self._export_all_tiffs_btn.setText(tr("Export All TIFFs", language))
         if self._embedded_column_table is None:
             self._figure_table_placeholder.setText(tr("Figure Generation table will appear here.", language))
             self._figure_preview_placeholder.setText(tr("Generated figure preview will appear here.", language))
-        else:
-            self._embedded_column_table.set_language(language)
         self._wb_plot_placeholder.setText(tr("WB Plot Figure Generation will appear here.", language))
-        self.param_panel.set_language(language)
-        self.results_panel.set_language(language)
-        if self._image_transform_dialog is not None:
-            self._image_transform_dialog.set_language(language)
-        if self._figure_mode_window is not None:
-            self._figure_mode_window.set_language(language)
+        self._refresh_language_targets(language)
+        self._tutorial_controller.refresh_language()
+
+        self._files_toggle_btn.setToolTip(tr(
+            "Expand Uploaded Files panel"
+            if self._files_panel_collapsed
+            else "Collapse Uploaded Files panel",
+            language,
+        ))
 
         for panel in self._image_panels:
             panel.transform_btn.setToolTip(tr("Image Transform: Low / High / Gamma", language))
             panel.rotate_btn.setToolTip(tr("Rotate Image", language))
-            panel.select_checkbox.setToolTip(tr("Select this image for Auto Detect", language))
+            panel.select_checkbox.setToolTip(tr("Select this image", language))
+            panel.zoom_out_btn.setToolTip(tr("Zoom out image", language))
+            panel.zoom_in_btn.setToolTip(tr("Zoom in image", language))
             panel.remove_btn.setToolTip(tr("Remove image", language))
-            panel.rotate_custom_action.setText(tr("Custom Rotate-Hit Enter", language))
-            panel.flip_vertical_action.setText(tr("Flip Vertically", language))
-            panel.flip_horizontal_action.setText(tr("Flip Horizontally", language))
-            panel.undo_image_operation_action.setText(tr("Undo Image Operation", language))
+            panel.rotate_custom_action.setText(tr("Custom", language))
+            panel.rotate_custom_action.setToolTip(tr("Press Enter/Return to apply", language))
+            panel.flip_vertical_action.setText(tr("Vertical", language))
+            panel.flip_horizontal_action.setText(tr("Horizontal", language))
+            panel.undo_image_operation_action.setText(tr("Undo", language))
+        if self._home_mode_active:
+            self._status_bar.showMessage(
+                tr("Choose a tool or import images.", language)
+            )
+        elif self._is_wb_plot_workspace_active():
+            self._status_bar.showMessage(
+                tr("Opened WB Figure Layout workspace.", language)
+            )
+        elif not self._figure_workspace.isHidden():
+            self._status_bar.showMessage(
+                tr("Returned to Data Graphs workspace.", language)
+            )
+        else:
+            self._status_bar.showMessage(
+                tr("Opened Densitometry workspace.", language)
+            )
         if persist:
             self._persistence.remember_ui_state(language=language)
+
+    def _refresh_language_targets(self, language: str) -> None:
+        """Refresh every live tool independently so one failure cannot block others."""
+        # The visible WB Figure workspace is intentionally first. It is the
+        # most time-sensitive target when the toolbar selector changes.
+        candidates = [
+            self._figure_mode_window,
+            self._embedded_column_table,
+            self.param_panel,
+            self.results_panel,
+            self._image_transform_dialog,
+            *self._figure_windows,
+        ]
+        candidates.extend(
+            widget
+            for widget in QApplication.topLevelWidgets()
+            if widget is not self
+        )
+
+        refreshed: set[int] = set()
+        for target in candidates:
+            if target is None or id(target) in refreshed:
+                continue
+            setter = getattr(target, "set_language", None)
+            if not callable(setter):
+                continue
+            refreshed.add(id(target))
+            try:
+                setter(language)
+            except Exception:
+                log.exception(
+                    "Failed to refresh %s to language %s",
+                    type(target).__name__,
+                    language,
+                )
 
     def _on_language_changed(self, index: int) -> None:
         language = self._language_combo.itemData(index)
         self._set_language(str(language))
+
+    def _show_tutorial_selector(self) -> None:
+        chooser = TutorialModeDialog(self, language=self._language)
+        if chooser.exec() != QDialog.DialogCode.Accepted:
+            return
+        if chooser.selection is not None:
+            self._tutorial_controller.start(chooser.selection)
+
+    @staticmethod
+    def _tutorial_asset_paths() -> dict[str, Path]:
+        if getattr(sys, "frozen", False):
+            root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
+        else:
+            root = Path(__file__).resolve().parents[1]
+        tutorial_dir = root / "assets" / "tutorial"
+        return {
+            "loading": tutorial_dir / "tutorial_loading_control.tif",
+            "target": tutorial_dir / "tutorial_target_protein.tif",
+        }
+
+    def _select_tutorial_image(self, role: str) -> bool:
+        path = self._tutorial_asset_paths().get(role)
+        if path is None:
+            return False
+        resolved = path.expanduser().resolve()
+        for index, state in enumerate(self._slot_states):
+            current = state.get("path")
+            if current and Path(current).expanduser().resolve() == resolved:
+                self._set_active_slot_from_interaction(index)
+                return True
+        return False
+
+    def _load_tutorial_images(self) -> bool:
+        """Load bundled examples without changing the normal Import workflow."""
+        assets = self._tutorial_asset_paths()
+        missing_files = [path for path in assets.values() if not path.is_file()]
+        if missing_files:
+            QMessageBox.critical(
+                self,
+                tr("Tutorial Images Missing", self._language),
+                tr(
+                    "The built-in tutorial images could not be found. Please reinstall the application.",
+                    self._language,
+                ),
+            )
+            return False
+
+        loaded_paths = {
+            str(Path(state["path"]).expanduser().resolve())
+            for state in self._slot_states
+            if state.get("path")
+        }
+        required_new_slots = sum(
+            str(path.resolve()) not in loaded_paths for path in assets.values()
+        )
+        if required_new_slots > self._available_image_slot_count():
+            QMessageBox.information(
+                self,
+                tr("Tutorial Needs Two Image Windows", self._language),
+                tr(
+                    "The tutorial needs two free image windows. Remove enough currently open images, then click Import Images again.",
+                    self._language,
+                ),
+            )
+            return False
+
+        ordered_paths = [assets["loading"], assets["target"]]
+        self._complete_upload(
+            results=[],
+            selected_paths=ordered_paths,
+            direct_tiffs=ordered_paths,
+            unsupported=[],
+        )
+        tutorial_paths = {str(path.resolve()) for path in ordered_paths}
+        now_loaded = {
+            str(Path(state["path"]).expanduser().resolve())
+            for state in self._slot_states
+            if state.get("path")
+        }
+        if not tutorial_paths.issubset(now_loaded):
+            return False
+        self._select_tutorial_image("loading")
+        self._status_bar.showMessage(
+            tr(
+                "Loaded the built-in Loading Control and Target Protein tutorial images.",
+                self._language,
+            ),
+            5000,
+        )
+        return True
 
     def _toggle_files_panel(self) -> None:
         self._set_files_panel_collapsed(not self._files_panel_collapsed)
@@ -901,7 +1389,7 @@ class MainWindow(QMainWindow):
         if self.param_panel.parentWidget() is not self._param_panel_host:
             self.param_panel.setParent(self._param_panel_host)
             self._param_panel_layout.addWidget(self.param_panel)
-        self._param_panel_host.setVisible(True)
+        self._sync_param_panel_visibility()
 
     def _dock_param_panel_in_wb_plot(self) -> None:
         if self._figure_mode_window is None:
@@ -922,6 +1410,116 @@ class MainWindow(QMainWindow):
         self._analyze_toolbar_group.setVisible(visible)
         self._analyze_toolbar_gap.setVisible(visible)
 
+    def _set_import_toolbar_visible(self, visible: bool) -> None:
+        """Expose image import only inside a selected workspace."""
+        self._open_toolbar_action.setVisible(visible)
+
+    def _show_home_page(self) -> None:
+        """Restore the blank-canvas Home shell without clearing loaded images."""
+        self._home_mode_active = True
+        self._mode_container.setCurrentWidget(self._main_splitter)
+        if self._figure_mode_window is not None:
+            self._figure_mode_window.set_context_controls_widget(None)
+        self._restore_param_panel()
+        self._figure_workspace.setVisible(False)
+        self._sync_param_panel_visibility()
+        self._results_dock.setVisible(False)
+        self._set_import_toolbar_visible(True)
+        self._set_analyze_toolbar_visible(False)
+        self._workspace_toolbar_action.setVisible(True)
+        self._set_workspace_focus_target("image")
+        self._status_bar.showMessage(
+            tr("Choose a tool or import images.", self._language)
+        )
+
+    def _restore_initial_home_after_tutorial(self) -> None:
+        """Discard tutorial artifacts and reproduce the fresh-launch Home UI."""
+        self._active_slot_index = None
+        self._image_path = None
+        self._lane_rects.clear()
+        self._band_roi = None
+        self._auto_detections = []
+        for index, panel in enumerate(self._image_panels):
+            self._slot_states[index] = {
+                "path": None,
+                "selected": False,
+                "lane_rects": [],
+                "band_roi": None,
+                "auto_detections": [],
+                "image_operation_history": [],
+            }
+            self._reset_canvas_widget(panel.canvas)
+            panel.set_filename("")
+        self.canvas = self._image_panels[0].canvas
+        self._refresh_image_panel_layout()
+        self._converted_documents.clear()
+        self._refresh_uploaded_files_list()
+        self.results_panel.clear()
+
+        if self._embedded_column_table is not None:
+            self._embedded_column_table.set_figure_preview_host(None)
+            self._embedded_column_table.deleteLater()
+        self._embedded_column_table = None
+        self._figure_windows.clear()
+        self._clear_container_layout(self._figure_table_host)
+        self._clear_container_layout(self._figure_preview_host)
+        self._figure_table_placeholder = QLabel(
+            tr("Figure Generation table will appear here.", self._language)
+        )
+        self._figure_table_placeholder.setStyleSheet(
+            "color: #6E8494; font-size: 11px; padding: 10px;"
+        )
+        self._figure_table_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._figure_table_host_layout.addWidget(self._figure_table_placeholder)
+        self._figure_preview_placeholder = QLabel(
+            tr("Generated figure preview will appear here.", self._language)
+        )
+        self._figure_preview_placeholder.setStyleSheet(
+            "color: #6E8494; font-size: 11px; padding: 10px;"
+        )
+        self._figure_preview_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._figure_preview_host_layout.addWidget(self._figure_preview_placeholder)
+
+        if self._figure_mode_window is not None:
+            self._figure_mode_window.set_context_controls_widget(None)
+            self._figure_mode_window.setParent(None)
+            self._figure_mode_window.deleteLater()
+        self._figure_mode_window = None
+        self._clear_container_layout(self._wb_plot_workspace_host)
+        self._wb_plot_placeholder = QLabel(
+            tr("WB Plot Figure Generation will appear here.", self._language)
+        )
+        self._wb_plot_placeholder.setStyleSheet(
+            "color: #6E8494; font-size: 11px; padding: 10px;"
+        )
+        self._wb_plot_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._wb_plot_workspace_layout.addWidget(self._wb_plot_placeholder)
+
+        self._show_home_page()
+        self._set_files_panel_collapsed(True, persist=False)
+        self._status_bar.showMessage(
+            tr("Choose a tool or import images.", self._language)
+        )
+
+    def _on_densitometry_mode(self) -> None:
+        """Open the analysis-first view of the existing densitometry workspace."""
+        self._home_mode_active = False
+        self._mode_container.setCurrentWidget(self._main_splitter)
+        self._set_import_toolbar_visible(True)
+        if self._figure_mode_window is not None:
+            self._figure_mode_window.set_context_controls_widget(None)
+        self._figure_workspace.setVisible(False)
+        self._restore_param_panel()
+        self._results_dock.setVisible(True)
+        self._set_analyze_toolbar_visible(True)
+        self._act_analyze.setEnabled(self._band_roi is not None)
+        self._workspace_toolbar_action.setVisible(True)
+        self._set_workspace_focus_target("image")
+        self._status_bar.showMessage(
+            tr("Opened Densitometry workspace.", self._language),
+            3000,
+        )
+
     def _show_figure_workspace(self, page: str = "densitometry") -> None:
         self._figure_workspace.setVisible(True)
         if page == "wb_plot":
@@ -929,11 +1527,12 @@ class MainWindow(QMainWindow):
             self._results_dock.setVisible(False)
             self._dock_param_panel_in_wb_plot()
         else:
+            self._figure_workspace_stack.setCurrentWidget(self._densitometry_figure_page)
             if self._figure_mode_window is not None:
                 self._figure_mode_window.set_context_controls_widget(None)
             self._restore_param_panel()
-            self._figure_workspace_stack.setCurrentWidget(self._densitometry_figure_page)
             self._results_dock.setVisible(True)
+            self._act_analyze.setEnabled(self._band_roi is not None)
         total = max(sum(self._workspace_splitter.sizes()), 1)
         left = max(420, int(total * 0.50 if page == "wb_plot" else total * 0.58))
         right = max(360, total - left)
@@ -995,6 +1594,12 @@ class MainWindow(QMainWindow):
         table_window.setParent(self)
         table_window.set_figure_preview_host(self._figure_preview_host)
         table_window.panelFocusRequested.connect(self._on_workspace_panel_focus_requested)
+        table_window.activeTargetRowChanged.connect(
+            self._tutorial_controller.notify_table_row_selected
+        )
+        table_window.tutorialEvent.connect(
+            self._tutorial_controller.notify_column_table_event
+        )
         self._embedded_column_table = table_window
         table_window.set_language(self._language)
         self._figure_windows = [table_window]
@@ -1002,20 +1607,33 @@ class MainWindow(QMainWindow):
         self._set_workspace_focus_target("table")
 
     def _on_figure_generation_clicked(self) -> None:
+        self._home_mode_active = False
+        self._set_import_toolbar_visible(True)
         self._set_analyze_toolbar_visible(True)
-        self._mode_container.setCurrentIndex(0)
+        self._workspace_toolbar_action.setVisible(True)
+        self._mode_container.setCurrentWidget(self._main_splitter)
         self._show_figure_workspace("densitometry")
         if self._embedded_column_table is not None:
             self._set_workspace_focus_target("table")
-            self._status_bar.showMessage("Returned to Densitometry Figure Generation workspace.", 3000)
+            self._status_bar.showMessage(
+                tr("Returned to Data Graphs workspace.", self._language),
+                3000,
+            )
             return
 
-        chooser = FigureTypeDialog(self)
-        chooser.set_language(self._language)
-        if chooser.exec() != QDialog.DialogCode.Accepted:
-            return
-
-        selection = chooser.selection
+        tutorial_direct_column = (
+            self._tutorial_controller.active
+            and self._tutorial_controller.mode == "densitometry"
+            and self._tutorial_controller.current_step_key == "create_column_table"
+        )
+        if tutorial_direct_column:
+            selection = "column"
+        else:
+            chooser = FigureTypeDialog(self)
+            chooser.set_language(self._language)
+            if chooser.exec() != QDialog.DialogCode.Accepted:
+                return
+            selection = chooser.selection
         if selection == "grouped":
             QMessageBox.information(
                 self,
@@ -1026,9 +1644,21 @@ class MainWindow(QMainWindow):
         if selection != "column":
             return
 
-        setup = ColumnSetupDialog(self)
+        tutorial_column_defaults = (
+            self._tutorial_controller.active
+            and self._tutorial_controller.mode == "densitometry"
+        )
+        setup = ColumnSetupDialog(
+            self,
+            default_samples=3,
+            default_replicates=2 if tutorial_column_defaults else 3,
+        )
         setup.set_language(self._language)
+        if tutorial_direct_column:
+            self._tutorial_controller.notify_column_setup_opened()
         if setup.exec() != QDialog.DialogCode.Accepted:
+            if tutorial_direct_column:
+                self._tutorial_controller.notify_column_setup_cancelled()
             return
 
         setup_values = setup.get_input()
@@ -1051,6 +1681,7 @@ class MainWindow(QMainWindow):
             f"Opened integrated Column table workspace: {setup_values.samples} sample(s) × {setup_values.replicates} replicate(s).",
             4000,
         )
+        self._tutorial_controller.notify_column_table_ready()
 
     def _loaded_slot_indices(self) -> list[int]:
         return [idx for idx, state in enumerate(self._slot_states) if state["path"]]
@@ -1150,6 +1781,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _reset_canvas_widget(canvas: ImageCanvas) -> None:
+        canvas.clear_tutorial_roi_hint()
         canvas._scene.clear()
         canvas._pixmap_item = None
         canvas._pixmap_original_size = None
@@ -1161,6 +1793,7 @@ class MainWindow(QMainWindow):
         canvas._auto_band_labels.clear()
         canvas._manual_band_labels.clear()
         canvas._auto_lane_frames.clear()
+        canvas._final_crop_item = None
         canvas._rotation_mode = False
         canvas._rotation_dragging = False
         canvas._rotation_angle_deg = 0.0
@@ -1210,10 +1843,7 @@ class MainWindow(QMainWindow):
         self.canvas = self._image_panels[slot_index].canvas
         self.canvas.set_interaction_mode(self._current_mode)
         self._load_slot_state(slot_index)
-        if self.param_panel.get_mode() == "auto":
-            self._act_analyze.setEnabled(bool(self._auto_detections))
-        else:
-            self._act_analyze.setEnabled(self._band_roi is not None)
+        self._act_analyze.setEnabled(self._band_roi is not None)
         self._refresh_rotation_controls()
         self._sync_image_transform_dialog()
 
@@ -1226,8 +1856,11 @@ class MainWindow(QMainWindow):
         self._slot_states[slot_index]["selected"] = checked
 
     def _set_panel_transform_enabled(self, slot_index: int, enabled: bool) -> None:
-        self._image_panels[slot_index].transform_btn.setEnabled(enabled)
-        self._image_panels[slot_index].rotate_btn.setEnabled(enabled)
+        panel = self._image_panels[slot_index]
+        panel.transform_btn.setEnabled(enabled)
+        panel.rotate_btn.setEnabled(enabled)
+        panel.zoom_out_btn.setEnabled(enabled)
+        panel.zoom_in_btn.setEnabled(enabled)
 
     def _refresh_image_panel_layout(self) -> None:
         loaded = self._loaded_slot_indices()
@@ -1323,6 +1956,17 @@ class MainWindow(QMainWindow):
         self._set_active_slot_from_interaction(slot_index)
         self._show_image_transform_dialog()
 
+    def _on_panel_zoom_requested(self, slot_index: int, *, zoom_in: bool) -> None:
+        """Zoom one image panel and make it the active Densitometry image."""
+        if slot_index not in self._loaded_slot_indices():
+            return
+        self._set_active_slot_from_interaction(slot_index)
+        canvas = self._image_panels[slot_index].canvas
+        if zoom_in:
+            canvas.zoom_in()
+        else:
+            canvas.zoom_out()
+
     def _on_panel_custom_rotate_requested(self, slot_index: int) -> None:
         if slot_index not in self._loaded_slot_indices():
             return
@@ -1357,10 +2001,12 @@ class MainWindow(QMainWindow):
     def _on_roi_changed_for_slot(self, slot_index: int, roi: QRectF) -> None:
         self._set_active_slot_from_interaction(slot_index)
         self._on_roi_changed(roi)
+        self._tutorial_controller.notify_roi_changed()
 
     def _on_band_roi_changed_for_slot(self, slot_index: int, band_roi: QRectF) -> None:
         self._set_active_slot_from_interaction(slot_index)
         self._on_band_roi_changed(band_roi)
+        self._tutorial_controller.notify_band_roi_changed()
 
     def _on_auto_rois_changed_for_slot(self, slot_index: int, detections: list[dict]) -> None:
         self._set_active_slot_from_interaction(slot_index)
@@ -1571,23 +2217,43 @@ class MainWindow(QMainWindow):
 
     def _on_wb_plot_mode(self) -> None:
         """Show WB Plot generation beside the active WB image viewer."""
+        self._home_mode_active = False
+        self._set_import_toolbar_visible(True)
         self._set_analyze_toolbar_visible(False)
-        self._mode_container.setCurrentIndex(0)
+        self._workspace_toolbar_action.setVisible(True)
+        self._mode_container.setCurrentWidget(self._main_splitter)
         if self._figure_mode_window is None:
             from gui.figure_mode_window import FigureModeWindow
 
             self._clear_container_layout(self._wb_plot_workspace_host)
-            self._figure_mode_window = FigureModeWindow(self._wb_plot_workspace_host)
-            self._figure_mode_window.set_language(self._language)
+            self._figure_mode_window = FigureModeWindow(
+                self._wb_plot_workspace_host,
+                language=self._language,
+            )
             self._figure_mode_window.set_active_image_provider(self._active_wb_plot_source)
+            self._figure_mode_window.set_auto_fit_detection_handler(
+                self._run_wb_plot_auto_fit_detection
+            )
+            self._figure_mode_window.set_auto_fit_overlay_handler(
+                self._set_wb_plot_auto_fit_overlay
+            )
             self._figure_mode_window.set_fixed_roi_request_handler(self._on_add_fixed_wb_plot_roi)
             self._figure_mode_window.set_fixed_roi_cancel_handler(self._on_cancel_fixed_wb_plot_roi)
             self._figure_mode_window.set_fixed_roi_size_selected_handler(self._on_select_fixed_wb_plot_roi_size)
             self._figure_mode_window.set_focus_request_handler(lambda: self._set_workspace_focus_target("figure"))
+            self._figure_mode_window.workflowEvent.connect(
+                self._tutorial_controller.notify_wb_event
+            )
             self._wb_plot_workspace_layout.addWidget(self._figure_mode_window, 1)
+        # Always resynchronise on entry. This covers both a workspace created
+        # after the language changed and an existing workspace shown again.
+        self._figure_mode_window.set_language(self._language)
         self._show_figure_workspace("wb_plot")
         self._set_workspace_focus_target("figure")
-        self._status_bar.showMessage("Opened WB Plot Figure Generation workspace.", 3000)
+        self._status_bar.showMessage(
+            tr("Opened WB Figure Layout workspace.", self._language),
+            3000,
+        )
 
     def _on_add_fixed_wb_plot_roi(self) -> QSizeF | None:
         if self._image_path is None:
@@ -1758,7 +2424,59 @@ class MainWindow(QMainWindow):
             "roi": QRectF(roi),
             "lane_count": 1,
             "image_transform": image_transform_to_dict(self.canvas.get_image_transform_params()),
+            "auto_detections": self._clone_auto_detections(self._auto_detections),
+            "image_size": self.canvas.image_scene_size(),
         }
+
+    def _run_wb_plot_auto_fit_detection(
+        self,
+        expected_lane_count: int | None,
+        reuse_existing: bool,
+    ) -> dict[str, object]:
+        """Run/reuse guided detection without changing densitometry mode."""
+        source = self._active_wb_plot_source()
+        if source.get("error"):
+            return source
+
+        if reuse_existing and self._auto_detections:
+            source["reused"] = True
+            return source
+
+        image_path = str(source["image_path"])
+        search_roi = source["roi"]
+        try:
+            detections, metadata = _run_auto_fit_guided_with_polarity_fallback(
+                image_path,
+                sensitivity=0.5,
+                search_roi=search_roi if isinstance(search_roi, QRectF) else None,
+                expected_lane_count=expected_lane_count,
+            )
+        except Exception as exc:
+            log.exception("WB Plot Auto-Fit detection failed")
+            return {"error": f"Band Auto-Fit detection failed: {exc}"}
+
+        self._auto_detections = self._normalize_auto_detections(detections)
+        if self._active_slot_index is not None:
+            self._slot_states[self._active_slot_index]["auto_detections"] = (
+                self._clone_auto_detections(self._auto_detections)
+            )
+        self.canvas.set_auto_edit_mode(True)
+        self.canvas.set_auto_detect_overlays(self._auto_detections)
+        source["auto_detections"] = self._clone_auto_detections(self._auto_detections)
+        source["metadata"] = metadata
+        source["reused"] = False
+        return source
+
+    def _set_wb_plot_auto_fit_overlay(self, crop: QRectF | None) -> None:
+        """Show/clear Auto-Fit review overlays in the active source viewer."""
+        if crop is None:
+            self.canvas.clear_auto_overlays()
+            self.canvas.set_auto_edit_mode(False)
+            self._auto_detections = []
+            if self._active_slot_index is not None:
+                self._slot_states[self._active_slot_index]["auto_detections"] = []
+            return
+        self.canvas.set_final_crop_overlay(crop)
 
     def _is_wb_plot_workspace_active(self) -> bool:
         return (
@@ -1812,8 +2530,7 @@ class MainWindow(QMainWindow):
         self._act_open.triggered.connect(self._upload_files)
         self._act_image_transform.triggered.connect(self._show_image_transform_dialog)
         self._act_analyze.triggered.connect(self._run_analysis)
-        self._act_export_all.triggered.connect(self._export_all)
-        self._act_reset.triggered.connect(self._reset_all)
+        self._tutorial_btn.clicked.connect(self._show_tutorial_selector)
         self._language_combo.currentIndexChanged.connect(self._on_language_changed)
 
         for idx, panel in enumerate(self._image_panels):
@@ -1825,6 +2542,12 @@ class MainWindow(QMainWindow):
             panel.canvas.panel_interacted.connect(lambda i=idx: self._set_active_slot_from_interaction(i))
             panel.canvas.roi_cleared.connect(lambda i=idx: self._on_canvas_roi_cleared_for_slot(i))
             panel.select_checkbox.toggled.connect(lambda checked, i=idx: self._on_panel_checkbox_toggled(i, checked))
+            panel.zoom_out_btn.clicked.connect(
+                lambda _=False, i=idx: self._on_panel_zoom_requested(i, zoom_in=False)
+            )
+            panel.zoom_in_btn.clicked.connect(
+                lambda _=False, i=idx: self._on_panel_zoom_requested(i, zoom_in=True)
+            )
             panel.remove_btn.clicked.connect(lambda _, i=idx: self._on_panel_remove_requested(i))
             panel.transform_btn.clicked.connect(lambda _, i=idx: self._on_panel_transform_requested(i))
             panel.rotate_custom_action.triggered.connect(
@@ -1893,6 +2616,7 @@ class MainWindow(QMainWindow):
             f"Autofilled {inserted_count} value(s) into {target_desc}.",
             4000,
         )
+        self._tutorial_controller.notify_autofill_completed()
 
     # ── Actions ────────────────────────────────────────────────────────────────
 
@@ -2021,6 +2745,7 @@ class MainWindow(QMainWindow):
         if target_slot is None:
             return False
         try:
+            log.info("Opening uploaded TIFF in viewer slot %d: %s", target_slot + 1, image_path)
             if self._active_slot_index is not None:
                 self._save_active_slot_state()
 
@@ -2045,11 +2770,7 @@ class MainWindow(QMainWindow):
             loaded_after = self._loaded_slot_indices()
             if len(loaded_after) > 1:
                 self._status_bar.showMessage(
-                    f"Loaded: {image_path.name}  —  viewer showing {len(loaded_after)} images. Select one image for Auto Detect."
-                )
-            elif self._current_mode == "auto":
-                self._status_bar.showMessage(
-                    f"Loaded: {image_path.name}  —  click Auto Detect to preview lanes and bands."
+                    f"Loaded: {image_path.name}  —  viewer showing {len(loaded_after)} images. Select one image to draw ROIs."
                 )
             else:
                 self._status_bar.showMessage(
@@ -2058,11 +2779,17 @@ class MainWindow(QMainWindow):
             log.info("Loaded converted TIFF: %s", image_path)
             return True
         except Exception as e:
+            log.exception("Image load error for %s", image_path)
             QMessageBox.critical(self, "Image Load Error", str(e))
-            log.error("Image load error: %s", e)
             return False
 
     def _upload_files(self) -> None:
+        if self._tutorial_controller.handle_import_request():
+            return
+        if self._upload_thread is not None and self._upload_thread.isRunning():
+            self._status_bar.showMessage("An upload is already in progress — please wait.")
+            return
+
         converter_error: Exception | None = None
         try:
             self._ensure_direct_exporter()
@@ -2074,7 +2801,7 @@ class MainWindow(QMainWindow):
         exts = " ".join(f"*{ext}" for ext in sorted(doc_exts | tiff_exts))
         paths, _ = QFileDialog.getOpenFileNames(
             self,
-            "Upload Files",
+            tr("Import Images", self._language),
             str(self._persistence.default_open_dir()),
             f"Image Lab docs + TIFF ({exts});;All files (*)",
         )
@@ -2095,20 +2822,114 @@ class MainWindow(QMainWindow):
                 f"Image Lab document conversion is unavailable:\n\n{converter_error}",
             )
             docs = []
-            results = []
         elif docs:
-            try:
-                results = self._direct_exporter.export_documents(
-                    docs,
-                    self._conversion_cache_dir,
-                    debug=False,
-                    log=lambda message: log.info("[Upload/Convert] %s", message),
-                )
-            except Exception as e:
-                QMessageBox.critical(self, "Conversion Error", str(e))
-                return
-        else:
-            results = []
+            self._start_upload_conversion(
+                docs=docs,
+                selected_paths=selected_paths,
+                direct_tiffs=direct_tiffs,
+                unsupported=unsupported,
+            )
+            return
+
+        self._complete_upload(
+            results=[],
+            selected_paths=selected_paths,
+            direct_tiffs=direct_tiffs,
+            unsupported=unsupported,
+        )
+
+    def _start_upload_conversion(
+        self,
+        *,
+        docs: list[Path],
+        selected_paths: list[Path],
+        direct_tiffs: list[Path],
+        unsupported: list[Path],
+    ) -> None:
+        """Start document conversion in a worker thread and keep the UI responsive."""
+        self._pending_upload = {
+            "selected_paths": list(selected_paths),
+            "direct_tiffs": list(direct_tiffs),
+            "unsupported": list(unsupported),
+        }
+        self._act_open.setEnabled(False)
+        self._status_bar.showMessage(
+            f"Uploading {len(selected_paths)} file(s) — converting Image Lab documents…"
+        )
+        log.info(
+            "Upload started: %d selected, %d document(s), %d direct TIFF(s)",
+            len(selected_paths),
+            len(docs),
+            len(direct_tiffs),
+        )
+
+        thread = QThread(self)
+        worker = UploadConversionWorker(
+            self._direct_exporter,
+            docs,
+            self._conversion_cache_dir,
+        )
+        self._upload_thread = thread
+        self._upload_worker = worker
+        worker.moveToThread(thread)
+
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._on_upload_progress)
+        worker.finished.connect(self._on_upload_conversion_done)
+        worker.error.connect(self._on_upload_conversion_error)
+        worker.finished.connect(worker.deleteLater)
+        worker.error.connect(worker.deleteLater)
+        worker.finished.connect(thread.quit)
+        worker.error.connect(thread.quit)
+        thread.finished.connect(self._on_upload_thread_finished)
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
+
+    def _on_upload_progress(self, message: str) -> None:
+        log.info("[Upload/Convert] %s", message)
+        if message.startswith("Parsing file:"):
+            self._status_bar.showMessage(f"Uploading — {message}")
+
+    def _on_upload_conversion_done(self, results: list) -> None:
+        pending = self._pending_upload
+        self._pending_upload = None
+        if pending is None:
+            log.error("Upload conversion finished without pending upload context")
+            return
+        log.info("Upload conversion finished; updating the file list and viewers")
+        try:
+            self._complete_upload(
+                results=results,
+                selected_paths=pending["selected_paths"],
+                direct_tiffs=pending["direct_tiffs"],
+                unsupported=pending["unsupported"],
+            )
+        except Exception as exc:
+            log.exception("Upload post-processing failed")
+            self._status_bar.showMessage("Upload post-processing failed — see error dialog.")
+            QMessageBox.critical(self, "Upload Error", str(exc))
+
+    def _on_upload_conversion_error(self, message: str) -> None:
+        self._pending_upload = None
+        log.error("Upload conversion failed: %s", message)
+        self._status_bar.showMessage("Upload failed — see error dialog.")
+        QMessageBox.critical(self, "Conversion Error", message)
+
+    def _on_upload_thread_finished(self) -> None:
+        self._act_open.setEnabled(True)
+        self._upload_worker = None
+        self._upload_thread = None
+
+    def _complete_upload(
+        self,
+        *,
+        results: list,
+        selected_paths: list[Path],
+        direct_tiffs: list[Path],
+        unsupported: list[Path],
+    ) -> None:
+        """Apply completed conversion results on the main Qt thread."""
+        log.info("Upload post-processing started")
 
         display_tiff_by_source: dict[str, Path] = {}
         failed_sources: list[str] = []
@@ -2134,7 +2955,9 @@ class MainWindow(QMainWindow):
             }
             display_tiff_by_source[source_key] = tiff_path
 
+        log.info("Refreshing Uploaded Files list")
         self._refresh_uploaded_files_list()
+        log.info("Uploaded Files list refreshed with %d item(s)", len(self._converted_documents))
 
         if failed_sources:
             QMessageBox.warning(
@@ -2170,12 +2993,14 @@ class MainWindow(QMainWindow):
             }
             was_empty = not existing_loaded
             loaded_new = 0
-            for display_tiff in selected_display_tiffs:
+            deferred_tiffs: list[Path] = []
+            for display_index, display_tiff in enumerate(selected_display_tiffs):
                 key = str(display_tiff.expanduser().resolve())
                 if key in existing_loaded:
                     self._load_converted_tiff_into_viewer(display_tiff, clear_results_on_first=False)
                     continue
                 if self._available_image_slot_count() <= 0:
+                    deferred_tiffs.extend(selected_display_tiffs[display_index:])
                     break
                 if self._load_converted_tiff_into_viewer(
                     display_tiff,
@@ -2184,14 +3009,35 @@ class MainWindow(QMainWindow):
                     existing_loaded.add(key)
                     loaded_new += 1
 
-            if loaded_new == 0 and self._available_image_slot_count() <= 0:
+            if deferred_tiffs:
+                if self._files_panel_collapsed:
+                    self._set_files_panel_collapsed(False)
                 self._status_bar.showMessage(
-                    f"Uploaded {len(paths)} file(s). Viewer already has {len(self._image_panels)} images; remove one to open another."
+                    f"Upload complete. {len(deferred_tiffs)} TIFF(s) are ready in Uploaded Files, "
+                    f"but all {len(self._image_panels)} image windows are full."
+                )
+                QMessageBox.information(
+                    self,
+                    "Upload Complete — Image Windows Full",
+                    f"The upload completed successfully, but all {len(self._image_panels)} image windows are already in use.\n\n"
+                    f"{len(deferred_tiffs)} new TIFF file(s) are ready in Uploaded Files. "
+                    "Remove an image from a window, then click the file there to open it.",
+                )
+                log.info(
+                    "Upload complete: %d TIFF(s) deferred because all %d viewers are full",
+                    len(deferred_tiffs),
+                    len(self._image_panels),
+                )
+            else:
+                self._status_bar.showMessage(
+                    f"Upload complete — opened {loaded_new} new image(s); "
+                    f"{len(selected_display_tiffs)} selected TIFF(s) are ready."
                 )
         else:
             self._status_bar.showMessage(
-                f"Uploaded {len(paths)} file(s). TIFF images are ready in the left file list."
+                f"Uploaded {len(selected_paths)} file(s). TIFF images are ready in the left file list."
             )
+        log.info("Upload post-processing finished")
 
     def _on_uploaded_file_clicked(self, item: QListWidgetItem) -> None:
         source_key = item.data(Qt.ItemDataRole.UserRole)
@@ -2470,7 +3316,16 @@ class MainWindow(QMainWindow):
         image_path: str,
         display_transform: ImageTransformParams,
     ) -> None:
+        # load_image() fits every newly loaded pixmap to the viewport.  Custom
+        # rotation creates a new, expanded TIFF, so that automatic fit used to
+        # make the WB image visibly jump to a different zoom level.  Preserve
+        # the existing view transform so source pixels keep the same on-screen
+        # scale before and after the operation.
+        view_transform = canvas.transform()
         canvas.load_image(image_path)
+        canvas.setTransform(view_transform)
+        if canvas._pixmap_item is not None:
+            canvas.centerOn(canvas._pixmap_item)
         canvas.set_image_transform_params(display_transform)
 
     def _clear_roi(self) -> None:
@@ -2490,7 +3345,7 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage("ROI cleared.")
 
     def _on_canvas_roi_cleared_for_slot(self, slot_index: int) -> None:
-        """Called when the user right-clicks a non-band area in manual mode to reset the ROI set.
+        """Reset state after the canvas cancels or clears a manual ROI set.
         The canvas has already cleared its visual items; this updates the main-window state."""
         if slot_index != self._active_slot_index:
             # Make the right-clicked panel active first so state is consistent
@@ -2503,80 +3358,6 @@ class MainWindow(QMainWindow):
         self._save_active_slot_state()
         self._refresh_detection_actions()
         self._act_analyze.setEnabled(False)
-
-    def _export_all(self) -> None:
-        default_dir = self._persistence.default_results_export_dir()
-        chosen_dir = QFileDialog.getExistingDirectory(
-            self,
-            "Export All",
-            str(default_dir),
-        )
-        if not chosen_dir:
-            return
-        export_dir = Path(chosen_dir).expanduser().resolve()
-
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        excel_path = self._ensure_unique_path(export_dir / f"WB_export_all_{stamp}.xlsx")
-        figure_path = self._ensure_unique_path(export_dir / f"WB_export_figure_{stamp}.pdf")
-
-        results_df = self.results_panel.to_dataframe()
-        table_window = self._active_column_table_window()
-        table_df = table_window.table_to_dataframe() if table_window is not None else pd.DataFrame()
-
-        try:
-            with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-                results_df.to_excel(writer, sheet_name="Results", index=False)
-                table_df.to_excel(writer, sheet_name="Table", index=False)
-        except Exception as exc:
-            QMessageBox.critical(self, "Export All Error", f"Failed to export Excel:\n{exc}")
-            return
-
-        figure_exported = False
-        if table_window is not None and table_window.has_generated_figure():
-            try:
-                figure_exported = table_window.export_current_figure_pdf(figure_path)
-            except Exception as exc:
-                QMessageBox.warning(self, "Export All", f"Excel exported, but figure export failed:\n{exc}")
-
-        if figure_exported:
-            QMessageBox.information(
-                self,
-                "Export All",
-                f"Saved:\n- {excel_path}\n- {figure_path}",
-            )
-        else:
-            QMessageBox.information(
-                self,
-                "Export All",
-                f"Saved Excel:\n- {excel_path}\n\nFigure PDF was skipped (no generated figure available).",
-            )
-
-    def _reset_all(self) -> None:
-        """Reset all ROIs, lanes, and results."""
-        self._active_slot_index = None
-        self._image_path = None
-        self._lane_rects.clear()
-        self._band_roi = None
-        self._auto_detections = []
-        for idx, panel in enumerate(self._image_panels):
-            self._reset_canvas_widget(panel.canvas)
-            panel.set_filename("")
-            self._slot_states[idx]["path"] = None
-            self._slot_states[idx]["selected"] = False
-            self._slot_states[idx]["lane_rects"] = []
-            self._slot_states[idx]["band_roi"] = None
-            self._slot_states[idx]["auto_detections"] = []
-            self._slot_states[idx]["image_operation_history"] = []
-
-        self._refresh_image_panel_layout()
-        self._current_mode = self.param_panel.get_mode()
-        self.results_panel.clear()
-        self.param_panel.set_auto_detect_enabled(False)
-        self.param_panel.set_auto_edit_enabled(False)
-        self.param_panel.set_detect_enabled(False)
-        self.canvas.set_auto_edit_mode(False)
-        self._act_analyze.setEnabled(False)
-        self._status_bar.showMessage("Reset. Upload files to begin.")
 
     # ── ROI / lane helpers ─────────────────────────────────────────────────────
 
@@ -2592,20 +3373,6 @@ class MainWindow(QMainWindow):
                 f"WB Plot ROI set ({roi.width():.0f} × {roi.height():.0f} px) — select a blot target and press Return/Enter."
             )
             return
-        if self.param_panel.get_mode() == "auto":
-            self._auto_detections = []
-            self._band_roi = None
-            self.canvas.clear_auto_overlays()
-            self.canvas.set_auto_edit_mode(False)
-            self.param_panel.set_auto_edit_enabled(False)
-            self._act_analyze.setEnabled(False)
-            self._status_bar.showMessage(
-                f"Auto search ROI set ({roi.width():.0f} × {roi.height():.0f} px) — click Auto Detect to search inside it."
-            )
-            return
-        if self.param_panel.get_mode() != "manual":
-            return
-
         self._auto_detections = []
         self._band_roi = None
         self._act_analyze.setEnabled(False)
@@ -2642,39 +3409,7 @@ class MainWindow(QMainWindow):
         )
 
     def _on_params_changed(self) -> None:
-        """Lane count or polarity changed → recalculate lanes."""
-        mode = self.param_panel.get_mode()
-        if mode != self._current_mode:
-            self._current_mode = mode
-            self._persistence.remember_ui_state(mode=mode)
-            self.canvas.set_interaction_mode(mode)
-            self.canvas.clear_roi()
-            self._lane_rects.clear()
-            self._band_roi = None
-            self._auto_detections = []
-            self.param_panel.set_auto_edit_enabled(False)
-            self.canvas.set_auto_edit_mode(False)
-            self._act_analyze.setEnabled(False)
-            self._refresh_detection_actions()
-            if self._image_path is None:
-                self._status_bar.showMessage("Upload files to begin.")
-            elif mode == "auto":
-                self._status_bar.showMessage("Switched to Auto mode — click Auto Detect.")
-            else:
-                self._status_bar.showMessage("Switched to Manual mode — draw a lane ROI to continue.")
-            return
-
-        if mode == "auto":
-            if self._auto_detections:
-                self.canvas.clear_auto_overlays()
-                self._auto_detections = []
-                self.param_panel.set_auto_edit_enabled(False)
-                self.canvas.set_auto_edit_mode(False)
-                self._act_analyze.setEnabled(False)
-                self._status_bar.showMessage("Auto settings changed — click Auto Detect again.")
-            self._refresh_detection_actions()
-            return
-
+        """Lane count changed → recalculate the manual lane subdivision."""
         roi = self.canvas.get_roi()
         if roi:
             if self._is_wb_plot_workspace_active():
@@ -2738,14 +3473,6 @@ class MainWindow(QMainWindow):
         if len(loaded) == 1:
             self._set_active_slot(loaded[0])
 
-        if self.param_panel.get_mode() != "manual":
-            QMessageBox.information(
-                self,
-                "Manual Mode",
-                "Switch to Manual mode to use Detect Bands, or click Auto Detect instead.",
-            )
-            return
-
         roi = self.canvas.get_roi()
         if roi is None:
             QMessageBox.warning(self, "No ROI", "Draw a lane ROI first.")
@@ -2802,215 +3529,15 @@ class MainWindow(QMainWindow):
             f"Band {target_band} detected — review overlay, then click Analyze."
         )
 
-    def _auto_detect(self) -> None:
-        from core.band_detector import auto_detect_all, auto_detect_guided
-
-        loaded = self._loaded_slot_indices()
-        if not loaded and self._image_path is None:
-            QMessageBox.warning(self, "No Image", "Upload files first.")
-            return
-        if len(loaded) > 1 and self._active_slot_index is None:
-            QMessageBox.warning(
-                self,
-                "Select Image",
-                "Please select an image first before running Auto Detect.",
-            )
-            return
-        if len(loaded) == 1:
-            self._set_active_slot(loaded[0])
-        elif self._active_slot_index is not None:
-            self._set_active_slot(self._active_slot_index)
-
-        if self._image_path is None:
-            QMessageBox.warning(self, "No Image", "Upload files first.")
-            return
-        if self.param_panel.get_mode() != "auto":
-            QMessageBox.information(
-                self,
-                "Auto Mode",
-                "Switch to Auto mode to use Auto Detect.",
-            )
-            return
-
-        params = self.param_panel.get_params()
-        sensitivity = params.get("sensitivity", 0.5)
-        # In Auto mode, a drawn main ROI acts only as an optional search region.
-        # It restricts where auto-detect looks for lanes/bands and is not used as
-        # the final measurement ROI.
-        search_rect = self.canvas.get_roi()
-        has_guided_constraints = any(
-            value is not None
-            for value in (
-                search_rect,
-                params.get("auto_lane_count"),
-                params.get("target_band_row"),
-                params.get("expected_rows_per_lane"),
-            )
-        )
-
-        if has_guided_constraints:
-            log.info(
-                "Auto detect: guided mode search_roi=%s lanes=%s rows_per_lane=%s target_row=%s",
-                search_rect,
-                params.get("auto_lane_count"),
-                params.get("expected_rows_per_lane"),
-                params.get("target_band_row"),
-            )
-            self._status_bar.showMessage("Running guided auto detection…")
-            detections, metadata = auto_detect_guided(
-                self._image_path,
-                dark_on_light=False,
-                sensitivity=sensitivity,
-                search_rect=search_rect,
-                expected_lane_count=params.get("auto_lane_count"),
-                target_band_row=params.get("target_band_row"),
-                expected_rows_per_lane=params.get("expected_rows_per_lane"),
-                return_metadata=True,
-            )
-        else:
-            self._status_bar.showMessage("Running auto detection…")
-            detections, metadata = auto_detect_all(
-                self._image_path,
-                dark_on_light=False,
-                sensitivity=sensitivity,
-                return_metadata=True,
-            )
-
-        total_bands = sum(len(lane["bands"]) for lane in detections)
-        if not detections or total_bands == 0:
-            self.canvas.clear_auto_overlays()
-            self._auto_detections = []
-            self.param_panel.set_auto_edit_enabled(False)
-            failure_stage = metadata.get("failure_stage")
-            if failure_stage == "search_region":
-                detail = "The search ROI is too small for auto detection. Draw a larger ROI or clear it to use the full image."
-            elif failure_stage == "horizontal_zone":
-                detail = (
-                    "Auto detection could not find a strong horizontal band zone.\n"
-                    "Try increasing sensitivity or use Manual mode."
-                )
-            elif failure_stage == "lanes":
-                detail = (
-                    "Auto detection found the band-rich region, but could not resolve lanes.\n"
-                    "Try adjusting sensitivity or switch to Manual mode."
-                )
-            elif failure_stage == "bands":
-                detail = (
-                    "Auto detection found lane candidates, but no bands were retained.\n"
-                    "Try increasing sensitivity, or use Detect Bands / Manual mode."
-                )
-            else:
-                detail = (
-                    "Auto detection found no lanes or bands.\n"
-                    "Try adjusting sensitivity or use Manual mode."
-                )
-            QMessageBox.warning(
-                self,
-                "Nothing Detected",
-                detail,
-            )
-            self._status_bar.showMessage(
-                f"Auto detection failed at stage: {failure_stage or 'unknown'}."
-            )
-            self._act_analyze.setEnabled(False)
-            return
-
-        self._lane_rects.clear()
-        self._band_roi = None
-        self._auto_detections = self._normalize_auto_detections(detections)
-        self.canvas.set_auto_detect_overlays(self._auto_detections)
-        self.canvas.set_auto_edit_mode(False)
-        self.param_panel.set_auto_edit_enabled(True)
-
-        n_lanes = len(self._auto_detections)
-        if has_guided_constraints:
-            self._status_bar.showMessage(
-                f"Guided auto detected {n_lanes} lane(s), {total_bands} band(s) total — review overlay, then click Analyze."
-            )
-        else:
-            self._status_bar.showMessage(
-                f"Auto detected {n_lanes} lane(s), {total_bands} band(s) total — review overlay, then click Analyze."
-            )
-        self._act_analyze.setEnabled(True)
-
-    def _on_auto_edit_toggled(self, enabled: bool) -> None:
-        self.canvas.set_auto_edit_mode(enabled)
-        if enabled:
-            self.param_panel.set_auto_edit_mode(True)
-            self._status_bar.showMessage("Edit Auto ROIs enabled — move/resize boxes, switch to Add or Delete as needed.")
-        else:
-            self.param_panel.set_auto_edit_mode(False)
-            total_bands = sum(len(lane["bands"]) for lane in self._auto_detections)
-            self._status_bar.showMessage(f"Auto ROI editing finished — {total_bands} ROI(s) ready for analysis.")
-
-    def _on_auto_edit_tool_changed(self, tool: str) -> None:
-        self.canvas.set_auto_edit_tool(tool)
-        if self.param_panel.get_mode() == "auto" and self._auto_detections:
-            self._status_bar.showMessage(f"Edit Auto ROIs: {tool.title()} tool active.")
-
     def _on_auto_rois_changed(self, detections: list[dict]) -> None:
+        """Keep WB Plot Auto-Fit review overlays synchronized with the source canvas."""
         self._auto_detections = self._normalize_auto_detections(detections, preserve_target_row=True)
         self.canvas.set_auto_detect_overlays(self._auto_detections)
         total_bands = sum(len(lane["bands"]) for lane in self._auto_detections)
-        self._act_analyze.setEnabled(total_bands > 0)
-        self._status_bar.showMessage(f"Edited auto ROIs — {total_bands} band ROI(s) currently selected.")
-
-    def _ordered_auto_bands_row_major(self) -> list[tuple[dict, dict]]:
-        records: list[tuple[dict, dict]] = []
-        for lane in self._auto_detections:
-            for band in lane.get("bands", []):
-                records.append((lane, band))
-        if not records:
-            return []
-
-        if all(band.get("row_index") is not None for _, band in records):
-            records.sort(
-                key=lambda item: (
-                    int(item[1].get("row_index", 10**9)),
-                    item[1]["band_rect"].center().x(),
-                    item[1]["band_rect"].center().y(),
-                    item[0]["lane_index"],
-                )
-            )
-            return records
-
-        heights = sorted(max(1.0, item[1]["band_rect"].height()) for item in records)
-        median_height = heights[len(heights) // 2] if heights else 10.0
-        row_tolerance = max(4.0, median_height * 0.55)
-
-        by_y = sorted(
-            records,
-            key=lambda item: (
-                item[1]["band_rect"].center().y(),
-                item[1]["band_rect"].center().x(),
-            ),
+        self._act_analyze.setEnabled(False)
+        self._status_bar.showMessage(
+            f"Edited WB Plot Auto-Fit ROIs — {total_bands} band ROI(s) currently selected."
         )
-        rows: list[dict] = []
-        for lane, band in by_y:
-            cy = band["band_rect"].center().y()
-            if not rows:
-                rows.append({"center_y": cy, "items": [(lane, band)]})
-                continue
-            current = rows[-1]
-            if abs(cy - float(current["center_y"])) <= row_tolerance:
-                members = current["items"]
-                members.append((lane, band))
-                current["center_y"] = sum(member[1]["band_rect"].center().y() for member in members) / len(members)
-            else:
-                rows.append({"center_y": cy, "items": [(lane, band)]})
-
-        ordered: list[tuple[dict, dict]] = []
-        for row in rows:
-            row_items = sorted(
-                row["items"],
-                key=lambda item: (
-                    item[1]["band_rect"].center().x(),
-                    item[1]["band_rect"].center().y(),
-                    item[0]["lane_index"],
-                ),
-            )
-            ordered.extend(row_items)
-        return ordered
 
     # ── Analysis ───────────────────────────────────────────────────────────────
 
@@ -3036,67 +3563,34 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No Image", "Please open an image first.")
             return
 
-        params = self.param_panel.get_params()
-        mode = params.get("mode", "manual")
-
         roi = self.canvas.get_roi()
         band_roi = self.canvas.get_band_roi()
-        if mode == "manual":
-            if roi is None:
-                QMessageBox.warning(self, "No ROI", "Please draw a large lane ROI first.")
-                return
-            if band_roi is None:
-                QMessageBox.warning(self, "No Band ROI", "Please draw a band ROI first.")
-                return
-        else:
-            if not self._auto_detections:
-                QMessageBox.warning(self, "No Detection", "Run Auto Detect first.")
-                return
+        if roi is None:
+            QMessageBox.warning(self, "No ROI", "Please draw a large lane ROI first.")
+            return
+        if band_roi is None:
+            QMessageBox.warning(self, "No Band ROI", "Please draw a band ROI first.")
+            return
 
-        total_band_rois = 0
-        if mode == "auto":
-            band_rois = []
-            ordered_bands = self._ordered_auto_bands_row_major()
-
-            for band_number, (lane, band) in enumerate(ordered_bands, start=1):
-                rect = band["band_rect"]
-                band_label = f"#{band_number}"
-                band_rois.append({
-                    "lane": lane["lane_index"],
-                    "band": band_number,
-                    "band_label": band_label,
-                    "x": rect.x(),
-                    "y": rect.y(),
-                    "width": rect.width(),
-                    "height": rect.height(),
-                })
-            total_band_rois = len(band_rois)
-        else:
-            try:
-                band_rois = self._construct_band_rois()
-            except ValueError as e:
-                QMessageBox.critical(self, "ROI Error", str(e))
-                return
-            total_band_rois = len(band_rois)
+        try:
+            band_rois = self._construct_band_rois()
+        except ValueError as e:
+            QMessageBox.critical(self, "ROI Error", str(e))
+            return
+        total_band_rois = len(band_rois)
 
         self._persistence.remember_analysis_debug(
             image_path=self._image_path,
-            mode=mode,
-            lane_count=len(self._lane_rects) if mode == "manual" else len(self._auto_detections),
+            mode="manual",
+            lane_count=len(self._lane_rects),
             band_count=total_band_rois,
         )
         image_pixels = None
         image_transform = None
         if self.canvas.has_quantitative_image_transform():
             image_pixels = self.canvas.current_analysis_pixels()
-            params = self.canvas.get_image_transform_params()
             image_transform = image_transform_to_dict(
-                ImageTransformParams(
-                    low=params.low,
-                    high=params.high,
-                    gamma=params.gamma,
-                    inverted=False,
-                )
+                self.canvas.get_analysis_transform_params()
             )
         self._start_measurement_worker(
             self._image_path,
@@ -3174,6 +3668,7 @@ class MainWindow(QMainWindow):
                 f"Done — {len(df)} band ROI(s) measured. Results are in memory; use Export Results to save."
             )
             log.info("Analysis complete: %s rows measured in-memory", len(df))
+            self._tutorial_controller.notify_analysis_started()
 
         except Exception as e:
             QMessageBox.critical(self, "Result Error", f"Failed to compile results:\n{e}")
@@ -3192,5 +3687,14 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
+        if self._upload_thread is not None and self._upload_thread.isRunning():
+            self._status_bar.showMessage("Upload is still finishing — close the app after it completes.")
+            QMessageBox.information(
+                self,
+                "Upload in Progress",
+                "An upload is still being converted. Please wait for it to finish before closing the app.",
+            )
+            event.ignore()
+            return
         shutil.rmtree(self._conversion_cache_dir, ignore_errors=True)
         super().closeEvent(event)

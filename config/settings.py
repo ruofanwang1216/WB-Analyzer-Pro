@@ -1,7 +1,7 @@
 from pathlib import Path
 
 APP_NAME = "WB Analyzer Pro"
-VERSION = "0.2.2"
+VERSION = "0.3.0"
 
 PROJECT_FOLDER_NAME = APP_NAME
 # App-managed settings belong in macOS Application Support, not the user's

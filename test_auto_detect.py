@@ -8,11 +8,18 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 from PySide6.QtWidgets import QApplication, QTableWidgetItem
-from PySide6.QtCore import QPointF, QRectF, QSizeF, Qt
+from PySide6.QtCore import QPointF, QRectF, QSizeF
 from PySide6.QtGui import QColor, QPixmap
-from PySide6.QtTest import QTest
 
-from core.band_detector import auto_detect_all, auto_detect_guided, group_auto_detected_rows, _build_auto_params, _soft_constrain_lane_centers, _merge_oversplit_lanes
+from core.band_detector import (
+    auto_detect_all,
+    auto_detect_guided,
+    group_auto_detected_rows,
+    _build_auto_params,
+    _soft_constrain_lane_centers,
+    _merge_oversplit_lanes,
+    _refine_band_horizontal_signal_bounds,
+)
 from gui.figure_generation import ColumnTableWindow
 from gui.main_window import MainWindow
 from gui.image_canvas import ImageCanvas
@@ -82,6 +89,29 @@ class AutoDetectPerLaneBandRoiTests(unittest.TestCase):
         self.assertNotEqual(band_1_rect.height(), band_2_rect.height())
         self.assertEqual(detections[0]["bands"][0]["row_index"], 1)
         self.assertEqual(detections[1]["bands"][0]["row_index"], 2)
+
+    def test_faint_left_shoulder_is_traced_beyond_initial_lane_box(self) -> None:
+        x = np.arange(120, dtype=np.float64)
+        core = np.exp(-0.5 * ((x - 60.0) / 7.0) ** 2)
+        left_shoulder = np.zeros_like(x)
+        left_shoulder[28:50] = np.linspace(0.045, 0.16, 22)
+        profile = core + left_shoulder
+        signal = np.zeros((30, 120), dtype=np.float64)
+        signal[10:20, :] = profile
+        bands = [{
+            "band_index": 1,
+            "peak_y": 15.0,
+            "band_rect": QRectF(45, 8, 35, 14),
+            "signal_rect": QRectF(45, 10, 35, 10),
+        }]
+
+        _refine_band_horizontal_signal_bounds(signal, bands)
+
+        signal_rect = bands[0]["signal_rect"]
+        self.assertLessEqual(signal_rect.x(), 31.0)
+        self.assertGreater(signal_rect.width(), 35.0)
+        self.assertEqual(bands[0]["band_rect"].x(), signal_rect.x())
+        self.assertEqual(bands[0]["band_rect"].width(), signal_rect.width())
 
     def test_group_auto_detected_rows_handles_missing_bands_without_reindexing_per_lane(self) -> None:
         detections = [
@@ -248,7 +278,9 @@ class AutoDetectPerLaneBandRoiTests(unittest.TestCase):
         lane_bands = [
             {
                 "band_index": 1,
+                "peak_y": 16.0,
                 "band_rect": QRectF(6, 12, 18, 8),
+                "signal_rect": QRectF(8, 14, 12, 4),
             },
         ]
 
@@ -278,6 +310,11 @@ class AutoDetectPerLaneBandRoiTests(unittest.TestCase):
         self.assertEqual(len(detections), 1)
         self.assertEqual(tuple(detections[0]["lane_rect"].getRect()), (46.0, 50.0, 18.0, 60.0))
         self.assertEqual(tuple(detections[0]["bands"][0]["band_rect"].getRect()), (46.0, 62.0, 18.0, 8.0))
+        self.assertEqual(detections[0]["bands"][0]["peak_y"], 66.0)
+        self.assertEqual(
+            tuple(detections[0]["bands"][0]["signal_rect"].getRect()),
+            (48.0, 64.0, 12.0, 4.0),
+        )
 
     def test_guided_auto_detect_groups_rows_without_harmonizing_band_rectangles(self) -> None:
         lane_candidates = [
@@ -361,8 +398,6 @@ class AutoDetectPerLaneBandRoiTests(unittest.TestCase):
     def test_main_window_keeps_existing_target_row_assignments(self) -> None:
         window = MainWindow()
         try:
-            window.param_panel._set_mode("auto")
-            window.param_panel._auto_target_row.setValue(2)
             detections = [
                 {
                     "lane_index": 1,
@@ -395,92 +430,43 @@ class AutoDetectPerLaneBandRoiTests(unittest.TestCase):
         self.assertEqual([band["row_index"] for band in normalized[0]["bands"]], [2])
         self.assertEqual([band["row_index"] for band in normalized[1]["bands"]], [2])
 
-    def test_main_window_uses_default_auto_path_without_guided_constraints(self) -> None:
-        window = MainWindow()
-        detections = [
-            {
-                "lane_index": 1,
-                "lane_rect": QRectF(0, 0, 20, 100),
-                "bands": [{"band_index": 1, "row_index": 1, "band_rect": QRectF(0, 20, 20, 10)}],
-            },
-        ]
-        try:
-            window.param_panel._set_mode("auto")
-            window._image_path = "synthetic.png"
-            with (
-                patch.object(window.canvas, "get_roi", return_value=None),
-                patch("core.band_detector.auto_detect_all", return_value=(detections, {"failure_stage": None, "message": ""})) as default_mock,
-                patch("core.band_detector.auto_detect_guided") as guided_mock,
-            ):
-                window._auto_detect()
-        finally:
-            window.close()
-
-        default_mock.assert_called_once()
-        guided_mock.assert_not_called()
-        self.assertFalse(default_mock.call_args.kwargs["dark_on_light"])
-
-    def test_main_window_uses_guided_auto_path_when_constraints_are_present(self) -> None:
-        window = MainWindow()
-        detections = [
-            {
-                "lane_index": 1,
-                "lane_rect": QRectF(0, 0, 20, 100),
-                "bands": [{"band_index": 1, "row_index": 2, "band_rect": QRectF(0, 40, 20, 12)}],
-            },
-        ]
-        try:
-            window.param_panel._set_mode("auto")
-            window.param_panel._auto_target_row.setValue(2)
-            window._image_path = "synthetic.png"
-            with (
-                patch.object(window.canvas, "get_roi", return_value=None),
-                patch("core.band_detector.auto_detect_all") as default_mock,
-                patch("core.band_detector.auto_detect_guided", return_value=(detections, {"failure_stage": None, "message": ""})) as guided_mock,
-            ):
-                window._auto_detect()
-        finally:
-            window.close()
-
-        guided_mock.assert_called_once()
-        default_mock.assert_not_called()
-        self.assertEqual(guided_mock.call_args.kwargs["target_band_row"], 2)
-        self.assertFalse(guided_mock.call_args.kwargs["dark_on_light"])
-
-    def test_auto_param_panel_returns_none_for_empty_guided_fields(self) -> None:
+    def test_densitometry_param_panel_is_manual_only(self) -> None:
         panel = ParamPanel()
         try:
-            panel._set_mode("auto")
+            panel.set_mode("auto")
             params = panel.get_params()
         finally:
             panel.close()
 
-        self.assertIsNone(params["auto_lane_count"])
-        self.assertIsNone(params["expected_rows_per_lane"])
-        self.assertIsNone(params["target_band_row"])
-        self.assertEqual(params["polarity"], "Light on Dark")
-        self.assertEqual(panel.polarity.text(), "Light on Dark")
-        self.assertEqual(panel._auto_polarity.text(), "Light on Dark")
+        self.assertEqual(panel.get_mode(), "manual")
+        self.assertEqual(params["mode"], "manual")
+        self.assertFalse(hasattr(panel, "_auto_mode_radio"))
+        self.assertFalse(hasattr(panel, "_auto_widget"))
+        self.assertNotIn("auto_lane_count", params)
+        self.assertNotIn("expected_rows_per_lane", params)
+        self.assertNotIn("target_band_row", params)
+        self.assertFalse(hasattr(panel, "_auto_detect_btn"))
 
-    def test_auto_param_panel_backspace_clears_field_and_allows_retyping(self) -> None:
-        panel = ParamPanel()
+    def test_densitometry_large_roi_keeps_manual_lane_workflow(self) -> None:
+        roi = QRectF(5, 5, 90, 60)
+        with (
+            patch("gui.main_window.AppPersistence.update_config", return_value=None),
+            patch("gui.main_window.AppPersistence.read_config", return_value={"ui": {}}),
+        ):
+            window = MainWindow()
         try:
-            panel._set_mode("auto")
-            panel._auto_lane_count.setValue(6)
-            editor = panel._auto_lane_count.lineEdit()
-            self.assertIsNotNone(editor)
-            assert editor is not None
-            editor.setFocus()
-            QTest.keyClick(editor, Qt.Key.Key_Backspace)
-            QApplication.processEvents()
-            self.assertIsNone(panel.get_params()["auto_lane_count"])
+            window.param_panel.lane_count.setValue(3)
+            with patch("gui.main_window._run_auto_fit_guided_with_polarity_fallback") as detect_mock:
+                window._on_roi_changed(roi)
 
-            editor.setText("8")
-            panel._auto_lane_count.interpretText()
-            QApplication.processEvents()
-            self.assertEqual(panel.get_params()["auto_lane_count"], 8)
+            detect_mock.assert_not_called()
+            self.assertFalse(hasattr(window, "_auto_detect"))
+            self.assertEqual(len(window._lane_rects), 3)
+            self.assertTrue(all(rect.width() == 30 for rect in window._lane_rects))
+            self.assertEqual(window._auto_detections, [])
+            self.assertFalse(window._act_analyze.isEnabled())
         finally:
-            panel.close()
+            window.close()
 
     def test_manual_param_panel_saves_and_selects_fixed_roi_size(self) -> None:
         panel = ParamPanel()
@@ -597,7 +583,9 @@ class AutoDetectPerLaneBandRoiTests(unittest.TestCase):
 
             self.assertEqual(window._samples, 3)
             self.assertEqual(window._replicates, 1)
-            self.assertEqual(window._table.rowCount(), 2)
+            # Each replicate now contains target, loading-control, and
+            # calculated normalized-result rows.
+            self.assertEqual(window._table.rowCount(), 3)
             self.assertEqual(window._table.columnCount(), 5)
             self.assertEqual(window._group_names, ["Group A", "Group B", "Group C"])
             self.assertIsNone(window._negative_control_group_index)
@@ -612,12 +600,12 @@ class AutoDetectPerLaneBandRoiTests(unittest.TestCase):
             values = {
                 (0, 2): "10",
                 (1, 2): "2",
-                (2, 2): "12",
-                (3, 2): "3",
                 (0, 3): "18",
                 (1, 3): "3",
-                (2, 3): "20",
-                (3, 3): "4",
+                (3, 2): "12",
+                (4, 2): "3",
+                (3, 3): "20",
+                (4, 3): "4",
             }
             for (row, col), text in values.items():
                 window._table.item(row, col).setText(text)
@@ -632,14 +620,23 @@ class AutoDetectPerLaneBandRoiTests(unittest.TestCase):
                 summary_df = pd.read_excel(export_path, sheet_name="Figure Summary")
 
             self.assertEqual(
-                raw_df[["Replicate", "Band Type", "Group A", "Group B"]].to_dict("records"),
+                raw_df[["Replicate", "Band Type"]].to_dict("records"),
                 [
-                    {"Replicate": "Replicate 1", "Band Type": "Target band", "Group A": 10, "Group B": 18},
-                    {"Replicate": "Replicate 1", "Band Type": "Loading control", "Group A": 2, "Group B": 3},
-                    {"Replicate": "Replicate 2", "Band Type": "Target band", "Group A": 12, "Group B": 20},
-                    {"Replicate": "Replicate 2", "Band Type": "Loading control", "Group A": 3, "Group B": 4},
+                    {"Replicate": "Replicate 1", "Band Type": "Target band"},
+                    {"Replicate": "Replicate 1", "Band Type": "Loading control"},
+                    {"Replicate": "Replicate 1", "Band Type": "Normalized result"},
+                    {"Replicate": "Replicate 2", "Band Type": "Target band"},
+                    {"Replicate": "Replicate 2", "Band Type": "Loading control"},
+                    {"Replicate": "Replicate 2", "Band Type": "Normalized result"},
                 ],
             )
+            self.assertTrue(
+                np.allclose(
+                    raw_df.loc[[0, 1, 3, 4], ["Group A", "Group B"]],
+                    [[10, 18], [2, 3], [12, 20], [3, 4]],
+                )
+            )
+            self.assertTrue(raw_df.loc[[2, 5], ["Group A", "Group B"]].isna().all().all())
             self.assertEqual(detail_df["Group"].tolist(), ["Group A", "Group A", "Group B", "Group B"])
             self.assertEqual(detail_df["Replicate"].tolist(), [1, 2, 1, 2])
             self.assertTrue(np.allclose(detail_df["Target/Loading Ratio"], [5.0, 4.0, 6.0, 5.0]))
@@ -660,64 +657,6 @@ class AutoDetectPerLaneBandRoiTests(unittest.TestCase):
             self.assertTrue(np.allclose(summary_df["Baseline Mean (Target/Loading)"], [4.5, 4.5]))
         finally:
             window.close()
-
-    def test_main_window_passes_guided_parameters(self) -> None:
-        window = MainWindow()
-        detections = [
-            {
-                "lane_index": 1,
-                "lane_rect": QRectF(0, 0, 20, 100),
-                "bands": [{"band_index": 1, "row_index": 3, "band_rect": QRectF(0, 40, 20, 12)}],
-            },
-        ]
-        try:
-            window.param_panel._set_mode("auto")
-            window.param_panel._auto_lane_count.setValue(6)
-            window.param_panel._auto_expected_rows.setValue(4)
-            window.param_panel._auto_target_row.setValue(3)
-            window._image_path = "synthetic.png"
-            with (
-                patch.object(window.canvas, "get_roi", return_value=None),
-                patch("core.band_detector.auto_detect_all") as default_mock,
-                patch("core.band_detector.auto_detect_guided", return_value=(detections, {"failure_stage": None, "message": ""})) as guided_mock,
-            ):
-                window._auto_detect()
-        finally:
-            window.close()
-
-        guided_mock.assert_called_once()
-        self.assertEqual(guided_mock.call_args.kwargs["expected_lane_count"], 6)
-        self.assertEqual(guided_mock.call_args.kwargs["expected_rows_per_lane"], 4)
-        self.assertEqual(guided_mock.call_args.kwargs["target_band_row"], 3)
-        self.assertFalse(guided_mock.call_args.kwargs["dark_on_light"])
-        default_mock.assert_not_called()
-
-    def test_main_window_uses_guided_auto_path_when_search_roi_is_present(self) -> None:
-        window = MainWindow()
-        detections = [
-            {
-                "lane_index": 1,
-                "lane_rect": QRectF(40, 50, 20, 100),
-                "bands": [{"band_index": 1, "row_index": 1, "band_rect": QRectF(40, 70, 20, 10)}],
-            },
-        ]
-        search_rect = QRectF(40, 50, 120, 140)
-        try:
-            window.param_panel._set_mode("auto")
-            window._image_path = "synthetic.png"
-            with (
-                patch.object(window.canvas, "get_roi", return_value=search_rect),
-                patch("core.band_detector.auto_detect_all") as default_mock,
-                patch("core.band_detector.auto_detect_guided", return_value=(detections, {"failure_stage": None, "message": ""})) as guided_mock,
-            ):
-                window._auto_detect()
-        finally:
-            window.close()
-
-        guided_mock.assert_called_once()
-        self.assertEqual(guided_mock.call_args.kwargs["search_rect"], search_rect)
-        self.assertFalse(guided_mock.call_args.kwargs["dark_on_light"])
-        default_mock.assert_not_called()
 
     def test_guided_oversplit_merge_is_stronger_than_default(self) -> None:
         params = _build_auto_params(120, 120, 0.5)

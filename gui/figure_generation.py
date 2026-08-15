@@ -162,12 +162,20 @@ class ColumnInput:
 class ColumnSetupDialog(QDialog):
     """Modal input dialog for Column table dimensions."""
 
-    def __init__(self, parent=None) -> None:
+    def __init__(
+        self,
+        parent=None,
+        *,
+        default_samples: int = 3,
+        default_replicates: int = 3,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Column Setup")
         self.setModal(True)
         self.setMinimumWidth(300)
         self._language = LANG_EN
+        self._default_samples = max(1, int(default_samples))
+        self._default_replicates = max(1, int(default_replicates))
         self._build_ui()
 
     def set_language(self, language: str) -> None:
@@ -186,14 +194,14 @@ class ColumnSetupDialog(QDialog):
 
         self._samples_spin = QSpinBox()
         self._samples_spin.setRange(1, 999)
-        self._samples_spin.setValue(3)
+        self._samples_spin.setValue(self._default_samples)
         self._samples_spin.setPrefix("Samples: ")
         self._samples_spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(self._samples_spin)
 
         self._replicates_spin = QSpinBox()
         self._replicates_spin.setRange(1, 999)
-        self._replicates_spin.setValue(3)
+        self._replicates_spin.setValue(self._default_replicates)
         self._replicates_spin.setPrefix("Replicates: ")
         self._replicates_spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(self._replicates_spin)
@@ -201,6 +209,10 @@ class ColumnSetupDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
+        self._button_box = buttons
+        ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_button is not None:
+            ok_button.setObjectName("columnSetupOkButton")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
@@ -1669,6 +1681,8 @@ class _FiguresDialog(QDialog):
 class ColumnTableWindow(QMainWindow):
     """Editable Prism-style column table window."""
     panelFocusRequested = Signal(str)
+    activeTargetRowChanged = Signal(int)
+    tutorialEvent = Signal(str)
     _ROWS_PER_REPLICATE = 3
 
     def __init__(self, samples: int, replicates: int, parent=None) -> None:
@@ -1757,6 +1771,7 @@ class ColumnTableWindow(QMainWindow):
         top_row.addWidget(title)
         top_row.addStretch(1)
         self._negative_btn = QPushButton("Select Negative Control")
+        self._negative_btn.setObjectName("selectNegativeControlButton")
         self._negative_btn.setStyleSheet(
             "QPushButton {"
             "background-color: #E6EEF3;"
@@ -1913,6 +1928,8 @@ class ColumnTableWindow(QMainWindow):
         export_table_btn.clicked.connect(self._on_export_table_clicked)
         bottom_row.addWidget(export_table_btn)
         figures_btn = QPushButton("Figures Generation")
+        figures_btn.setObjectName("figuresGenerationButton")
+        self._figures_btn = figures_btn
         figures_btn.setStyleSheet(
             "QPushButton {"
             "background-color: #C2D3C8;"
@@ -2458,6 +2475,7 @@ class ColumnTableWindow(QMainWindow):
         if self._negative_btn is not None:
             self._negative_btn.setText("Click a Group Header…")
         self._set_hint("Negative control mode: click one group header at the top.")
+        self.tutorialEvent.emit("negative_control_requested")
 
     def _on_group_header_clicked(self, group_index: int) -> None:
         self.panelFocusRequested.emit("table")
@@ -2475,6 +2493,7 @@ class ColumnTableWindow(QMainWindow):
             self._refresh_header_visuals()
             self._refresh_row_and_column_highlights()
             self._set_hint(f"Negative control selected: {self._group_names[group_index]}")
+            self.tutorialEvent.emit("negative_control_selected")
 
     def _on_group_rename_requested(self, group_index: int) -> None:
         self._begin_inline_header_edit(group_index)
@@ -2640,6 +2659,7 @@ class ColumnTableWindow(QMainWindow):
             return False
         self._active_target_row = row
         self._refresh_row_and_column_highlights()
+        self.activeTargetRowChanged.emit(row)
         return True
 
     def has_active_target_row(self) -> bool:
@@ -2861,6 +2881,7 @@ class ColumnTableWindow(QMainWindow):
             # Geometry is only reliable after the new preview has entered the
             # layout, so fit on the next event-loop turn.
             QTimer.singleShot(0, self.fit_figure_preview)
+            self.tutorialEvent.emit("figure_generated")
             return
 
         dialog = _FiguresDialog(
@@ -2883,3 +2904,4 @@ class ColumnTableWindow(QMainWindow):
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+        self.tutorialEvent.emit("figure_generated")

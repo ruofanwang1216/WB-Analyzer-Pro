@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from PySide6.QtCore import Signal, Qt, QEvent, QSize, QSizeF
+from PySide6.QtCore import Signal, Qt, QSize, QSizeF
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QGroupBox,
-    QSpinBox, QAbstractSpinBox, QLineEdit, QPushButton,
-    QHBoxLayout, QLabel, QSizePolicy, QSlider,
+    QSpinBox, QAbstractSpinBox, QPushButton,
+    QHBoxLayout, QLabel, QSizePolicy,
     QListWidget, QListWidgetItem, QInputDialog, QToolButton,
 )
 from utils.i18n import LANG_EN, tr
@@ -33,95 +33,6 @@ _INACTIVE_BTN = """
 """
 
 _FIXED_ROI_NAME_ROLE = int(Qt.ItemDataRole.UserRole) + 1
-
-
-class OptionalSpinBox(QSpinBox):
-    """
-    Spin box that supports true empty input.
-    Empty text is treated as None by `value_or_none()`.
-    """
-
-    def __init__(self, *, placeholder_text: str, minimum: int = 0, maximum: int = 48, parent=None) -> None:
-        super().__init__(parent)
-        self._is_empty = True
-        self.setRange(minimum, maximum)
-        self.setKeyboardTracking(False)
-        self.setSpecialValueText("")
-
-        editor = self.lineEdit()
-        if editor is not None:
-            editor.setPlaceholderText(placeholder_text)
-            editor.textEdited.connect(self._on_text_edited)
-            editor.installEventFilter(self)
-
-        self.editingFinished.connect(self._on_editing_finished)
-        self.valueChanged.connect(self._on_value_changed)
-        super().setValue(minimum)
-        if self.lineEdit() is not None:
-            self.lineEdit().clear()
-
-    def keyPressEvent(self, event) -> None:  # type: ignore[override]
-        if event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
-            self.clear_value()
-            return
-        super().keyPressEvent(event)
-
-    def eventFilter(self, watched, event) -> bool:  # type: ignore[override]
-        editor = self.lineEdit()
-        if (
-            watched is editor
-            and event.type() == QEvent.Type.KeyPress
-            and event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete)
-        ):
-            self.clear_value()
-            return True
-        return super().eventFilter(watched, event)
-
-    def setValue(self, value: int) -> None:  # type: ignore[override]
-        self._is_empty = int(value) <= self.minimum()
-        super().setValue(value)
-        if self._is_empty and self.lineEdit() is not None:
-            self.lineEdit().clear()
-
-    def clear_value(self) -> None:
-        self._is_empty = True
-        self.setValue(self.minimum())
-
-    def value_or_none(self) -> int | None:
-        editor = self.lineEdit()
-        if editor is not None:
-            text = editor.text().strip()
-            if text:
-                try:
-                    parsed = int(text)
-                except ValueError:
-                    parsed = int(self.value())
-                if parsed > self.minimum():
-                    return parsed
-                return None
-
-        value = int(self.value())
-        if self._is_empty or value <= self.minimum():
-            return None
-        return value
-
-    def _on_text_edited(self, text: str) -> None:
-        self._is_empty = not text.strip()
-        if self._is_empty:
-            self.setValue(self.minimum())
-
-    def _on_editing_finished(self) -> None:
-        editor = self.lineEdit()
-        if editor is None:
-            return
-        text = editor.text().strip()
-        if not text:
-            self._is_empty = True
-            self.setValue(self.minimum())
-
-    def _on_value_changed(self, value: int) -> None:
-        if int(value) > self.minimum():
-            self._is_empty = False
 
 
 class ParamPanel(QWidget):
@@ -245,36 +156,6 @@ class ParamPanel(QWidget):
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(10)
 
-        # ── Manual Rotation ───────────────────────────────────────────────────
-        self._rotate_group = QGroupBox("Manual Rotation")
-        rotate_group = self._rotate_group
-        rotate_layout = QVBoxLayout(rotate_group)
-        rotate_layout.setContentsMargins(8, 6, 8, 8)
-        rotate_layout.setSpacing(6)
-
-        self._btn_custom_rotate = QPushButton("Custom Rotate")
-        self._btn_custom_rotate.clicked.connect(self.custom_rotate_requested)
-        self._btn_custom_rotate.setEnabled(False)
-        rotate_layout.addWidget(self._btn_custom_rotate)
-
-        rotate_actions = QHBoxLayout()
-        rotate_actions.setSpacing(6)
-        self._btn_rotate = QPushButton("Rotate")
-        self._btn_rotate.clicked.connect(self.rotate_requested)
-        self._btn_rotate.setEnabled(False)
-        rotate_actions.addWidget(self._btn_rotate)
-        self._btn_cancel_rotate = QPushButton("Cancel")
-        self._btn_cancel_rotate.clicked.connect(self.cancel_rotate_requested)
-        self._btn_cancel_rotate.setEnabled(False)
-        rotate_actions.addWidget(self._btn_cancel_rotate)
-        rotate_layout.addLayout(rotate_actions)
-
-        self._rotate_angle_label = QLabel("Angle: +0.00°")
-        self._rotate_angle_label.setStyleSheet("color: #6E8494; font-size: 9px;")
-        rotate_layout.addWidget(self._rotate_angle_label)
-
-        root.addWidget(rotate_group)
-
         # ── ROI Settings ────────────────────────────────────────────────────────
         self._roi_group = QGroupBox("ROI Settings")
         roi_layout = QVBoxLayout(self._roi_group)
@@ -379,10 +260,6 @@ class ParamPanel(QWidget):
     def set_language(self, language: str) -> None:
         """Refresh user-facing WB terminology without changing analysis state."""
         self._language = language
-        self._rotate_group.setTitle(tr("Manual Rotation", language))
-        self._btn_custom_rotate.setText(tr("Custom Rotate", language))
-        self._btn_rotate.setText(tr("Rotate", language))
-        self._btn_cancel_rotate.setText(tr("Cancel", language))
         self._roi_group.setTitle(tr("ROI Settings", language))
         self._lane_section_label.setText(tr("Lane Settings", language))
         self._lanes_label.setText(tr("Lanes:", language))
@@ -399,11 +276,11 @@ class ParamPanel(QWidget):
     # ── Public API ─────────────────────────────────────────────────────────────
 
     def get_mode(self) -> str:
-        """The ROI workflow is manual-only."""
+        """Densitometry uses the manual ROI workflow only."""
         return "manual"
 
     def set_mode(self, mode: str) -> None:
-        # Older saved preferences may contain "auto"; manual is now the only mode.
+        # Ignore legacy saved "auto" preferences.
         self._mode = "manual"
 
     def set_fixed_roi_request_handler(self, handler: Callable[[], dict[str, Any] | None]) -> None:
@@ -511,7 +388,7 @@ class ParamPanel(QWidget):
         return f"Fixed Lane ROI {count}"
 
     def set_wb_plot_simplified(self, enabled: bool) -> None:
-        """Show only rotation controls when embedded in WB Plot mode."""
+        """Hide densitometry-only controls while WB Plot mode is active."""
         self._roi_group.setVisible(not enabled)
         self._help_note.setVisible(not enabled)
 
@@ -535,21 +412,18 @@ class ParamPanel(QWidget):
             "polarity": "Light on Dark",
             "bands_per_lane": 1,
             "target_band": 1,
+            "sensitivity": 0.5,
         }
 
     def get_lane_count(self) -> int:
         return self.lane_count.value()
 
     def set_rotation_controls_enabled(self, enabled: bool) -> None:
-        self._btn_custom_rotate.setEnabled(enabled)
-        if not enabled:
-            self._btn_rotate.setEnabled(False)
-            self._btn_cancel_rotate.setEnabled(False)
-            self.set_rotation_angle(0.0)
+        # Rotation is controlled from each image panel's own menu.
+        return
 
     def set_rotation_mode_active(self, active: bool) -> None:
-        self._btn_rotate.setEnabled(active)
-        self._btn_cancel_rotate.setEnabled(active)
+        return
 
     def set_rotation_angle(self, angle_deg: float) -> None:
-        self._rotate_angle_label.setText(f"Angle: {angle_deg:+.2f}°")
+        return

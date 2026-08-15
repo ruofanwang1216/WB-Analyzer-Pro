@@ -40,7 +40,7 @@ class SourceRef:
     # Discriminator for the target model field
     field: Literal[
         "label", "mw_marker", "title", "panel_letter",
-        "condition_cell", "metadata_title", "blot", ""
+        "condition_cell", "condition_line", "metadata_title", "blot", ""
     ] = ""
 
     def key(self) -> tuple:
@@ -100,9 +100,16 @@ class BlotSlot:
     bounding_box: ImageBBox | None # IMAGE_PX; None until ROI is drawn
     lane_count: int = 4
     lane_rois: list[LaneROI] = field(default_factory=list)
+    # Optional equal-size source crops, one per lane. Auto-Fit uses these to
+    # align signal anchors by translation while retaining original pixels.
+    lane_crops: list[ImageBBox] = field(default_factory=list)
     display_width_pt: float | None = None
     display_height_pt: float | None = None
     image_transform: dict | None = None
+    # Lossless display-ready crop embedded in a saved blot file. When present,
+    # render/export use it so reopening cannot reinterpret TIFF polarity or
+    # tone controls differently from what the user saved.
+    saved_preview_path: str = ""
 
     # ── Convenience helpers ───────────────────────────────────────────────
 
@@ -154,6 +161,10 @@ class GlobalLayout:
     canvas_width_pt: float = 456.0
     panel_padding_pt: float = 12.0
     inter_panel_gap_pt: float = 28.0
+    # User-created multi-panel frames can flow left-to-right and use the
+    # first panel's antibody labels as one shared column after the last panel.
+    panel_layout: Literal["vertical", "horizontal"] = "vertical"
+    share_ib_labels: bool = False
 
     # Blot strip
     blot_height_pt: float = 18.0
@@ -162,6 +173,7 @@ class GlobalLayout:
     # Column widths
     mw_col_width_pt: float = 96.0
     label_col_width_pt: float = 120.0
+    ib_label_gap_pt: float = 6.0
 
     # Spacing
     title_spacing_pt: float = 18.0

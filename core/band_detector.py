@@ -272,72 +272,6 @@ def _find_band_rich_horizontal_zone(
     }
 
 
-def _build_lane_rois_from_peaks(
-    x_profile: np.ndarray,
-    peaks: np.ndarray,
-    lane_widths: np.ndarray,
-    img_h: int,
-    zone: tuple[int, int],
-    params: _AutoDetectParams,
-) -> list[dict]:
-    peaks = np.array(sorted(int(p) for p in peaks), dtype=int)
-    if len(peaks) == 0:
-        return []
-
-    y1, y2 = zone
-    valleys = []
-    for left_peak, right_peak in zip(peaks[:-1], peaks[1:]):
-        segment = x_profile[left_peak:right_peak + 1]
-        valleys.append(left_peak + int(np.argmin(segment)))
-
-    lane_bounds: list[tuple[int, int, int]] = []
-    for i, peak in enumerate(peaks):
-        local_width = max(params.lane_min_width, int(round(lane_widths[i])))
-        outer_half = max(params.lane_outer_width // 2, int(round(local_width * 0.8)))
-
-        if i == 0:
-            left = max(0, peak - outer_half)
-        else:
-            left = valleys[i - 1]
-
-        if i == len(peaks) - 1:
-            right = min(x_profile.size, peak + outer_half)
-        else:
-            right = valleys[i]
-
-        if right - left < params.lane_min_width:
-            deficit = params.lane_min_width - (right - left)
-            left = max(0, left - deficit // 2)
-            right = min(x_profile.size, right + deficit - deficit // 2)
-
-        lane_bounds.append((left, right, peak))
-
-    widths = [right - left for left, right, _ in lane_bounds]
-    if not widths:
-        return []
-
-    median_width = float(np.median(widths))
-    max_allowed = min(params.lane_max_width, int(round(median_width * params.lane_width_tol)))
-    min_allowed = max(params.lane_min_width, int(round(median_width * 0.45)))
-
-    lane_rois = []
-    for left, right, peak in lane_bounds:
-        width = right - left
-        if width < min_allowed or width > max_allowed:
-            continue
-        if peak < params.lane_edge_margin or peak > x_profile.size - params.lane_edge_margin:
-            continue
-        lane_rois.append({
-            "peak": peak,
-            "score": float(x_profile[peak]),
-            "x_range": (left, right),
-            "lane_rect": QRectF(left, y1, width, y2 - y1),
-        })
-
-    lane_rois.sort(key=lambda item: item["x_range"][0])
-    return lane_rois
-
-
 def _find_lane_peaks_in_band_slice(
     signal: np.ndarray,
     center_row: int,
@@ -1026,17 +960,24 @@ def _build_band_rois_from_peak_list(
     left, right = lane_x_range
     band_rois = []
     for band_index, peak in enumerate(sorted(int(p) for p in peaks), start=1):
-        start, end = _find_band_boundaries(y_profile, peak)
+        signal_start, signal_end = _find_band_boundaries(y_profile, peak)
         if clip_windows is not None and band_index - 1 < len(clip_windows):
             clip_top, clip_bottom = clip_windows[band_index - 1]
-            start = max(start, clip_top)
-            end = min(end, max(clip_top + 1, clip_bottom - 1))
-        start = max(0, start - params.band_padding)
-        end = min(y_profile.size - 1, end + params.band_padding)
+            signal_start = max(signal_start, clip_top)
+            signal_end = min(signal_end, max(clip_top + 1, clip_bottom - 1))
+        start = max(0, signal_start - params.band_padding)
+        end = min(y_profile.size - 1, signal_end + params.band_padding)
         height = max(4, end - start)
         band_rois.append({
             "band_index": band_index,
+            "peak_y": float(zone_y1 + peak),
             "band_rect": QRectF(left, zone_y1 + start, right - left, height),
+            "signal_rect": QRectF(
+                left,
+                zone_y1 + signal_start,
+                right - left,
+                max(1, signal_end - signal_start),
+            ),
         })
     return band_rois
 
@@ -1232,15 +1173,104 @@ def _build_band_rois_from_peaks(
     left, right = lane_x_range
     band_rois = []
     for band_index, peak in enumerate(sorted(int(p) for p in peaks), start=1):
-        start, end = _find_band_boundaries(y_profile, peak)
-        start = max(0, start - params.band_padding)
-        end = min(y_profile.size - 1, end + params.band_padding)
+        signal_start, signal_end = _find_band_boundaries(y_profile, peak)
+        start = max(0, signal_start - params.band_padding)
+        end = min(y_profile.size - 1, signal_end + params.band_padding)
         height = max(4, end - start)
         band_rois.append({
             "band_index": band_index,
+            "peak_y": float(zone_y1 + peak),
             "band_rect": QRectF(left, zone_y1 + start, right - left, height),
+            "signal_rect": QRectF(
+                left,
+                zone_y1 + signal_start,
+                right - left,
+                max(1, signal_end - signal_start),
+            ),
         })
     return band_rois
+
+
+def _refine_band_horizontal_signal_bounds(
+    signal: np.ndarray,
+    bands: list[dict],
+) -> None:
+    """Measure the full band width, including a faint one-sided shoulder."""
+    img_h, img_w = signal.shape
+    for band in bands:
+        rect = band.get("signal_rect")
+        if rect is None:
+            continue
+        initial_left = max(0, int(np.floor(rect.x())))
+        initial_right = min(img_w, int(np.ceil(rect.x() + rect.width())))
+        search_padding = max(4, int(round(rect.width() * 0.45)))
+        search_left = max(0, initial_left - search_padding)
+        search_right = min(img_w, initial_right + search_padding)
+        top = max(0, int(np.floor(rect.y())))
+        bottom = min(img_h, int(np.ceil(rect.y() + rect.height())))
+        patch = signal[top:bottom, search_left:search_right]
+        if patch.size == 0 or patch.shape[1] < 2:
+            continue
+        profile = patch.mean(axis=0).astype(np.float64)
+        profile = _smooth(profile, 1.0)
+        baseline = float(np.percentile(profile, 15.0))
+        peak_value = float(profile.max())
+        dynamic_range = peak_value - baseline
+        if dynamic_range <= 0:
+            continue
+
+        # The high threshold identifies a trustworthy band core. The lower
+        # hysteresis threshold then follows a gradual shoulder/tail until two
+        # consecutive background samples are reached.
+        high_threshold = baseline + dynamic_range * 0.12
+        low_values = profile[profile <= np.percentile(profile, 25.0)]
+        noise_mad = (
+            float(np.median(np.abs(low_values - np.median(low_values))))
+            if low_values.size
+            else 0.0
+        )
+        low_threshold = baseline + max(dynamic_range * 0.04, noise_mad * 2.5)
+        core_left = max(0, initial_left - search_left)
+        core_right = min(profile.size, initial_right - search_left)
+        if core_right <= core_left:
+            continue
+        peak_index = core_left + int(np.argmax(profile[core_left:core_right]))
+        if profile[peak_index] < high_threshold:
+            continue
+
+        def trace_boundary(direction: int) -> int:
+            index = peak_index
+            last_signal = peak_index
+            below_count = 0
+            while 0 <= index + direction < profile.size:
+                index += direction
+                if profile[index] >= low_threshold:
+                    last_signal = index
+                    below_count = 0
+                else:
+                    below_count += 1
+                    if below_count >= 2:
+                        break
+            return last_signal
+
+        left_index = trace_boundary(-1)
+        right_index = trace_boundary(1)
+        signal_left = search_left + left_index
+        signal_width = max(1, right_index - left_index + 1)
+        band["signal_rect"] = QRectF(
+            signal_left,
+            rect.y(),
+            signal_width,
+            rect.height(),
+        )
+        display_rect = band.get("band_rect")
+        if display_rect is not None:
+            band["band_rect"] = QRectF(
+                signal_left,
+                display_rect.y(),
+                signal_width,
+                display_rect.height(),
+            )
 
 
 def _detect_bands_in_lane(
@@ -1326,6 +1356,7 @@ def _detect_bands_in_lane(
         if len(peaks) == 0:
             return [], {"failure_stage": "bands", "message": "no band peaks found in lane"}
         bands = _build_band_rois_from_peaks(y_smooth, peaks, lane_x_range, zone_y1, params)
+    _refine_band_horizontal_signal_bounds(signal, bands)
     return bands, {
         "failure_stage": None,
         "message": "",
@@ -1352,6 +1383,16 @@ def _copy_and_offset_detections(
                 rect.width(),
                 rect.height(),
             )
+            if band.get("peak_y") is not None:
+                band_copy["peak_y"] = float(search_y1 + float(band["peak_y"]))
+            signal_rect = band.get("signal_rect")
+            if signal_rect is not None:
+                band_copy["signal_rect"] = QRectF(
+                    search_x1 + signal_rect.x(),
+                    search_y1 + signal_rect.y(),
+                    signal_rect.width(),
+                    signal_rect.height(),
+                )
             copied_bands.append(band_copy)
         detections.append({
             "lane_index": lane_index,
@@ -1404,9 +1445,8 @@ def _prepare_auto_detect_region(
 ) -> tuple[np.ndarray | None, np.ndarray | None, _AutoDetectParams | None, dict]:
     arr = _load_8bit(image_path)
     img_h, img_w = arr.shape
-    # Polarity is currently fixed to Light on Dark in both UI and backend.
-    dark_on_light = False
-    polarity_label = "Light on Dark"
+    dark_on_light = bool(dark_on_light)
+    polarity_label = "Dark on Light" if dark_on_light else "Light on Dark"
     metadata = {
         "failure_stage": None,
         "message": "",
@@ -1533,7 +1573,6 @@ def auto_detect_all(
     )
     return (detections, metadata) if return_metadata else detections
 
-
 def auto_detect_guided(
     image_path: str,
     dark_on_light: bool = False,
@@ -1619,21 +1658,3 @@ def auto_detect_guided(
         collapse_lane_duplicates=True,
     )
     return (detections, metadata) if return_metadata else detections
-
-
-def auto_detect_default(
-    image_path: str,
-    dark_on_light: bool = False,
-    sensitivity: float = 0.5,
-    return_metadata: bool = False,
-) -> list[dict] | tuple[list[dict], dict]:
-    """
-    Backward-compatible alias for callers that already adopted the temporary
-    split name. The stable default implementation lives in `auto_detect_all()`.
-    """
-    return auto_detect_all(
-        image_path,
-        dark_on_light=dark_on_light,
-        sensitivity=sensitivity,
-        return_metadata=return_metadata,
-    )

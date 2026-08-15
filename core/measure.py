@@ -1,6 +1,10 @@
 """
-Pure-Python band densitometry matching Fiji/ImageJ 8-bit measurement behavior.
+Pure-Python band densitometry matching Fiji/ImageJ 8-bit signal behavior.
 Supports 8-bit and 16-bit grayscale TIFF (Bio-Rad ChemiDoc), PNG, JPG.
+
+The values reported here are signal intensities: a stronger band is a larger
+number regardless of whether the file stores the band as dark-on-light or
+light-on-dark.  Display-only inversion never changes the measurement polarity.
 """
 from __future__ import annotations
 
@@ -10,6 +14,7 @@ import numpy as np
 from PIL import Image
 from core.image_transform import (
     ImageTransformParams,
+    default_inverted_for_pil_image,
     image_array_to_uint16_luminance,
     image_transform_from_dict,
     transform_pixels_16_to_8,
@@ -19,17 +24,13 @@ from utils.logger import get_logger
 log = get_logger(__name__)
 
 
-def _to_8bit_grayscale(image_path: str) -> np.ndarray:
-    """
-    Load image and convert to 8-bit grayscale, matching ImageJ behavior:
+def _array_to_8bit_grayscale(arr: np.ndarray) -> np.ndarray:
+    """Convert a Pillow image array to ImageJ-style 8-bit grayscale.
+
     - 16-bit grayscale: divide by 256 (same as ImageJ default)
     - RGB/RGBA: luminance = 0.299R + 0.587G + 0.114B, then scale if needed
     - 8-bit grayscale: use as-is
-    Returns a 2D uint8 numpy array.
     """
-    img = Image.open(image_path)
-    arr = np.array(img)
-
     if arr.ndim == 2:
         if arr.dtype == np.uint16:
             # 16-bit grayscale (Bio-Rad ChemiDoc) -> 8-bit, matching ImageJ
@@ -49,17 +50,40 @@ def _to_8bit_grayscale(image_path: str) -> np.ndarray:
     return arr
 
 
+def _to_8bit_signal(image_path: str) -> np.ndarray:
+    """Load an image as 8-bit WB signal, where a stronger band is brighter."""
+    with Image.open(image_path) as img:
+        # The viewer's default transform normalizes WB presentation to dark
+        # bands. Quantitation must therefore use the opposite polarity.
+        signal_inverted = not default_inverted_for_pil_image(img, fallback=True)
+        arr = np.array(img)
+
+    arr = _array_to_8bit_grayscale(arr)
+    if signal_inverted:
+        arr = np.subtract(255, arr, dtype=np.uint8)
+    return arr
+
+
 def _to_transformed_8bit_grayscale(
     image_path: str,
     image_transform: dict[str, Any] | ImageTransformParams,
 ) -> np.ndarray:
-    """Load image and convert it to the current transformed 8-bit display state."""
+    """Load image and convert it to transformed 8-bit WB signal intensity."""
     with Image.open(image_path) as img:
+        signal_inverted = not default_inverted_for_pil_image(img, fallback=True)
         arr = np.array(img)
     params = (
         image_transform.sanitized()
         if isinstance(image_transform, ImageTransformParams)
         else image_transform_from_dict(image_transform)
+    )
+    # ``image_transform.inverted`` is a display preference. Measurement
+    # polarity comes from the file's default WB presentation instead.
+    params = ImageTransformParams(
+        low=params.low,
+        high=params.high,
+        gamma=params.gamma,
+        inverted=signal_inverted,
     )
     pixels_16 = image_array_to_uint16_luminance(arr)
     return transform_pixels_16_to_8(pixels_16, params)
@@ -71,12 +95,12 @@ def measure_all_lanes(
     image_transform: dict[str, Any] | ImageTransformParams | None = None,
 ) -> list[dict]:
     """
-    Load image once, convert to 8-bit, measure all lane ROIs.
+    Load image once, convert to 8-bit WB signal, measure all lane ROIs.
     Returns list of result dicts with keys:
     lane, Area, Mean, Min, Max, IntDen, RawIntDen
     """
     if image_transform is None:
-        arr = _to_8bit_grayscale(image_path)
+        arr = _to_8bit_signal(image_path)
     else:
         arr = _to_transformed_8bit_grayscale(image_path, image_transform)
     img_h, img_w = arr.shape
@@ -88,7 +112,7 @@ def measure_all_lanes_in_array(
     arr: np.ndarray,
     band_rois: list,  # list of QRectF or dict
 ) -> list[dict]:
-    """Measure all ROIs from an already prepared 8-bit grayscale image array."""
+    """Measure ROIs from an 8-bit array already prepared as signal intensity."""
     img_h, img_w = arr.shape
 
     results = []

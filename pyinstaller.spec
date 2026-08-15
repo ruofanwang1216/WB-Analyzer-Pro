@@ -26,6 +26,16 @@ datas = []
 vendor_dir = project_root / "vendor" / "wb_tiff_exporter"
 if vendor_dir.exists():
     datas.append((str(vendor_dir), "vendor/wb_tiff_exporter"))
+tutorial_assets_dir = project_root / "assets" / "tutorial"
+if tutorial_assets_dir.exists():
+    datas.append((str(tutorial_assets_dir), "assets/tutorial"))
+
+# Saved blot files are private, user-created data stored outside the project at
+# ~/.wb_analyzer/blot_files.  They must never be bundled into a distributable
+# installer.  Keep this guard next to the explicit data declarations so a
+# future packaging change cannot include that directory accidentally.
+if any("blot_files" in Path(source).parts for source, _destination in datas):
+    raise RuntimeError("Saved blot files must not be included in release builds")
 
 hiddenimports = [
     "PySide6.QtCore",
@@ -106,7 +116,7 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "WB Analyzer Pro",
             "CFBundleDisplayName": "WB Analyzer Pro",
-            "CFBundleShortVersionString": "0.2.2",
+            "CFBundleShortVersionString": "0.3.0",
             "NSHighResolutionCapable": True,
         },
     )

@@ -6,14 +6,15 @@ from math import atan2, degrees
 
 import numpy as np
 from PIL import Image
-from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QSizeF, QPoint
+from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QSizeF, QPoint, QTimer
 from PySide6.QtGui import (
     QPixmap, QPen, QBrush, QColor, QPainter, QWheelEvent, QImage,
-    QMouseEvent, QKeyEvent,
+    QMouseEvent, QKeyEvent, QPainterPath,
 )
 from PySide6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
     QGraphicsRectItem, QGraphicsItem, QGraphicsLineItem, QGraphicsSimpleTextItem,
+    QGraphicsPathItem,
 )
 
 from core.image_transform import (
@@ -31,6 +32,7 @@ _LANE_COLORS = [
     "#A4B0C8", "#88B8A8", "#9AACC4", "#80B4AC", "#A8ACC0", "#8CB0B8",
 ]
 _MAX_DESKEW_ANGLE_DEG = 45.0
+_LANE_ROI_CANCEL_TOLERANCE_PX = 4
 
 
 class EditableBandRectItem(QGraphicsRectItem):
@@ -248,7 +250,7 @@ class ImageCanvas(QGraphicsView):
     rotation_angle_changed = Signal(float)
     rotation_mode_changed = Signal(bool)
     panel_interacted = Signal()          # click/wheel/pan interaction for panel activation
-    roi_cleared = Signal()               # emitted when ROI is cleared via right-click shortcut
+    roi_cleared = Signal()               # emitted when a manual ROI selection is cleared in-canvas
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -267,6 +269,7 @@ class ImageCanvas(QGraphicsView):
         self._auto_band_labels: list[QGraphicsItem] = []
         self._manual_band_labels: list[QGraphicsItem] = []
         self._auto_lane_frames: list[dict] = []
+        self._final_crop_item: QGraphicsRectItem | None = None
         self._interaction_mode = "manual"
         self._auto_edit_enabled = False
         self._auto_edit_tool = "move"
@@ -293,6 +296,15 @@ class ImageCanvas(QGraphicsView):
         self._moving_fixed_roi = False
         self._fixed_roi_move_offset = QPointF()
         self._wb_plot_roi_only = False
+        self._tutorial_hint_item: QGraphicsRectItem | None = None
+        self._tutorial_cursor_item: QGraphicsPathItem | None = None
+        self._tutorial_hint_rect: QRectF | None = None
+        self._tutorial_cursor_progress = 0.0
+        self._tutorial_cursor_timer = QTimer(self)
+        self._tutorial_cursor_timer.setInterval(32)
+        self._tutorial_cursor_timer.timeout.connect(
+            self._advance_tutorial_roi_cursor
+        )
 
         # High-quality rendering for both shapes and pixmaps
         self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -317,6 +329,7 @@ class ImageCanvas(QGraphicsView):
         The original image resolution is preserved in memory. Display scaling
         uses high-quality SmoothTransformation. ROI coordinates are in image space.
         """
+        self.clear_tutorial_roi_hint()
         self._scene.clear()
         self._pixmap_item = None
         self._pixmap_original_size = None
@@ -330,6 +343,7 @@ class ImageCanvas(QGraphicsView):
         self._auto_band_labels.clear()
         self._manual_band_labels.clear()
         self._auto_lane_frames.clear()
+        self._final_crop_item = None
         self._rotation_mode = False
         self._rotation_dragging = False
         self._rotation_angle_deg = 0.0
@@ -405,13 +419,16 @@ class ImageCanvas(QGraphicsView):
         )
 
     def current_analysis_pixels(self) -> np.ndarray | None:
+        """Return WB signal pixels; display-only inversion is intentionally ignored."""
         if self._display_source_pixels is None:
             return None
         params = ImageTransformParams(
             low=self._image_transform_params.low,
             high=self._image_transform_params.high,
             gamma=self._image_transform_params.gamma,
-            inverted=False,
+            # Default display polarity presents WB signal as dark bands. The
+            # quantitative buffer is its opposite, so stronger signal is high.
+            inverted=not self._image_default_transform_params.inverted,
         )
         return np.ascontiguousarray(
             transform_pixels_16_to_8(
@@ -419,6 +436,16 @@ class ImageCanvas(QGraphicsView):
                 params,
             )
         )
+
+    def get_analysis_transform_params(self) -> ImageTransformParams:
+        """Return the tone transform used for quantitative signal pixels."""
+        params = self.get_image_transform_params()
+        return ImageTransformParams(
+            low=params.low,
+            high=params.high,
+            gamma=params.gamma,
+            inverted=not self._image_default_transform_params.inverted,
+        ).sanitized()
 
     def reset_image_transform(self) -> ImageTransformParams:
         params = self._image_default_transform_params
@@ -478,6 +505,97 @@ class ImageCanvas(QGraphicsView):
             return None
         rect = self._pixmap_item.boundingRect()
         return QSizeF(rect.width(), rect.height())
+
+    def show_tutorial_roi_hint(self, rect: QRectF) -> None:
+        """Show a visual-only suggested ROI and a looping drag gesture."""
+        self.clear_tutorial_roi_hint()
+        if self._pixmap_item is None:
+            return
+        image_rect = self._pixmap_item.boundingRect()
+        hint = QRectF(rect).intersected(image_rect)
+        if hint.width() <= 4 or hint.height() <= 4:
+            return
+
+        hint_pen = QPen(QColor(222, 139, 0, 235), 3.0, Qt.PenStyle.DashLine)
+        hint_pen.setDashPattern([6.0, 4.0])
+        hint_pen.setCosmetic(True)
+        self._tutorial_hint_item = self._scene.addRect(
+            QRectF(hint.topLeft(), QSizeF(1.0, 1.0)),
+            hint_pen,
+            QBrush(QColor(255, 188, 45, 48)),
+        )
+        self._tutorial_hint_item.setZValue(1000)
+        self._tutorial_hint_item.setAcceptedMouseButtons(
+            Qt.MouseButton.NoButton
+        )
+
+        cursor_path = QPainterPath()
+        cursor_path.moveTo(0.0, 0.0)
+        cursor_path.lineTo(0.0, 25.0)
+        cursor_path.lineTo(6.5, 18.5)
+        cursor_path.lineTo(12.5, 31.0)
+        cursor_path.lineTo(17.5, 28.5)
+        cursor_path.lineTo(11.5, 16.5)
+        cursor_path.lineTo(21.0, 16.5)
+        cursor_path.closeSubpath()
+        self._tutorial_cursor_item = self._scene.addPath(
+            cursor_path,
+            QPen(QColor("#8A5600"), 2.0),
+            QBrush(QColor(255, 250, 235, 245)),
+        )
+        self._tutorial_cursor_item.setZValue(1002)
+        self._tutorial_cursor_item.setFlag(
+            QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations,
+            True,
+        )
+        self._tutorial_cursor_item.setAcceptedMouseButtons(
+            Qt.MouseButton.NoButton
+        )
+        self._tutorial_hint_rect = hint
+        self._tutorial_cursor_progress = 0.0
+        self._tutorial_cursor_timer.start()
+        self._advance_tutorial_roi_cursor()
+
+    def clear_tutorial_roi_hint(self) -> None:
+        self._tutorial_cursor_timer.stop()
+        for item in (
+            self._tutorial_hint_item,
+            self._tutorial_cursor_item,
+        ):
+            if item is not None and item.scene() is self._scene:
+                self._scene.removeItem(item)
+        self._tutorial_hint_item = None
+        self._tutorial_cursor_item = None
+        self._tutorial_hint_rect = None
+        self._tutorial_cursor_progress = 0.0
+
+    def _advance_tutorial_roi_cursor(self) -> None:
+        rect = self._tutorial_hint_rect
+        hint_item = self._tutorial_hint_item
+        cursor = self._tutorial_cursor_item
+        if rect is None or hint_item is None or cursor is None:
+            self._tutorial_cursor_timer.stop()
+            return
+        # Reproduce the real interaction: the ROI itself grows with the mouse.
+        # No cursor trail is drawn because the actual canvas does not show one.
+        self._tutorial_cursor_progress = (
+            self._tutorial_cursor_progress + 0.018
+        ) % 1.42
+        cycle = self._tutorial_cursor_progress
+        moving = cycle <= 1.0
+        cursor.setVisible(moving)
+        if not moving:
+            hint_item.setRect(rect)
+            return
+        eased = cycle * cycle * (3.0 - 2.0 * cycle)
+        start = rect.topLeft()
+        end = rect.bottomRight()
+        point = QPointF(
+            start.x() + (end.x() - start.x()) * eased,
+            start.y() + (end.y() - start.y()) * eased,
+        )
+        cursor.setPos(point)
+        hint_item.setRect(QRectF(start, point).normalized())
 
     def set_fixed_roi_mode(self, enabled: bool) -> bool:
         """Enable fixed-size main ROI placement for WB Plot cropping.
@@ -633,6 +751,23 @@ class ImageCanvas(QGraphicsView):
         self._auto_band_labels.clear()
         self.clear_manual_band_labels()
         self._auto_lane_frames.clear()
+        if self._final_crop_item is not None:
+            self._scene.removeItem(self._final_crop_item)
+            self._final_crop_item = None
+
+    def set_final_crop_overlay(self, rect: QRectF | None) -> None:
+        """Show the source-pixel crop that Auto-Fit will apply to the figure."""
+        if self._final_crop_item is not None:
+            self._scene.removeItem(self._final_crop_item)
+            self._final_crop_item = None
+        if rect is None or rect.width() <= 0 or rect.height() <= 0:
+            return
+        pen = QPen(QColor("#9B6CC2"), 2.5, Qt.PenStyle.DashDotLine)
+        pen.setCosmetic(True)
+        brush = QBrush(QColor(155, 108, 194, 24))
+        self._final_crop_item = self._scene.addRect(QRectF(rect), pen, brush)
+        self._final_crop_item.setZValue(10.5)
+        self._final_crop_item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
 
     def clear_manual_band_labels(self) -> None:
         for label in self._manual_band_labels:
@@ -1057,6 +1192,19 @@ class ImageCanvas(QGraphicsView):
         if self._pixmap_item:
             self.fitInView(self._pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
 
+    def _lane_roi_contains_viewport_pos(self, viewport_pos: QPoint) -> bool:
+        """Return whether a click is within the lane ROI plus a 4 px visual margin."""
+        if self._roi_item is None:
+            return False
+        viewport_rect = self.mapFromScene(self._roi_item.rect()).boundingRect()
+        viewport_rect.adjust(
+            -_LANE_ROI_CANCEL_TOLERANCE_PX,
+            -_LANE_ROI_CANCEL_TOLERANCE_PX,
+            _LANE_ROI_CANCEL_TOLERANCE_PX,
+            _LANE_ROI_CANCEL_TOLERANCE_PX,
+        )
+        return viewport_rect.contains(viewport_pos)
+
     # ── Mouse events ───────────────────────────────────────────────────────────
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -1127,10 +1275,40 @@ class ImageCanvas(QGraphicsView):
                 super().mousePressEvent(event)
                 return
 
+        # After the first manual Lane ROI is complete, an out-of-frame click
+        # cancels it instead of accidentally starting a Band ROI elsewhere.
+        # The tolerance is measured in viewport pixels so it feels identical
+        # at every zoom level.
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and self._pixmap_item is not None
+            and self.dragMode() == QGraphicsView.DragMode.NoDrag
+            and self._interaction_mode != "auto"
+            and not self._wb_plot_roi_only
+            and self._roi_item is not None
+            and self._band_roi_item is None
+            and not self._drawing
+            and not self._lane_roi_contains_viewport_pos(event.pos())
+        ):
+            self.clear_roi()
+            self.roi_cleared.emit()
+            event.accept()
+            return
+
         if event.button() == Qt.MouseButton.LeftButton and self._pixmap_item:
             if self.dragMode() == QGraphicsView.DragMode.NoDrag:
                 sp = self.mapToScene(event.pos())
                 if self._pixmap_item.boundingRect().contains(sp):
+                    if (
+                        self._wb_plot_roi_only
+                        and self._auto_edit_enabled
+                        and isinstance(self.itemAt(event.pos()), EditableBandRectItem)
+                    ):
+                        # Low-confidence WB Plot Auto-Fit review reuses the
+                        # existing editable band items instead of starting a
+                        # replacement rough ROI on top of them.
+                        super().mousePressEvent(event)
+                        return
                     if self._wb_plot_roi_only:
                         if self._roi_item is not None:
                             self._scene.removeItem(self._roi_item)

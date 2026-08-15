@@ -34,6 +34,7 @@ Overlay annotations:
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable
@@ -55,7 +56,7 @@ from PySide6.QtWidgets import (
 
 from core.figure_project import FigureProject, SourceRef
 from core.layout_engine import (
-    LayoutItem, LayoutResult,
+    DEFAULT_LANE_WIDTH_PT, LayoutItem, LayoutResult,
     pt_to_scene, scene_to_pt,
 )
 from core.image_transform import (
@@ -64,11 +65,17 @@ from core.image_transform import (
     image_array_to_uint16_luminance,
     transform_pixels_16_to_8,
 )
+from core.lane_composition import compose_lane_crops
 from gui.layout_editor_items import (
     BlotPlaceholderItem as _OverlayBlotItem,
     EditableTextItem as _OverlayTextItem,
     LineElementItem as _OverlayLineItem,
 )
+
+
+# Match the large visual proportion of a freshly created frame in the WB
+# workspace while retaining a small margin around the complete figure.
+DEFAULT_FRAME_VIEW_FILL_RATIO = 0.95
 
 # Maximum fine-position offset in scene units for label/table fine positioning.
 MAX_OFFSET_SCENE: float = 240.0
@@ -95,7 +102,10 @@ class _OverlayScene(QGraphicsScene):
         self.undo_stack.setUndoLimit(10)
         self.record_state_before_change: Callable[[], None] | None = None
         self.move_group_item: Callable[[QGraphicsItem, QPointF], None] | None = None
+        self.begin_smart_guides: Callable[[], None] | None = None
+        self.clear_smart_guides: Callable[[], None] | None = None
         self.select_overlay_blot_item: Callable[[QGraphicsItem, bool], None] | None = None
+        self.text_rotation_changed: Callable[[_OverlayTextItem, bool], None] | None = None
 
     def record_text_edit(self, item: _OverlayTextItem, old_text: str, new_text: str) -> None:
         from gui.layout_editor_commands import EditTextCommand
@@ -246,6 +256,7 @@ class EditableTextItem(_OverlayTextItem):
         box_width: float = DEFAULT_OVERLAY_TEXT_W,
         box_height: float = DEFAULT_OVERLAY_TEXT_H,
         on_position_changed: Callable[["EditableTextItem"], None] | None = None,
+        on_size_changed: Callable[["EditableTextItem"], None] | None = None,
         parent=None,
     ) -> None:
         super().__init__(
@@ -269,19 +280,28 @@ class EditableTextItem(_OverlayTextItem):
         self._on_commit = on_commit
         self._computed_pos: QPointF = computed_pos or QPointF(0.0, 0.0)
         self._on_position_changed = on_position_changed
+        self._on_size_changed = on_size_changed
         self.setDefaultTextColor(QColor("#000000"))
 
     # ── Event overrides ───────────────────────────────────────────────────
 
     def focusOutEvent(self, event) -> None:
+        previous_offset = self.current_offset()
         super().focusOutEvent(event)
+        # Base editing auto-fits the width. Treat the alignment-preserving
+        # horizontal shift as new computed geometry, not a user drag offset.
+        self._computed_pos = self.pos() - previous_offset
+        self._emit_position_changed()
         # Guard: scene may be None if this item is being destroyed during clear()
         if self.scene() is not None and self._on_commit is not None:
             self._on_commit(self._source_ref, self.toPlainText())
 
     def resize_to_local_size(self, width: float, height: float) -> None:
         super().resize_to_local_size(width, height)
-        self._emit_position_changed()
+        if self._on_size_changed is not None:
+            self._on_size_changed(self)
+        else:
+            self._emit_position_changed()
 
     @property
     def source_ref(self) -> SourceRef:
@@ -290,6 +310,10 @@ class EditableTextItem(_OverlayTextItem):
     def current_offset(self) -> QPointF:
         """Current fine-position offset from computed position (scene units)."""
         return self.pos() - self._computed_pos
+
+    def accept_current_position_as_computed(self, offset: QPointF) -> None:
+        """Preserve a user offset after an automatic alignment-anchor shift."""
+        self._computed_pos = self.pos() - offset
 
     def _emit_position_changed(self) -> None:
         if self._on_position_changed is not None:
@@ -342,6 +366,7 @@ class FigureCanvas(QGraphicsView):
 
         # Callback for text edits — set by the parent window before use
         self.on_text_edited: Callable[[SourceRef, str], None] | None = None
+        self.on_text_rotation_changed: Callable[[dict[tuple, dict]], None] | None = None
         self.on_blot_resized: Callable[[list[SourceRef], float, float], None] | None = None
         self.on_blot_selected: Callable[[SourceRef], None] | None = None
         self.on_blot_selection_cleared: Callable[[], None] | None = None
@@ -352,15 +377,27 @@ class FigureCanvas(QGraphicsView):
         self._syncing_blot_selection = False
         self._blot_frames: dict[tuple, ResizableBlotFrameItem] = {}
         self._blot_layout_items: dict[tuple, LayoutItem] = {}
+        self._blot_lane_counts: dict[tuple, int] = {}
+        self._blot_gap_scene = pt_to_scene(3.0)
         self._blot_move_start_offsets: dict[tuple, QPointF] = {}
         self._blot_move_start_frame_pos: dict[tuple, QPointF] = {}
         self._blot_move_start_content_pos: dict[tuple, list[QPointF]] = {}
         self._selected_text_keys: set[tuple] = set()
         self._text_items: dict[tuple, EditableTextItem] = {}
         self._text_box_sizes: dict[tuple, tuple[float, float]] = {}
+        self._manually_sized_text_keys: set[tuple] = set()
         self._hidden_text_keys: set[tuple] = set()
+        self._line_items: dict[tuple, _OverlayLineItem] = {}
+        self._line_offsets: dict[tuple, QPointF] = {}
+        self._line_base_lines: dict[tuple, QLineF] = {}
+        self._line_endpoint_offsets: dict[
+            tuple, tuple[QPointF, QPointF]
+        ] = {}
+        self._hidden_line_keys: set[tuple] = set()
         self._copied_text_items_data: list[dict] = []
         self._skip_next_render_offset_sync = False
+        self._resize_recenter_pending = False
+        self._last_canvas_widget_size = QSize(self.size())
 
         self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
@@ -370,6 +407,8 @@ class FigureCanvas(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
 
         self._background_item: QGraphicsRectItem | None = None
+        self._smart_guide_items: list[QGraphicsItem] = []
+        self._smart_guides_active = False
         self._panning = False
         self._pan_start: QPointF | None = None
 
@@ -380,7 +419,10 @@ class FigureCanvas(QGraphicsView):
         self.setStyleSheet("background-color: #FFFFFF;")
         self._scene.record_state_before_change = self._notify_state_about_to_change
         self._scene.move_group_item = self._move_group_item_to_position
+        self._scene.begin_smart_guides = self._begin_smart_guides
+        self._scene.clear_smart_guides = self._end_smart_guides
         self._scene.select_overlay_blot_item = self._select_overlay_blot_item
+        self._scene.text_rotation_changed = self._handle_text_rotation_changed
         self._scene.selectionChanged.connect(self._sync_blot_selection_from_scene)
 
     def _notify_state_about_to_change(self) -> None:
@@ -406,9 +448,33 @@ class FigureCanvas(QGraphicsView):
             else:
                 self._blot_offsets.pop(key, None)
 
+    def _sync_line_offsets_from_items(self) -> None:
+        for key, line_item in self._line_items.items():
+            offset = QPointF(line_item.pos())
+            if offset.manhattanLength() > 0.1:
+                self._line_offsets[key] = offset
+            else:
+                self._line_offsets.pop(key, None)
+            base_line = self._line_base_lines.get(key)
+            if base_line is None:
+                continue
+            current_line = line_item.line()
+            p1_offset = current_line.p1() - base_line.p1()
+            p2_offset = current_line.p2() - base_line.p2()
+            if (
+                p1_offset.manhattanLength() > 0.1
+                or p2_offset.manhattanLength() > 0.1
+            ):
+                self._line_endpoint_offsets[key] = (
+                    QPointF(p1_offset),
+                    QPointF(p2_offset),
+                )
+            else:
+                self._line_endpoint_offsets.pop(key, None)
+
     # ── Public API ────────────────────────────────────────────────────────
 
-    def render(self, layout: LayoutResult, project: FigureProject) -> None:
+    def render(self, layout: LayoutResult, project: FigureProject | None) -> None:
         """Clear and re-populate the scene from *layout*.
 
         Fine-position offsets stored in self._offsets are re-applied so
@@ -416,6 +482,18 @@ class FigureCanvas(QGraphicsView):
         """
         self._syncing_blot_selection = True
         try:
+            if project is not None:
+                self._blot_lane_counts = {
+                    SourceRef(panel_idx=panel_index, slot_idx=slot_index, field="blot").key():
+                    max(1, int(slot.lane_count))
+                    for panel_index, panel in enumerate(project.panels)
+                    for slot_index, slot in enumerate(panel.blot_slots)
+                }
+                self._blot_gap_scene = pt_to_scene(
+                    project.global_layout.blot_gap_pt
+                )
+            elif not layout.items:
+                self._blot_lane_counts = {}
             # Save current offsets from any existing editable items. Snapshot
             # restoration has already supplied the historical offsets, so the next
             # render after undo must not overwrite them with the current item state.
@@ -423,6 +501,7 @@ class FigureCanvas(QGraphicsView):
                 self._skip_next_render_offset_sync = False
             else:
                 self._sync_text_offsets_from_items()
+                self._sync_line_offsets_from_items()
 
             # Drop focus/selection so Qt releases internal item references before clear
             self._scene.clearFocus()
@@ -437,9 +516,12 @@ class FigureCanvas(QGraphicsView):
             # Keeping wrappers to scene-owned items past clear can double-destroy them
             # during shortcut callbacks on PySide 6.11.
             self._background_item = None
+            self._clear_smart_guides()
             self._blot_frames.clear()
             self._blot_layout_items.clear()
             self._text_items.clear()
+            self._line_items.clear()
+            self._line_base_lines.clear()
             self._blot_content_items.clear()
 
             self._scene.clear()
@@ -478,6 +560,7 @@ class FigureCanvas(QGraphicsView):
         """Return a lightweight undo snapshot for canvas-level edits."""
         self._sync_text_offsets_from_items()
         self._sync_blot_offsets_from_frames()
+        self._sync_line_offsets_from_items()
 
         def encode_offsets(offsets: dict[tuple, QPointF]) -> list[dict]:
             return [
@@ -488,13 +571,35 @@ class FigureCanvas(QGraphicsView):
         return {
             "overlay_items": self.overlay_items_as_json_data(),
             "hidden_text_keys": [list(key) for key in self._hidden_text_keys],
+            "hidden_line_keys": [list(key) for key in self._hidden_line_keys],
             "fine_offsets": encode_offsets(self._offsets),
             "blot_offsets": encode_offsets(self._blot_offsets),
+            "line_offsets": encode_offsets(self._line_offsets),
+            "line_endpoint_offsets": [
+                {
+                    "key": list(key),
+                    "p1x": offsets[0].x(),
+                    "p1y": offsets[0].y(),
+                    "p2x": offsets[1].x(),
+                    "p2y": offsets[1].y(),
+                }
+                for key, offsets in self._line_endpoint_offsets.items()
+            ],
             "text_box_sizes": [
                 {"key": list(key), "w": value[0], "h": value[1]}
                 for key, value in self._text_box_sizes.items()
             ],
+            "manually_sized_text_keys": [
+                list(key) for key in self._manually_sized_text_keys
+            ],
         }
+
+    def blot_preview_image(self, key: tuple) -> QImage | None:
+        """Return a detached copy of the exact visible pixels for one slot."""
+        for item in self._blot_content_items.get(key, []):
+            if isinstance(item, QGraphicsPixmapItem) and not item.pixmap().isNull():
+                return item.pixmap().toImage().copy()
+        return None
 
     def restore_state_snapshot(self, snapshot: dict, *, repopulate_scene: bool = True) -> None:
         """Restore a snapshot previously returned by state_snapshot()."""
@@ -512,14 +617,34 @@ class FigureCanvas(QGraphicsView):
         self._hidden_text_keys = {
             tuple(key) for key in snapshot.get("hidden_text_keys", [])
         }
+        self._hidden_line_keys = {
+            tuple(key) for key in snapshot.get("hidden_line_keys", [])
+        }
         self._offsets = decode_offsets(snapshot.get("fine_offsets", []))
         self._blot_offsets = decode_offsets(snapshot.get("blot_offsets", []))
+        self._line_offsets = decode_offsets(snapshot.get("line_offsets", []))
+        self._line_endpoint_offsets = {
+            tuple(entry.get("key", [])): (
+                QPointF(
+                    float(entry.get("p1x", 0.0)),
+                    float(entry.get("p1y", 0.0)),
+                ),
+                QPointF(
+                    float(entry.get("p2x", 0.0)),
+                    float(entry.get("p2y", 0.0)),
+                ),
+            )
+            for entry in snapshot.get("line_endpoint_offsets", [])
+        }
         self._text_box_sizes = {
             tuple(entry.get("key", [])): (
                 float(entry.get("w", DEFAULT_OVERLAY_TEXT_W)),
                 float(entry.get("h", DEFAULT_OVERLAY_TEXT_H)),
             )
             for entry in snapshot.get("text_box_sizes", [])
+        }
+        self._manually_sized_text_keys = {
+            tuple(key) for key in snapshot.get("manually_sized_text_keys", [])
         }
         self._skip_next_render_offset_sync = True
 
@@ -541,7 +666,13 @@ class FigureCanvas(QGraphicsView):
         self._selected_blot_keys.clear()
         self._selected_text_keys.clear()
         self._text_items.clear()
+        self._line_items.clear()
+        self._line_offsets.clear()
+        self._line_base_lines.clear()
+        self._line_endpoint_offsets.clear()
+        self._hidden_line_keys.clear()
         self._text_box_sizes.clear()
+        self._manually_sized_text_keys.clear()
         self._hidden_text_keys.clear()
         self._copied_text_items_data.clear()
         self._skip_next_render_offset_sync = False
@@ -558,24 +689,214 @@ class FigureCanvas(QGraphicsView):
             )
             self.scale(1.18, 1.18)
 
-    def render_page_image(self, *, scale: float = 2.0) -> QImage:
-        """Render the current visible figure page to a raster image for exact export."""
-        source = (
-            self._background_item.sceneBoundingRect()
-            if self._background_item is not None
-            else self._scene.itemsBoundingRect()
+    def _frame_content_scene_rect(self) -> QRectF:
+        """Return the visible frame bounds without the surrounding white page."""
+        rect = QRectF()
+        content_items: list[QGraphicsItem] = list(self._blot_frames.values())
+        content_items.extend(self._text_items.values())
+        content_items.extend(
+            item
+            for item in self._overlay_items
+            if item.scene() is self._scene
         )
-        if source.isNull() or source.width() <= 0.0 or source.height() <= 0.0:
-            return QImage()
 
-        scale = max(1.0, float(scale))
-        image = QImage(
-            max(1, int(round(source.width() * scale))),
-            max(1, int(round(source.height() * scale))),
-            QImage.Format.Format_ARGB32,
+        for item in content_items:
+            item_rect = item.sceneBoundingRect()
+            if (
+                isinstance(item, EditableTextItem)
+                and item.source_ref.field == "label"
+                and abs(item.rotation()) < 0.01
+            ):
+                # IB labels use a generously sized editable box.  Centre the
+                # initial view on the visible glyphs, not its unused right side.
+                item_rect.setWidth(
+                    min(item_rect.width(), item.document().idealWidth())
+                )
+            rect = item_rect if rect.isNull() else rect.united(item_rect)
+        return rect
+
+    def fit_frame_content_to_view(
+        self,
+        fill_ratio: float = DEFAULT_FRAME_VIEW_FILL_RATIO,
+    ) -> None:
+        """Reset zoom and centre the complete figure at the standard size."""
+        content = self._frame_content_scene_rect()
+        if content.isNull() or content.width() <= 0.0 or content.height() <= 0.0:
+            self.fit_to_view()
+            return
+
+        viewport = self.viewport().rect()
+        usable_width = max(1.0, float(viewport.width() - 4))
+        usable_height = max(1.0, float(viewport.height() - 4))
+        fill_ratio = max(0.20, min(0.95, float(fill_ratio)))
+        factor = min(
+            usable_width * fill_ratio / content.width(),
+            usable_height * fill_ratio / content.height(),
         )
-        image.fill(QColor("#FFFFFF"))
+        factor = max(0.15, min(6.0, factor))
 
+        self.resetTransform()
+        self.scale(factor, factor)
+        # Ensure the scrollable scene has enough breathing room on every side
+        # for QGraphicsView.centerOn() to reach the true content centre.
+        half_view_width = usable_width / (2.0 * factor)
+        half_view_height = usable_height / (2.0 * factor)
+        center = content.center()
+        self._set_centerable_scene_rect(
+            center,
+            half_view_width,
+            half_view_height,
+        )
+        self.centerOn(center)
+        # Changing the scene bounds can toggle a scrollbar and therefore move
+        # the viewport centre by half the scrollbar thickness. Correct once
+        # more after Qt has finalized that geometry.
+        QTimer.singleShot(0, self.center_frame_content_in_view)
+
+    def _set_centerable_scene_rect(
+        self,
+        center: QPointF,
+        half_view_width: float,
+        half_view_height: float,
+    ) -> None:
+        """Keep all items visible while giving the view symmetric pan room."""
+        item_bounds = self._scene.itemsBoundingRect()
+        margin = 20.0
+        half_width = max(
+            half_view_width + margin,
+            center.x() - item_bounds.left() + margin,
+            item_bounds.right() - center.x() + margin,
+        )
+        half_height = max(
+            half_view_height + margin,
+            center.y() - item_bounds.top() + margin,
+            item_bounds.bottom() - center.y() + margin,
+        )
+        self._scene.setSceneRect(QRectF(
+            center.x() - half_width,
+            center.y() - half_height,
+            half_width * 2.0,
+            half_height * 2.0,
+        ))
+
+    def center_frame_content_in_view(self) -> None:
+        """Centre the complete WB figure without changing its zoom level."""
+        content = self._frame_content_scene_rect()
+        if content.isNull() or content.width() <= 0.0 or content.height() <= 0.0:
+            return
+        scale = max(1e-9, abs(self.transform().m11()))
+        viewport = self.viewport().rect()
+        half_view_width = max(1.0, viewport.width() / (2.0 * scale))
+        half_view_height = max(1.0, viewport.height() / (2.0 * scale))
+        center = content.center()
+        self._set_centerable_scene_rect(
+            center,
+            half_view_width,
+            half_view_height,
+        )
+        self.centerOn(center)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        current_size = QSize(self.size())
+        if current_size == self._last_canvas_widget_size:
+            return
+        self._last_canvas_widget_size = current_size
+        if not self._blot_frames or self._resize_recenter_pending:
+            return
+        self._resize_recenter_pending = True
+
+        def recenter_after_resize() -> None:
+            self._resize_recenter_pending = False
+            self.center_frame_content_in_view()
+            QTimer.singleShot(0, self.center_frame_content_in_view)
+
+        # Scrollbar visibility is finalized after the resize event. Re-centre
+        # on the next event-loop turn, but preserve the exact current scale so
+        # dragging a splitter never makes the WB frame suddenly smaller.
+        QTimer.singleShot(0, recenter_after_resize)
+
+    def _blot_frames_scene_rect(self) -> QRectF:
+        rect = QRectF()
+        for frame in self._blot_frames.values():
+            frame_rect = frame.sceneBoundingRect()
+            rect = frame_rect if rect.isNull() else rect.united(frame_rect)
+        return rect
+
+    def capture_blot_view_state(self) -> dict | None:
+        """Capture zoom and the blot stack's current viewport anchor."""
+        blot_rect = self._blot_frames_scene_rect()
+        if blot_rect.isNull():
+            return None
+        anchor = self.mapFromScene(blot_rect.center())
+        return {
+            "transform": QTransform(self.transform()),
+            "anchor_x": float(anchor.x()),
+            "anchor_y": float(anchor.y()),
+        }
+
+    def restore_blot_view_state(self, state: dict | None) -> None:
+        """Restore zoom and keep the rebuilt blot stack at the same screen point."""
+        if not state:
+            return
+        blot_rect = self._blot_frames_scene_rect()
+        transform = state.get("transform")
+        if blot_rect.isNull() or not isinstance(transform, QTransform):
+            return
+
+        self.setTransform(transform)
+        scale = max(1e-9, abs(self.transform().m11()))
+        viewport = self.viewport().rect()
+        anchor_x = float(state.get("anchor_x", viewport.center().x()))
+        anchor_y = float(state.get("anchor_y", viewport.center().y()))
+        center = blot_rect.center()
+
+        visible_scene_rect = QRectF(
+            center.x() - anchor_x / scale,
+            center.y() - anchor_y / scale,
+            max(1.0, viewport.width() / scale),
+            max(1.0, viewport.height() / scale),
+        )
+        scrollbar_allowance = 40.0 / scale
+        visible_scene_rect.adjust(
+            -scrollbar_allowance,
+            -scrollbar_allowance,
+            scrollbar_allowance,
+            scrollbar_allowance,
+        )
+        self._scene.setSceneRect(
+            self._scene.sceneRect().united(visible_scene_rect)
+        )
+        self.centerOn(center)
+
+        def align_anchor() -> None:
+            current_rect = self._blot_frames_scene_rect()
+            if current_rect.isNull():
+                return
+            mapped_center = self.mapFromScene(current_rect.center())
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value()
+                + mapped_center.x()
+                - round(anchor_x)
+            )
+            self.verticalScrollBar().setValue(
+                self.verticalScrollBar().value()
+                + mapped_center.y()
+                - round(anchor_y)
+            )
+
+        align_anchor()
+        # Scrollbar visibility can change after the event loop processes the
+        # larger condition-table scene; correct once more using final geometry.
+        QTimer.singleShot(0, align_anchor)
+
+    def render_page_image(
+        self,
+        *,
+        scale: float = 2.0,
+        include_overflow: bool = False,
+    ) -> QImage:
+        """Render the figure page, optionally including items outside the page."""
         selected_items = list(self._scene.selectedItems())
         selected_blot_keys = set(self._selected_blot_keys)
         with QSignalBlocker(self._scene):
@@ -585,6 +906,39 @@ class FigureCanvas(QGraphicsView):
                     item.setSelected(False)
                 for frame in self._blot_frames.values():
                     frame.set_frame_selected(False)
+
+                page_rect = (
+                    self._background_item.sceneBoundingRect()
+                    if self._background_item is not None
+                    else QRectF()
+                )
+                content_rect = self._scene.itemsBoundingRect()
+                if include_overflow and not content_rect.isNull():
+                    source = (
+                        page_rect.united(content_rect)
+                        if not page_rect.isNull()
+                        else content_rect
+                    )
+                    if page_rect.isNull() or not page_rect.contains(content_rect):
+                        # Keep antialiased line edges and rotated text safely
+                        # inside the raster even when their bounds cross the page.
+                        source = source.adjusted(-2.0, -2.0, 2.0, 2.0)
+                else:
+                    source = page_rect if not page_rect.isNull() else content_rect
+                if (
+                    source.isNull()
+                    or source.width() <= 0.0
+                    or source.height() <= 0.0
+                ):
+                    return QImage()
+
+                scale = max(1.0, float(scale))
+                image = QImage(
+                    max(1, int(round(source.width() * scale))),
+                    max(1, int(round(source.height() * scale))),
+                    QImage.Format.Format_ARGB32,
+                )
+                image.fill(QColor("#FFFFFF"))
 
                 painter = QPainter(image)
                 try:
@@ -598,11 +952,11 @@ class FigureCanvas(QGraphicsView):
                 finally:
                     painter.end()
 
+            finally:
                 for item in selected_items:
                     item.setSelected(True)
                 for key, frame in self._blot_frames.items():
                     frame.set_frame_selected(key in selected_blot_keys)
-            finally:
                 self._syncing_blot_selection = False
         return image
 
@@ -644,9 +998,13 @@ class FigureCanvas(QGraphicsView):
             gi = QGraphicsPixmapItem(pm)
             gi.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
             gi.setPos(x + ox, y + oy)
-            sx = w / max(1, pm.width())
-            sy = h / max(1, pm.height())
-            gi.setTransform(QTransform.fromScale(sx, sy), False)
+            gi.setTransform(
+                QTransform.fromScale(
+                    w / max(1.0, pm.width()),
+                    h / max(1.0, pm.height()),
+                ),
+                False,
+            )
             gi.setZValue(item.z_order)
             self._scene.addItem(gi)
             content_group.append(gi)
@@ -697,8 +1055,11 @@ class FigureCanvas(QGraphicsView):
         except Exception:
             return None
 
-        # Crop in IMAGE_PX coordinates
-        if item.image_crop_px:
+        # Auto-Fit composes equal-size lane crops by translation only. Manual
+        # ROI mode continues to use the single source crop below.
+        if item.image_lane_crops_px:
+            pixels = compose_lane_crops(pixels, item.image_lane_crops_px)
+        elif item.image_crop_px:
             c = item.image_crop_px
             img_h, img_w = pixels.shape
             if img_w <= 0 or img_h <= 0:
@@ -738,7 +1099,9 @@ class FigureCanvas(QGraphicsView):
         self, item: LayoutItem,
         x: float, y: float, w: float, h: float,
     ) -> None:
-        computed_pos = QPointF(x, y + h * 0.25)   # vertically centre-ish
+        # The text item's box shares the blot's exact top and height.  Its
+        # display painter vertically centres the glyphs inside that box.
+        computed_pos = QPointF(x, y)
 
         # Re-apply saved offset (if any)
         offset = QPointF(0.0, 0.0)
@@ -746,7 +1109,10 @@ class FigureCanvas(QGraphicsView):
             offset = self._offsets.get(item.source_ref.key(), QPointF(0.0, 0.0))
         box_w = w
         box_h = h
-        if item.source_ref is not None:
+        if (
+            item.source_ref is not None
+            and item.source_ref.key() in self._manually_sized_text_keys
+        ):
             box_w, box_h = self._text_box_sizes.get(item.source_ref.key(), (w, h))
 
         gi = EditableTextItem(
@@ -763,17 +1129,31 @@ class FigureCanvas(QGraphicsView):
             box_width=box_w,
             box_height=box_h,
             on_position_changed=self._handle_text_position_changed,
+            on_size_changed=self._handle_text_size_changed,
         )
         gi.setPos(computed_pos + offset)
+        key = item.source_ref.key() if item.source_ref is not None else None
+        if key is None or key not in self._manually_sized_text_keys:
+            gi.fit_width_to_text()
+            gi.accept_current_position_as_computed(offset)
         gi.setRotation(item.rotation)
         gi.setZValue(item.z_order)
         self._scene.addItem(gi)
         if item.source_ref is not None:
             self._text_items[item.source_ref.key()] = gi
+            self._text_box_sizes[item.source_ref.key()] = (
+                gi.editor_rect().width(),
+                gi.editor_rect().height(),
+            )
 
     def _handle_text_edit(self, ref: SourceRef, new_text: str) -> None:
+        self._manually_sized_text_keys.discard(ref.key())
         if self.on_text_edited is not None:
             self.on_text_edited(ref, new_text)
+
+    def _handle_text_size_changed(self, item: EditableTextItem) -> None:
+        self._manually_sized_text_keys.add(item.source_ref.key())
+        self._handle_text_position_changed(item)
 
     def _handle_text_position_changed(self, item: EditableTextItem) -> None:
         key = item.source_ref.key()
@@ -784,6 +1164,30 @@ class FigureCanvas(QGraphicsView):
             self._offsets.pop(key, None)
         rect = item.editor_rect()
         self._text_box_sizes[key] = (rect.width(), rect.height())
+
+    def _handle_text_rotation_changed(
+        self,
+        item: _OverlayTextItem,
+        final: bool,
+    ) -> None:
+        """Persist a handle-driven rotation without rebuilding during drag."""
+        if not isinstance(item, EditableTextItem):
+            return
+        self._handle_text_position_changed(item)
+        if not final or self.on_text_rotation_changed is None:
+            return
+        font = item.font()
+        self.on_text_rotation_changed({
+            item.source_ref.key(): {
+                "font_family": font.family(),
+                "font_size_pt": font.pointSizeF(),
+                "bold": font.bold(),
+                "italic": font.italic(),
+                "underline": font.underline(),
+                "align": item.text_align(),
+                "rotation": item.rotation(),
+            }
+        })
 
     def selected_text_refs(self) -> list[SourceRef]:
         refs: list[SourceRef] = []
@@ -858,6 +1262,14 @@ class FigureCanvas(QGraphicsView):
             content_item.setPos(content_item.pos() + delta)
 
     def _move_group_item_to_position(self, item: QGraphicsItem, target_pos: QPointF) -> None:
+        if (
+            self._smart_guides_active
+            and len([candidate for candidate in self._scene.selectedItems()
+                     if candidate.parentItem() is None]) <= 1
+        ):
+            target_pos = self._smart_snap_position(item, target_pos)
+        else:
+            self._clear_smart_guides()
         delta = target_pos - item.pos()
         if isinstance(item, ResizableBlotFrameItem):
             key = self._key_for_blot_frame(item)
@@ -869,6 +1281,201 @@ class FigureCanvas(QGraphicsView):
         item.setPos(target_pos)
         if isinstance(item, EditableTextItem):
             self._handle_text_position_changed(item)
+
+    def _smart_guide_candidates(self, moving_item: QGraphicsItem) -> list[QGraphicsItem]:
+        candidates: list[QGraphicsItem] = []
+        candidates.extend(self._text_items.values())
+        candidates.extend(self._blot_frames.values())
+        candidates.extend(self._line_items.values())
+        candidates.extend(self._overlay_items)
+        seen: set[int] = set()
+        result: list[QGraphicsItem] = []
+        for item in candidates:
+            identity = id(item)
+            if (
+                item is moving_item
+                or identity in seen
+                or item.scene() is not self._scene
+                or not item.isVisible()
+                or item.isSelected()
+                or item.parentItem() is not None
+            ):
+                continue
+            seen.add(identity)
+            result.append(item)
+        return result
+
+    def _smart_snap_position(
+        self, item: QGraphicsItem, target_pos: QPointF
+    ) -> QPointF:
+        """Snap a moving object's edges/centres/spacing and draw purple guides."""
+        self._clear_smart_guides()
+        candidates = self._smart_guide_candidates(item)
+        if not candidates:
+            return target_pos
+
+        threshold = 6.0
+        current = item.sceneBoundingRect()
+        proposed = current.translated(target_pos - item.pos())
+        candidate_rects = [candidate.sceneBoundingRect() for candidate in candidates]
+
+        x_choices: list[tuple[float, list[QLineF], int]] = []
+        y_choices: list[tuple[float, list[QLineF], int]] = []
+        moving_x = (proposed.left(), proposed.center().x(), proposed.right())
+        moving_y = (proposed.top(), proposed.center().y(), proposed.bottom())
+
+        for other in candidate_rects:
+            other_x = (other.left(), other.center().x(), other.right())
+            other_y = (other.top(), other.center().y(), other.bottom())
+            for source in moving_x:
+                for target in other_x:
+                    correction = target - source
+                    if abs(correction) <= threshold:
+                        x = source + correction
+                        x_choices.append((
+                            correction,
+                            [QLineF(
+                                x,
+                                min(proposed.top(), other.top()) - 8.0,
+                                x,
+                                max(proposed.bottom(), other.bottom()) + 8.0,
+                            )],
+                            1,
+                        ))
+            for source in moving_y:
+                for target in other_y:
+                    correction = target - source
+                    if abs(correction) <= threshold:
+                        y = source + correction
+                        y_choices.append((
+                            correction,
+                            [QLineF(
+                                min(proposed.left(), other.left()) - 8.0,
+                                y,
+                                max(proposed.right(), other.right()) + 8.0,
+                                y,
+                            )],
+                            1,
+                        ))
+
+        # Thin parallel lines must align by their true centreline, not by the
+        # top/bottom edges of their selectable shape or pen bounding box.
+        if isinstance(item, _OverlayLineItem):
+            moving_line = item.line()
+            proposed_delta = target_pos - item.pos()
+            moving_p1 = item.mapToScene(moving_line.p1()) + proposed_delta
+            moving_p2 = item.mapToScene(moving_line.p2()) + proposed_delta
+            moving_is_horizontal = abs(moving_p2.y() - moving_p1.y()) <= 1.0
+            moving_is_vertical = abs(moving_p2.x() - moving_p1.x()) <= 1.0
+            for candidate in candidates:
+                if not isinstance(candidate, _OverlayLineItem):
+                    continue
+                candidate_line = candidate.line()
+                other_p1 = candidate.mapToScene(candidate_line.p1())
+                other_p2 = candidate.mapToScene(candidate_line.p2())
+                if moving_is_horizontal and abs(other_p2.y() - other_p1.y()) <= 1.0:
+                    moving_center_y = (moving_p1.y() + moving_p2.y()) / 2.0
+                    other_center_y = (other_p1.y() + other_p2.y()) / 2.0
+                    correction = other_center_y - moving_center_y
+                    if abs(correction) <= threshold:
+                        y_choices.append((
+                            correction,
+                            [QLineF(
+                                min(moving_p1.x(), moving_p2.x(), other_p1.x(), other_p2.x()) - 8.0,
+                                other_center_y,
+                                max(moving_p1.x(), moving_p2.x(), other_p1.x(), other_p2.x()) + 8.0,
+                                other_center_y,
+                            )],
+                            0,
+                        ))
+                if moving_is_vertical and abs(other_p2.x() - other_p1.x()) <= 1.0:
+                    moving_center_x = (moving_p1.x() + moving_p2.x()) / 2.0
+                    other_center_x = (other_p1.x() + other_p2.x()) / 2.0
+                    correction = other_center_x - moving_center_x
+                    if abs(correction) <= threshold:
+                        x_choices.append((
+                            correction,
+                            [QLineF(
+                                other_center_x,
+                                min(moving_p1.y(), moving_p2.y(), other_p1.y(), other_p2.y()) - 8.0,
+                                other_center_x,
+                                max(moving_p1.y(), moving_p2.y(), other_p1.y(), other_p2.y()) + 8.0,
+                            )],
+                            0,
+                        ))
+
+        # Equal horizontal spacing when the item is between two neighbours.
+        left_rects = [rect for rect in candidate_rects if rect.right() <= proposed.left()]
+        right_rects = [rect for rect in candidate_rects if rect.left() >= proposed.right()]
+        if left_rects and right_rects:
+            left = max(left_rects, key=lambda rect: rect.right())
+            right = min(right_rects, key=lambda rect: rect.left())
+            left_gap = proposed.left() - left.right()
+            right_gap = right.left() - proposed.right()
+            correction = (right_gap - left_gap) / 2.0
+            if abs(correction) <= threshold:
+                snapped = proposed.translated(correction, 0.0)
+                guide_y = snapped.center().y()
+                x_choices.append((
+                    correction,
+                    [
+                        QLineF(left.right(), guide_y, snapped.left(), guide_y),
+                        QLineF(snapped.right(), guide_y, right.left(), guide_y),
+                    ],
+                    1,
+                ))
+
+        # Equal vertical spacing when the item is between two neighbours.
+        above_rects = [rect for rect in candidate_rects if rect.bottom() <= proposed.top()]
+        below_rects = [rect for rect in candidate_rects if rect.top() >= proposed.bottom()]
+        if above_rects and below_rects:
+            above = max(above_rects, key=lambda rect: rect.bottom())
+            below = min(below_rects, key=lambda rect: rect.top())
+            above_gap = proposed.top() - above.bottom()
+            below_gap = below.top() - proposed.bottom()
+            correction = (below_gap - above_gap) / 2.0
+            if abs(correction) <= threshold:
+                snapped = proposed.translated(0.0, correction)
+                guide_x = snapped.center().x()
+                y_choices.append((
+                    correction,
+                    [
+                        QLineF(guide_x, above.bottom(), guide_x, snapped.top()),
+                        QLineF(guide_x, snapped.bottom(), guide_x, below.top()),
+                    ],
+                    1,
+                ))
+
+        dx, x_lines, _ = min(
+            x_choices, key=lambda choice: (choice[2], abs(choice[0]))
+        ) if x_choices else (0.0, [], 1)
+        dy, y_lines, _ = min(
+            y_choices, key=lambda choice: (choice[2], abs(choice[0]))
+        ) if y_choices else (0.0, [], 1)
+        self._show_smart_guides(x_lines + y_lines)
+        return target_pos + QPointF(dx, dy)
+
+    def _show_smart_guides(self, lines: list[QLineF]) -> None:
+        pen = QPen(QColor("#A83DFF"), 1.25, Qt.PenStyle.SolidLine)
+        pen.setCosmetic(True)
+        for line in lines:
+            guide = self._scene.addLine(line, pen)
+            guide.setZValue(10000.0)
+            guide.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+            self._smart_guide_items.append(guide)
+
+    def _begin_smart_guides(self) -> None:
+        self._smart_guides_active = True
+
+    def _end_smart_guides(self) -> None:
+        self._smart_guides_active = False
+        self._clear_smart_guides()
+
+    def _clear_smart_guides(self) -> None:
+        for guide in self._smart_guide_items:
+            if guide.scene() is self._scene:
+                self._scene.removeItem(guide)
+        self._smart_guide_items.clear()
 
     def _sync_blot_selection_from_scene(self) -> None:
         if self._syncing_blot_selection:
@@ -996,6 +1603,7 @@ class FigureCanvas(QGraphicsView):
 
     def _begin_blot_frame_move(self) -> None:
         self._notify_state_about_to_change()
+        self._begin_smart_guides()
         keys = set(self._selected_blot_keys)
         self._blot_move_start_offsets = {
             key: QPointF(self._blot_offsets.get(key, QPointF(0.0, 0.0)))
@@ -1012,6 +1620,13 @@ class FigureCanvas(QGraphicsView):
         }
 
     def _preview_blot_frame_move(self, delta: QPointF) -> None:
+        primary_key = next(iter(self._blot_move_start_frame_pos), None)
+        if self._smart_guides_active and primary_key is not None:
+            primary = self._blot_frames.get(primary_key)
+            start_pos = self._blot_move_start_frame_pos.get(primary_key)
+            if primary is not None and start_pos is not None:
+                snapped_pos = self._smart_snap_position(primary, start_pos + delta)
+                delta = snapped_pos - start_pos
         for key, start_pos in self._blot_move_start_frame_pos.items():
             frame = self._blot_frames.get(key)
             if frame is not None:
@@ -1022,8 +1637,15 @@ class FigureCanvas(QGraphicsView):
                 item.setPos(item_start + delta)
 
     def _commit_blot_frame_move(self, delta: QPointF) -> None:
+        primary_key = next(iter(self._blot_move_start_frame_pos), None)
+        if primary_key is not None:
+            primary = self._blot_frames.get(primary_key)
+            start_pos = self._blot_move_start_frame_pos.get(primary_key)
+            if primary is not None and start_pos is not None:
+                delta = primary.pos() - start_pos
         for key, start_offset in self._blot_move_start_offsets.items():
             self._blot_offsets[key] = start_offset + delta
+        self._end_smart_guides()
         self._blot_move_start_offsets.clear()
         self._blot_move_start_frame_pos.clear()
         self._blot_move_start_content_pos.clear()
@@ -1081,10 +1703,14 @@ class FigureCanvas(QGraphicsView):
             if isinstance(item, QGraphicsPixmapItem):
                 pm = item.pixmap()
                 if not pm.isNull():
-                    sx = width / max(1, pm.width())
-                    sy = height / max(1, pm.height())
                     item.setPos(frame_pos)
-                    item.setTransform(QTransform.fromScale(sx, sy), False)
+                    item.setTransform(
+                        QTransform.fromScale(
+                            width / max(1.0, pm.width()),
+                            height / max(1.0, pm.height()),
+                        ),
+                        False,
+                    )
             elif isinstance(item, QGraphicsRectItem):
                 item.setPos(QPointF(0.0, 0.0))
                 item.setRect(QRectF(frame_pos.x(), frame_pos.y(), width, height))
@@ -1096,14 +1722,28 @@ class FigureCanvas(QGraphicsView):
     def _add_line(
         self, item: LayoutItem, x: float, y: float, w: float, h: float
     ) -> None:
+        key = item.source_ref.key() if item.source_ref is not None else None
+        if key is not None and key in self._hidden_line_keys:
+            return
         pen = QPen(QColor(item.line_color or "#AAAAAA"))
         pen.setWidthF(pt_to_scene(item.line_width_pt))
-        li = _OverlayLineItem(QLineF(x, y, x + w, y + h))
+        base_line = QLineF(x, y, x + w, y + h)
+        display_line = QLineF(base_line)
+        if key is not None and key in self._line_endpoint_offsets:
+            p1_offset, p2_offset = self._line_endpoint_offsets[key]
+            display_line.setP1(base_line.p1() + p1_offset)
+            display_line.setP2(base_line.p2() + p2_offset)
+        li = _OverlayLineItem(display_line)
         li.setPen(pen)
+        if key is not None:
+            li.setPos(self._line_offsets.get(key, QPointF()))
         li.start_handle.setVisible(False)
         li.end_handle.setVisible(False)
         li.setZValue(item.z_order)
         self._scene.addItem(li)
+        if key is not None:
+            self._line_items[key] = li
+            self._line_base_lines[key] = base_line
 
     def _add_divider(
         self, item: LayoutItem, x: float, y: float, h: float
@@ -1129,6 +1769,7 @@ class FigureCanvas(QGraphicsView):
                 DEFAULT_OVERLAY_TEXT_H,
             ),
         )
+        item.fit_width_to_text()
         self._scene.addItem(item)
         self._overlay_items.append(item)
         self._scene.clearSelection()
@@ -1148,37 +1789,82 @@ class FigureCanvas(QGraphicsView):
         self.setFocus(Qt.FocusReason.OtherFocusReason)
         return item
 
-    def add_overlay_blot_frame(self) -> _OverlayBlotItem:
-        """Add a free-position WB blot frame that can receive ROI image sync."""
+    def add_overlay_blot_frame(self, lane_count: int = 4) -> _OverlayBlotItem:
+        """Add a lane-sized WB blot below the leftmost structured panel."""
         self._notify_state_about_to_change()
-        source_frame = next(
-            (
-                frame for key, frame in self._blot_frames.items()
-                if key in self._selected_blot_keys
-            ),
-            None,
-        )
-        if source_frame is None and self._blot_frames:
-            source_frame = next(iter(self._blot_frames.values()))
+        lane_count = max(1, int(lane_count))
+        structured_frames = list(self._blot_frames.items())
+        if structured_frames:
+            def frame_geometry(frame: QGraphicsRectItem) -> QRectF:
+                local_rect = frame.rect()
+                return QRectF(
+                    frame.pos().x() + local_rect.left(),
+                    frame.pos().y() + local_rect.top(),
+                    local_rect.width(),
+                    local_rect.height(),
+                )
 
-        if source_frame is not None:
+            # Geometry, rather than panel index, makes this work for both the
+            # normal horizontal multi-panel layout and older vertical layouts.
+            source_key, source_frame = min(
+                structured_frames,
+                key=lambda entry: (
+                    frame_geometry(entry[1]).left(),
+                    frame_geometry(entry[1]).top(),
+                ),
+            )
+            source_rect = frame_geometry(source_frame)
+            anchor_x = source_rect.left()
+            source_lanes = self._blot_lane_counts.get(source_key, 1)
+            lane_width = source_rect.width() / max(1, source_lanes)
+
+            # All structured frames in the leftmost visual column constitute
+            # the target panel stack. Include previously added, still-aligned
+            # floating frames so repeated additions continue downward.
+            tolerance = 1.0
+            column_rects = [
+                frame_geometry(frame)
+                for _key, frame in structured_frames
+                if abs(frame_geometry(frame).left() - anchor_x) <= tolerance
+            ]
+            aligned_overlays = [
+                frame_geometry(item)
+                for item in self._overlay_items
+                if (
+                    isinstance(item, _OverlayBlotItem)
+                    and abs(frame_geometry(item).left() - anchor_x) <= tolerance
+                )
+            ]
+
+            # Prefer the visible spacing between existing blot rows. This
+            # preserves custom spacing; a one-row panel falls back to its
+            # GlobalLayout blot gap.
+            ordered = sorted(column_rects, key=lambda rect: rect.top())
+            gaps = [
+                current.top() - previous.bottom()
+                for previous, current in zip(ordered, ordered[1:])
+                if current.top() >= previous.bottom()
+            ]
+            gap = gaps[len(gaps) // 2] if gaps else self._blot_gap_scene
+            stack_rects = column_rects + aligned_overlays
+            bottom = max(rect.bottom() for rect in stack_rects)
             rect = QRectF(
-                source_frame.pos().x() + source_frame.rect().width() + 18.0,
-                source_frame.pos().y(),
-                source_frame.rect().width(),
-                source_frame.rect().height(),
+                anchor_x,
+                bottom + gap,
+                lane_width * lane_count,
+                source_rect.height(),
             )
         else:
             center = self.mapToScene(self.viewport().rect().center())
             rect = QRectF(
-                center.x() - DEFAULT_OVERLAY_BLOT_W / 2.0,
+                center.x() - pt_to_scene(DEFAULT_LANE_WIDTH_PT) * lane_count / 2.0,
                 center.y() - DEFAULT_OVERLAY_BLOT_H / 2.0,
-                DEFAULT_OVERLAY_BLOT_W,
+                pt_to_scene(DEFAULT_LANE_WIDTH_PT) * lane_count,
                 DEFAULT_OVERLAY_BLOT_H,
             )
         self._scene.clearSelection()
         self._clear_blot_selection()
-        item = _OverlayBlotItem(rect)
+        item = _OverlayBlotItem(rect, lane_count=lane_count)
         self._scene.addItem(item)
         self._overlay_items.append(item)
         item.setSelected(True)
@@ -1264,6 +1950,11 @@ class FigureCanvas(QGraphicsView):
                 font.setUnderline(underline)
             item.setFont(font)
             if isinstance(item, EditableTextItem):
+                key = item.source_ref.key()
+                previous_offset = item.current_offset()
+                self._manually_sized_text_keys.discard(key)
+                item.fit_width_to_text()
+                item.accept_current_position_as_computed(previous_offset)
                 built_in_styles[item.source_ref.key()] = {
                     "font_family": font.family(),
                     "font_size_pt": font.pointSizeF(),
@@ -1276,6 +1967,7 @@ class FigureCanvas(QGraphicsView):
                 item.update_resize_handles()
                 self._handle_text_position_changed(item)
             elif isinstance(item, _OverlayTextItem):
+                item.fit_width_to_text()
                 item.update_resize_handles()
         return built_in_styles
 
@@ -1505,6 +2197,7 @@ class FigureCanvas(QGraphicsView):
             "y": frame.pos().y(),
             "width": frame.rect().width(),
             "height": frame.rect().height(),
+            "lane_count": self._blot_lane_counts.get(key, 4),
             "rotation": frame.rotation(),
             "image_path": layout_item.image_path if layout_item is not None else None,
             "roi": roi,
@@ -1691,6 +2384,34 @@ class FigureCanvas(QGraphicsView):
                     if offset is not None:
                         out.x_pt += scene_to_pt(offset.x())
                         out.y_pt += scene_to_pt(offset.y())
+                elif item.kind == "line":
+                    if key in self._hidden_line_keys:
+                        continue
+                    line_item = self._line_items.get(key)
+                    if line_item is not None:
+                        line = line_item.line()
+                        p1 = line_item.mapToScene(line.p1())
+                        p2 = line_item.mapToScene(line.p2())
+                        out.x_pt = scene_to_pt(p1.x())
+                        out.y_pt = scene_to_pt(p1.y())
+                        out.w_pt = scene_to_pt(p2.x() - p1.x())
+                        out.h_pt = scene_to_pt(p2.y() - p1.y())
+                    else:
+                        offset = self._line_offsets.get(key)
+                        if offset is not None:
+                            out.x_pt += scene_to_pt(offset.x())
+                            out.y_pt += scene_to_pt(offset.y())
+                        endpoint_offsets = self._line_endpoint_offsets.get(key)
+                        if endpoint_offsets is not None:
+                            p1_offset, p2_offset = endpoint_offsets
+                            out.x_pt += scene_to_pt(p1_offset.x())
+                            out.y_pt += scene_to_pt(p1_offset.y())
+                            out.w_pt += scene_to_pt(
+                                p2_offset.x() - p1_offset.x()
+                            )
+                            out.h_pt += scene_to_pt(
+                                p2_offset.y() - p1_offset.y()
+                            )
             adjusted.append(out)
         return adjusted
 
@@ -1708,8 +2429,31 @@ class FigureCanvas(QGraphicsView):
     def wheelEvent(self, event: QWheelEvent) -> None:
         if self.on_view_interacted is not None:
             self.on_view_interacted()
-        factor = 1.12 if event.angleDelta().y() > 0 else 1.0 / 1.12
+
+        # Trackpads emit many small pixel deltas while mouse wheels generally
+        # emit 120-unit angle steps.  Convert both to a gentle exponential
+        # scale and cap each event so neither device can produce a zoom jump.
+        pixel_y = event.pixelDelta().y()
+        if pixel_y:
+            delta = float(pixel_y)
+            sensitivity = 0.0015
+        else:
+            delta = float(event.angleDelta().y())
+            sensitivity = 0.00035
+        if abs(delta) < 0.01:
+            event.ignore()
+            return
+
+        factor = math.exp(delta * sensitivity)
+        factor = max(0.94, min(1.06, factor))
+        current_scale = abs(self.transform().m11())
+        next_scale = current_scale * factor
+        if next_scale < 0.15:
+            factor = 0.15 / max(current_scale, 1e-9)
+        elif next_scale > 6.0:
+            factor = 6.0 / max(current_scale, 1e-9)
         self.scale(factor, factor)
+        event.accept()
 
     def enter_place_mode(self, kind: str) -> None:
         """Switch to placement mode: next left-click places a 'text' or 'line' item."""
@@ -1718,6 +2462,10 @@ class FigureCanvas(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
 
     def mousePressEvent(self, event) -> None:
+        # A new interaction must never inherit guides from a drag that ended
+        # outside the viewport or was interrupted by another control.
+        self._end_smart_guides()
+
         # ── Placement mode: drop item at clicked scene position ───────────
         if self._pending_place and event.button() == Qt.MouseButton.LeftButton:
             kind = self._pending_place
@@ -1736,6 +2484,7 @@ class FigureCanvas(QGraphicsView):
                         DEFAULT_OVERLAY_TEXT_H,
                     ),
                 )
+                item.fit_width_to_text()
             else:
                 item = _OverlayLineItem(QLineF(sp.x() - 60, sp.y(), sp.x() + 60, sp.y()))
             self._scene.addItem(item)
@@ -1798,11 +2547,13 @@ class FigureCanvas(QGraphicsView):
 
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.MiddleButton:
+            self._end_smart_guides()
             self._panning = False
             self.unsetCursor()
             event.accept()
             return
         if event.button() == Qt.MouseButton.LeftButton and self._rubberband is not None:
+            self._end_smart_guides()
             rb_geom = self._rubberband.geometry()
             self._rubberband.hide()
             self._rubberband_origin = None
@@ -1825,8 +2576,17 @@ class FigureCanvas(QGraphicsView):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+        self._end_smart_guides()
         self._sync_blot_selection_from_scene()
         self.selected_text_refs()
+
+    def leaveEvent(self, event) -> None:
+        self._end_smart_guides()
+        super().leaveEvent(event)
+
+    def focusOutEvent(self, event) -> None:
+        self._end_smart_guides()
+        super().focusOutEvent(event)
 
     def _clear_text_editing_state(self) -> None:
         """Exit text editing and clear any in-text cursor selection."""
@@ -1919,7 +2679,12 @@ class FigureCanvas(QGraphicsView):
                 for key, item in self._text_items.items()
                 if item.isSelected()
             ]
-            if to_remove or built_in_to_remove:
+            built_in_lines_to_remove = [
+                (key, item)
+                for key, item in self._line_items.items()
+                if item.isSelected()
+            ]
+            if to_remove or built_in_to_remove or built_in_lines_to_remove:
                 self._notify_state_about_to_change()
                 for i in to_remove:
                     self._scene.removeItem(i)
@@ -1931,6 +2696,10 @@ class FigureCanvas(QGraphicsView):
                         self.on_text_edited(item.source_ref, "")
                     self._scene.removeItem(item)
                     self._text_items.pop(key, None)
+                for key, item in built_in_lines_to_remove:
+                    self._hidden_line_keys.add(key)
+                    self._scene.removeItem(item)
+                    self._line_items.pop(key, None)
                 event.accept()
                 return
 
@@ -1956,6 +2725,11 @@ class FigureCanvas(QGraphicsView):
                 item for item in self._overlay_items
                 if isinstance(item, _OverlayLineItem) and item.isSelected()
             ]
+            selected_built_in_lines = [
+                (key, item)
+                for key, item in self._line_items.items()
+                if item.isSelected()
+            ]
             selected_overlay_blots = [
                 item for item in self._overlay_items
                 if isinstance(item, _OverlayBlotItem) and item.isSelected()
@@ -1965,6 +2739,7 @@ class FigureCanvas(QGraphicsView):
                 or bool(self._selected_blot_keys)
                 or bool(selected_overlay_texts)
                 or bool(selected_overlay_lines)
+                or bool(selected_built_in_lines)
                 or bool(selected_overlay_blots)
             )
             if changed:
@@ -1986,6 +2761,10 @@ class FigureCanvas(QGraphicsView):
             # Move selected user-added lines with arrow keys
             for item in selected_overlay_lines:
                 item.setPos(item.pos() + delta)
+                moved = True
+            for key, item in selected_built_in_lines:
+                item.setPos(item.pos() + delta)
+                self._line_offsets[key] = QPointF(item.pos())
                 moved = True
             for item in selected_overlay_blots:
                 item.setPos(item.pos() + delta)
