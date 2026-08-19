@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import pandas as pd
-from PySide6.QtCore import QRect, QTimer
+from PySide6.QtCore import QEventLoop, QRect, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -34,6 +34,22 @@ class TutorialWorkflowTests(unittest.TestCase):
         window._persistence.remember_ui_state = Mock()
         return window
 
+    def _wait_for_image_loads(self, window: MainWindow) -> None:
+        if not any(panel.canvas.is_loading() for panel in window._image_panels):
+            return
+        loop = QEventLoop()
+        for panel in window._image_panels:
+            panel.canvas.image_load_finished.connect(
+                lambda _path: (
+                    loop.quit()
+                    if not any(item.canvas.is_loading() for item in window._image_panels)
+                    else None
+                )
+            )
+        QTimer.singleShot(5000, loop.quit)
+        loop.exec()
+        self.assertFalse(any(panel.canvas.is_loading() for panel in window._image_panels))
+
     def test_tutorial_import_uses_bundled_images_without_file_picker(self) -> None:
         window = self._make_window()
         original_lanes = window.param_panel.get_lane_count()
@@ -48,6 +64,7 @@ class TutorialWorkflowTests(unittest.TestCase):
         window._tutorial_controller.notify_column_table_ready()
         with patch("gui.main_window.QFileDialog.getOpenFileNames") as picker:
             window._upload_files()
+        self._wait_for_image_loads(window)
 
         picker.assert_not_called()
         loaded_names = {
@@ -185,6 +202,7 @@ class TutorialWorkflowTests(unittest.TestCase):
         workspace._lanes_spin.setValue(3)
         workspace._on_apply_structure()
         window._upload_files()
+        self._wait_for_image_loads(window)
 
         first_frame = next(
             frame

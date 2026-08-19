@@ -1,10 +1,8 @@
-"""
-Pure-Python band densitometry matching Fiji/ImageJ 8-bit signal behavior.
-Supports 8-bit and 16-bit grayscale TIFF (Bio-Rad ChemiDoc), PNG, JPG.
+"""Scientific densitometry over immutable source-image pixels.
 
-The values reported here are signal intensities: a stronger band is a larger
-number regardless of whether the file stores the band as dark-on-light or
-light-on-dark.  Display-only inversion never changes the measurement polarity.
+The functions in this module know nothing about preview buffers, tone controls,
+display inversion, zoom, or presentation geometry. Callers must inverse-map
+Canvas ROIs into raw-image geometry before entering this module.
 """
 from __future__ import annotations
 
@@ -12,154 +10,191 @@ from typing import Any
 
 import numpy as np
 from PIL import Image
-from core.image_transform import (
-    ImageTransformParams,
-    default_inverted_for_pil_image,
-    image_array_to_uint16_luminance,
-    image_transform_from_dict,
-    transform_pixels_16_to_8,
-)
+
+from core.image_transform import image_array_to_raw_luminance
 from utils.logger import get_logger
 
 log = get_logger(__name__)
 
 
-def _array_to_8bit_grayscale(arr: np.ndarray) -> np.ndarray:
-    """Convert a Pillow image array to ImageJ-style 8-bit grayscale.
+def load_raw_quantification_image(image_path: str) -> np.ndarray:
+    """Load scalar source pixels without an 8-bit conversion."""
+    with Image.open(image_path) as image:
+        raw = np.array(image)
+    pixels = image_array_to_raw_luminance(raw)
+    if pixels.ndim != 2:
+        raise ValueError(f"Quantification requires a 2D scalar image, got {pixels.shape}")
+    return np.ascontiguousarray(pixels)
 
-    - 16-bit grayscale: divide by 256 (same as ImageJ default)
-    - RGB/RGBA: luminance = 0.299R + 0.587G + 0.114B, then scale if needed
-    - 8-bit grayscale: use as-is
-    """
-    if arr.ndim == 2:
-        if arr.dtype == np.uint16:
-            # 16-bit grayscale (Bio-Rad ChemiDoc) -> 8-bit, matching ImageJ
-            arr = (arr / 256).astype(np.uint8)
+
+def _rect_components(geometry: Any) -> tuple[float, float, float, float] | None:
+    if hasattr(geometry, "x") and callable(geometry.x):
+        return (
+            float(geometry.x()),
+            float(geometry.y()),
+            float(geometry.width()),
+            float(geometry.height()),
+        )
+    if isinstance(geometry, dict) and "points" not in geometry:
+        return (
+            float(geometry.get("x", 0.0)),
+            float(geometry.get("y", 0.0)),
+            float(geometry.get("width", geometry.get("w", 1.0))),
+            float(geometry.get("height", geometry.get("h", 1.0))),
+        )
+    return None
+
+
+def _polygon_points(geometry: Any) -> np.ndarray | None:
+    if not isinstance(geometry, dict) or "points" not in geometry:
+        return None
+    values = geometry.get("points") or []
+    points: list[tuple[float, float]] = []
+    for point in values:
+        if isinstance(point, dict):
+            points.append((float(point["x"]), float(point["y"])))
         else:
-            arr = arr.astype(np.uint8)
-    elif arr.ndim == 3:
-        # RGB or RGBA
-        rgb = arr[:, :, :3].astype(np.float64)
-        gray = 0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2]
-        if arr.dtype == np.uint16:
-            gray = gray / 256
-        arr = gray.round().clip(0, 255).astype(np.uint8)
+            points.append((float(point[0]), float(point[1])))
+    if len(points) < 3:
+        return np.empty((0, 2), dtype=np.float64)
+    return np.asarray(points, dtype=np.float64)
+
+
+def _points_in_polygon(x: np.ndarray, y: np.ndarray, polygon: np.ndarray) -> np.ndarray:
+    """Vectorized even/odd test over pixel centres, including polygon edges."""
+    inside = np.zeros(x.shape, dtype=bool)
+    on_edge = np.zeros(x.shape, dtype=bool)
+    x1, y1 = polygon[-1]
+    tolerance = 1e-9
+    for x2, y2 in polygon:
+        dx = x2 - x1
+        dy = y2 - y1
+        cross = ((x - x1) * dy) - ((y - y1) * dx)
+        within = (
+            (x >= min(x1, x2) - tolerance)
+            & (x <= max(x1, x2) + tolerance)
+            & (y >= min(y1, y2) - tolerance)
+            & (y <= max(y1, y2) + tolerance)
+        )
+        on_edge |= (np.abs(cross) <= tolerance) & within
+        crossing = (y1 > y) != (y2 > y)
+        denominator = dy if abs(dy) > np.finfo(float).eps else np.finfo(float).eps
+        x_intersection = ((dx * (y - y1)) / denominator) + x1
+        inside ^= crossing & (x < x_intersection)
+        x1, y1 = x2, y2
+    return inside | on_edge
+
+
+def roi_pixels(raw_image: np.ndarray, raw_roi_geometry: Any) -> np.ndarray:
+    """Return source pixels selected by a raw-space rectangle or polygon."""
+    pixels = np.asarray(raw_image)
+    if pixels.ndim != 2:
+        raise ValueError(f"Quantification requires a 2D raw image, got {pixels.shape}")
+    image_height, image_width = pixels.shape
+
+    polygon = _polygon_points(raw_roi_geometry)
+    if polygon is not None:
+        if len(polygon) < 3:
+            return pixels[0:0, 0:0].reshape(-1)
+        left = max(0, int(np.floor(np.min(polygon[:, 0]))))
+        top = max(0, int(np.floor(np.min(polygon[:, 1]))))
+        right = min(image_width, int(np.ceil(np.max(polygon[:, 0]))))
+        bottom = min(image_height, int(np.ceil(np.max(polygon[:, 1]))))
+        if right <= left or bottom <= top:
+            return pixels[0:0, 0:0].reshape(-1)
+        yy, xx = np.mgrid[top:bottom, left:right]
+        mask = _points_in_polygon(xx + 0.5, yy + 0.5, polygon)
+        return pixels[top:bottom, left:right][mask]
+
+    rect = _rect_components(raw_roi_geometry)
+    if rect is None:
+        raise ValueError("ROI geometry must be a rectangle or a polygon with points.")
+    x, y, width, height = rect
+    x1 = max(0, int(x))
+    y1 = max(0, int(y))
+    x2 = min(image_width, int(x) + max(1, int(width)))
+    y2 = min(image_height, int(y) + max(1, int(height)))
+    if x2 <= x1 or y2 <= y1:
+        return pixels[0:0, 0:0].reshape(-1)
+    return pixels[y1:y2, x1:x2].reshape(-1)
+
+
+def _reported_scalar(value: np.generic | float | int) -> int | float:
+    scalar = value.item() if isinstance(value, np.generic) else value
+    if isinstance(scalar, (int, np.integer)):
+        return int(scalar)
+    return float(scalar)
+
+
+def quantify_roi(raw_image: np.ndarray, raw_roi_geometry: Any) -> dict[str, int | float]:
+    """Quantify one raw-space ROI using only immutable source values."""
+    selected = roi_pixels(raw_image, raw_roi_geometry)
+    if selected.size == 0:
+        return {
+            "Area": 0,
+            "Mean": 0.0,
+            "Min": 0,
+            "Max": 0,
+            "IntDen": 0.0,
+            "RawIntDen": 0,
+        }
+    values = selected.astype(np.float64, copy=False)
+    area = int(selected.size)
+    mean = float(np.mean(values))
+    if np.issubdtype(selected.dtype, np.unsignedinteger):
+        raw_total: int | float = int(np.sum(selected, dtype=np.uint64))
+    elif np.issubdtype(selected.dtype, np.signedinteger):
+        raw_total = int(np.sum(selected, dtype=np.int64))
     else:
-        raise ValueError(f"Unexpected image shape: {arr.shape}")
-
-    return arr
-
-
-def _to_8bit_signal(image_path: str) -> np.ndarray:
-    """Load an image as 8-bit WB signal, where a stronger band is brighter."""
-    with Image.open(image_path) as img:
-        # The viewer's default transform normalizes WB presentation to dark
-        # bands. Quantitation must therefore use the opposite polarity.
-        signal_inverted = not default_inverted_for_pil_image(img, fallback=True)
-        arr = np.array(img)
-
-    arr = _array_to_8bit_grayscale(arr)
-    if signal_inverted:
-        arr = np.subtract(255, arr, dtype=np.uint8)
-    return arr
-
-
-def _to_transformed_8bit_grayscale(
-    image_path: str,
-    image_transform: dict[str, Any] | ImageTransformParams,
-) -> np.ndarray:
-    """Load image and convert it to transformed 8-bit WB signal intensity."""
-    with Image.open(image_path) as img:
-        signal_inverted = not default_inverted_for_pil_image(img, fallback=True)
-        arr = np.array(img)
-    params = (
-        image_transform.sanitized()
-        if isinstance(image_transform, ImageTransformParams)
-        else image_transform_from_dict(image_transform)
-    )
-    # ``image_transform.inverted`` is a display preference. Measurement
-    # polarity comes from the file's default WB presentation instead.
-    params = ImageTransformParams(
-        low=params.low,
-        high=params.high,
-        gamma=params.gamma,
-        inverted=signal_inverted,
-    )
-    pixels_16 = image_array_to_uint16_luminance(arr)
-    return transform_pixels_16_to_8(pixels_16, params)
+        raw_total = float(np.sum(values, dtype=np.float64))
+    total = float(raw_total)
+    return {
+        "Area": area,
+        "Mean": round(mean, 3),
+        "Min": _reported_scalar(np.min(selected)),
+        "Max": _reported_scalar(np.max(selected)),
+        "IntDen": round(total, 3),
+        "RawIntDen": raw_total,
+    }
 
 
 def measure_all_lanes(
     image_path: str,
-    band_rois: list,  # list of QRectF or dict
-    image_transform: dict[str, Any] | ImageTransformParams | None = None,
+    band_rois: list,
+    image_transform: dict[str, Any] | None = None,
 ) -> list[dict]:
+    """Load the source once and quantify raw-space ROIs at native bit depth.
+
+    image_transform remains accepted for old callers and saved workflows, but
+    is intentionally ignored because it is presentation-only metadata.
     """
-    Load image once, convert to 8-bit WB signal, measure all lane ROIs.
-    Returns list of result dicts with keys:
-    lane, Area, Mean, Min, Max, IntDen, RawIntDen
-    """
-    if image_transform is None:
-        arr = _to_8bit_signal(image_path)
-    else:
-        arr = _to_transformed_8bit_grayscale(image_path, image_transform)
-    img_h, img_w = arr.shape
-    log.info("Image loaded as 8-bit: %dx%d", img_w, img_h)
-    return measure_all_lanes_in_array(arr, band_rois)
+    del image_transform
+    raw_image = load_raw_quantification_image(image_path)
+    log.info(
+        "Raw image loaded for quantification: %dx%d dtype=%s",
+        raw_image.shape[1],
+        raw_image.shape[0],
+        raw_image.dtype,
+    )
+    return measure_all_lanes_in_array(raw_image, band_rois)
 
 
-def measure_all_lanes_in_array(
-    arr: np.ndarray,
-    band_rois: list,  # list of QRectF or dict
-) -> list[dict]:
-    """Measure ROIs from an 8-bit array already prepared as signal intensity."""
-    img_h, img_w = arr.shape
-
-    results = []
-    for i, r in enumerate(band_rois, start=1):
-        if hasattr(r, 'x') and callable(r.x):
-            x, y = int(r.x()), int(r.y())
-            w, h = max(1, int(r.width())), max(1, int(r.height()))
-            lane_index = i
-            band_index = None
+def measure_all_lanes_in_array(arr: np.ndarray, band_rois: list) -> list[dict]:
+    """Quantify raw-space ROIs from an already loaded native-depth array."""
+    raw_image = np.asarray(arr)
+    results: list[dict] = []
+    for ordinal, geometry in enumerate(band_rois, start=1):
+        if isinstance(geometry, dict):
+            lane_index = int(geometry.get("lane", ordinal))
+            band_index = geometry.get("band")
+            band_label = geometry.get("band_label")
         else:
-            x, y = int(r.get('x', 0)), int(r.get('y', 0))
-            w, h = max(1, int(r.get('width', 1))), max(1, int(r.get('height', 1)))
-            lane_index = int(r.get('lane', i))
-            band_index = r.get('band')
-            band_label = r.get('band_label')
-        if hasattr(r, 'x') and callable(r.x):
+            lane_index = ordinal
+            band_index = None
             band_label = None
-
-        x1, y1 = max(0, x), max(0, y)
-        x2, y2 = min(img_w, x + w), min(img_h, y + h)
-        roi = arr[y1:y2, x1:x2]
-
-        if roi.size == 0:
-            log.warning("Lane %d: empty ROI after clamping", lane_index)
-            results.append({"lane": lane_index, "Area": 0, "Mean": 0.0,
-                            "Min": 0, "Max": 0, "IntDen": 0.0, "RawIntDen": 0})
-            continue
-
-        roi_f = roi.astype(np.float64)
-        area = roi.size
-        mean = float(np.mean(roi_f))
-        raw_int_den = int(np.sum(roi_f))
-
-        row = {
-            "lane": lane_index,
-            "Area": area,
-            "Mean": round(mean, 3),
-            "Min": int(np.min(roi)),
-            "Max": int(np.max(roi)),
-            "IntDen": round(mean * area, 3),
-            "RawIntDen": raw_int_den,
-        }
+        row = {"lane": lane_index, **quantify_roi(raw_image, geometry)}
         if band_index is not None:
             row["band"] = band_label or f"Band {int(band_index)}"
-            log.info("Lane %d Band %s: %s", lane_index, row["band"], row)
-        else:
-            log.info("Lane %d: %s", lane_index, row)
         results.append(row)
-
+        log.info("Lane %d: %s", lane_index, row)
     return results

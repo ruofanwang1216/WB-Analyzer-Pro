@@ -6,10 +6,13 @@ from math import atan2, degrees
 
 import numpy as np
 from PIL import Image
-from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QSizeF, QPoint, QTimer
+from PySide6.QtCore import (
+    Qt, QCoreApplication, QEvent, QObject, QThread, Signal, Slot,
+    QRectF, QPointF, QSizeF, QPoint, QTimer,
+)
 from PySide6.QtGui import (
     QPixmap, QPen, QBrush, QColor, QPainter, QWheelEvent, QImage,
-    QMouseEvent, QKeyEvent, QPainterPath,
+    QMouseEvent, QKeyEvent, QPainterPath, QTransform,
 )
 from PySide6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
@@ -18,9 +21,12 @@ from PySide6.QtWidgets import (
 )
 
 from core.image_transform import (
+    GeometryTransform,
     ImageTransformParams,
+    apply_geometry_to_display,
     auto_scale_range_16,
     default_inverted_for_pil_image,
+    image_array_to_raw_luminance,
     image_array_to_uint16_luminance,
     transform_pixels_16_to_8,
 )
@@ -33,6 +39,219 @@ _LANE_COLORS = [
 ]
 _MAX_DESKEW_ANGLE_DEG = 45.0
 _LANE_ROI_CANCEL_TOLERANCE_PX = 4
+_MAX_PREVIEW_EDGE_PX = 4096
+
+
+def _readonly(array: np.ndarray) -> np.ndarray:
+    """Return *array* as a read-only ndarray without copying when possible."""
+    result = np.ascontiguousarray(np.asarray(array))
+    result.setflags(write=False)
+    return result
+
+
+def _uncompressed_uint16_tiff_memmap(
+    path: Path,
+    image: Image.Image,
+) -> np.ndarray | None:
+    """Map a simple, contiguous uncompressed 16-bit grayscale TIFF.
+
+    Pillow itself maps a subset of these files internally, but exporting that
+    image through ``np.asarray`` materializes a bytes object.  Mapping the
+    contiguous strip payload directly keeps the quantitative buffer zero-copy.
+    TIFF layouts that are tiled, oriented, planar, compressed, or non-contiguous
+    deliberately fall back to Pillow's fully-tested decoder.
+    """
+    if path.suffix.lower() not in {".tif", ".tiff"}:
+        return None
+    tags = getattr(image, "tag_v2", None)
+    if tags is None or image.mode not in {"I;16", "I;16L", "I;16B"}:
+        return None
+
+    try:
+        width, height = image.size
+        bits = tags.get(258, (16,))
+        if isinstance(bits, int):
+            bits = (bits,)
+        compression = int(tags.get(259, 1))
+        samples_per_pixel = int(tags.get(277, 1))
+        planar_configuration = int(tags.get(284, 1))
+        orientation = int(tags.get(274, 1))
+        sample_format = tags.get(339, (1,))
+        if isinstance(sample_format, int):
+            sample_format = (sample_format,)
+        if (
+            tuple(int(value) for value in bits) != (16,)
+            or compression != 1
+            or samples_per_pixel != 1
+            or planar_configuration != 1
+            or orientation != 1
+            or tuple(int(value) for value in sample_format) != (1,)
+            or tags.get(324) is not None  # tiled TIFF
+        ):
+            return None
+
+        offsets = tags.get(273)
+        byte_counts = tags.get(279)
+        if isinstance(offsets, int):
+            offsets = (offsets,)
+        if isinstance(byte_counts, int):
+            byte_counts = (byte_counts,)
+        if not offsets or not byte_counts or len(offsets) != len(byte_counts):
+            return None
+
+        rows_per_strip = max(1, int(tags.get(278, height)))
+        row_bytes = width * 2
+        expected_offset = int(offsets[0])
+        rows_remaining = height
+        for offset, byte_count in zip(offsets, byte_counts):
+            strip_rows = min(rows_per_strip, rows_remaining)
+            expected_bytes = strip_rows * row_bytes
+            if int(offset) != expected_offset or int(byte_count) < expected_bytes:
+                return None
+            expected_offset += expected_bytes
+            rows_remaining -= strip_rows
+        if rows_remaining != 0:
+            return None
+
+        endian = getattr(tags, "_endian", "<")
+        dtype = np.dtype(">u2" if endian == ">" else "<u2")
+        mapped = np.memmap(
+            path,
+            dtype=dtype,
+            mode="r",
+            offset=int(offsets[0]),
+            shape=(height, width),
+            order="C",
+        )
+        return _readonly(mapped)
+    except (OSError, TypeError, ValueError, OverflowError):
+        return None
+
+
+def _preview_stride(width: int, height: int) -> int:
+    return max(1, int(np.ceil(max(width, height) / _MAX_PREVIEW_EDGE_PX)))
+
+
+def _render_default_preview(
+    quantitative_pixels: np.ndarray,
+    stride: int,
+    params: ImageTransformParams,
+) -> np.ndarray:
+    sampled = quantitative_pixels[::stride, ::stride]
+    display_source = image_array_to_uint16_luminance(sampled)
+    return _readonly(transform_pixels_16_to_8(display_source, params))
+
+
+class ImageLoadWorker(QObject):
+    """Decode and prepare an image without touching GUI-owned Qt objects."""
+
+    preview_ready = Signal(int, str, object)
+    finished = Signal(int, str, object)
+    error = Signal(int, str, str)
+    cancelled = Signal(int)
+
+    def __init__(self, request_id: int, path: str) -> None:
+        super().__init__()
+        self.request_id = request_id
+        self.path = path
+        self.failure_message: str | None = None
+
+    def _interrupted(self) -> bool:
+        return QThread.currentThread().isInterruptionRequested()
+
+    @Slot()
+    def run(self) -> None:
+        path = Path(self.path)
+        try:
+            with Image.open(path) as image:
+                width, height = image.size
+                if width <= 0 or height <= 0:
+                    raise ValueError(f"Image has invalid dimensions: {image.size}")
+                default_params = ImageTransformParams(
+                    inverted=default_inverted_for_pil_image(image, fallback=True)
+                )
+                stride = _preview_stride(width, height)
+                quantitative = _uncompressed_uint16_tiff_memmap(path, image)
+
+                if quantitative is not None:
+                    preview = _render_default_preview(
+                        quantitative, stride, default_params
+                    )
+                    self.preview_ready.emit(
+                        self.request_id,
+                        self.path,
+                        {
+                            "pixels": preview,
+                            "raw_shape": (height, width),
+                            "stride": stride,
+                            "default_params": default_params,
+                            "memory_mapped": True,
+                        },
+                    )
+                    if self._interrupted():
+                        self.cancelled.emit(self.request_id)
+                        return
+                    self.finished.emit(
+                        self.request_id,
+                        self.path,
+                        {
+                            "quantitative_pixels": quantitative,
+                            "raw_shape": (height, width),
+                            "stride": stride,
+                            "default_params": default_params,
+                            "memory_mapped": True,
+                        },
+                    )
+                    return
+
+                # Pillow is the compatibility decoder for compressed, tiled,
+                # multichannel, or otherwise non-trivial TIFF layouts.  The
+                # decoded source is retained only until native-depth scalar
+                # quantitative pixels have been prepared.
+                decoded = np.asarray(image)
+                if decoded.ndim not in {2, 3} or decoded.size == 0:
+                    raise ValueError(f"Unexpected image shape: {decoded.shape}")
+
+                # Prepare and emit the sampled preview before the potentially
+                # expensive full-resolution RGB -> luminance conversion.
+                sampled_quantitative = image_array_to_raw_luminance(
+                    decoded[::stride, ::stride]
+                )
+                preview = _render_default_preview(
+                    sampled_quantitative, 1, default_params
+                )
+                self.preview_ready.emit(
+                    self.request_id,
+                    self.path,
+                    {
+                        "pixels": preview,
+                        "raw_shape": (height, width),
+                        "stride": stride,
+                        "default_params": default_params,
+                        "memory_mapped": False,
+                    },
+                )
+                if self._interrupted():
+                    self.cancelled.emit(self.request_id)
+                    return
+
+                quantitative = _readonly(
+                    image_array_to_raw_luminance(decoded)
+                )
+                self.finished.emit(
+                    self.request_id,
+                    self.path,
+                    {
+                        "quantitative_pixels": quantitative,
+                        "raw_shape": (height, width),
+                        "stride": stride,
+                        "default_params": default_params,
+                        "memory_mapped": False,
+                    },
+                )
+        except Exception as exc:
+            self.failure_message = str(exc)
+            self.error.emit(self.request_id, self.path, self.failure_message)
 
 
 class EditableBandRectItem(QGraphicsRectItem):
@@ -251,6 +470,9 @@ class ImageCanvas(QGraphicsView):
     rotation_mode_changed = Signal(bool)
     panel_interacted = Signal()          # click/wheel/pan interaction for panel activation
     roi_cleared = Signal()               # emitted when a manual ROI selection is cleared in-canvas
+    image_preview_ready = Signal(str)
+    image_load_finished = Signal(str)
+    image_load_failed = Signal(str, str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -259,7 +481,18 @@ class ImageCanvas(QGraphicsView):
 
         self._pixmap_item: QGraphicsPixmapItem | None = None
         self._pixmap_original_size: QSizeF | None = None  # Original image size before any scaling
+        self._raw_image_pixels: np.ndarray | None = None
+        self._raw_quantification_pixels: np.ndarray | None = None
         self._display_source_pixels: np.ndarray | None = None
+        self._raw_image_shape: tuple[int, int] | None = None
+        self._display_preview_stride = 1
+        self._image_memory_mapped = False
+        self._image_load_request_id = 0
+        self._image_load_jobs: dict[int, tuple[QThread, ImageLoadWorker]] = {}
+        self._pending_image_load_results: dict[int, tuple[str, str, str | None]] = {}
+        self._image_loading = False
+        self._loading_item: QGraphicsSimpleTextItem | None = None
+        self._geometry_transform = GeometryTransform()
         self._image_default_transform_params = self._default_image_transform_params()
         self._image_transform_params = self._image_default_transform_params
         self._roi_item: QGraphicsRectItem | None = None
@@ -323,17 +556,19 @@ class ImageCanvas(QGraphicsView):
         # dark bands on a light background. This affects display only.
         return ImageTransformParams(inverted=True)
 
-    def load_image(self, path: str | Path) -> None:
-        """Load an image file at full resolution and fit it in the view.
-
-        The original image resolution is preserved in memory. Display scaling
-        uses high-quality SmoothTransformation. ROI coordinates are in image space.
-        """
+    def _reset_image_state(self) -> None:
         self.clear_tutorial_roi_hint()
         self._scene.clear()
         self._pixmap_item = None
         self._pixmap_original_size = None
+        self._raw_image_pixels = None
+        self._raw_quantification_pixels = None
         self._display_source_pixels = None
+        self._raw_image_shape = None
+        self._display_preview_stride = 1
+        self._image_memory_mapped = False
+        self._loading_item = None
+        self._geometry_transform = GeometryTransform()
         self._image_default_transform_params = self._default_image_transform_params()
         self._image_transform_params = self._image_default_transform_params
         self._roi_item = None
@@ -359,28 +594,197 @@ class ImageCanvas(QGraphicsView):
         self._fixed_band_roi_relative = None
         self._moving_fixed_roi = False
 
-        with Image.open(path) as img:
-            default_inverted = default_inverted_for_pil_image(img, fallback=True)
-            arr = np.array(img)
-        self._image_default_transform_params = ImageTransformParams(inverted=default_inverted)
+    def _show_loading_state(self, message: str) -> None:
+        if self._loading_item is not None and self._loading_item.scene() is self._scene:
+            self._loading_item.setText(message)
+            return
+        if self._pixmap_item is None:
+            width = max(320, self.viewport().width())
+            height = max(180, self.viewport().height())
+            self._scene.setSceneRect(0, 0, width, height)
+            position = QPointF(width / 2.0, height / 2.0)
+        else:
+            position = self._pixmap_item.sceneBoundingRect().center()
+        item = self._scene.addSimpleText(message)
+        item.setBrush(QBrush(QColor("#385161")))
+        font = item.font()
+        font.setBold(True)
+        font.setPointSize(10)
+        item.setFont(font)
+        item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        bounds = item.boundingRect()
+        item.setPos(position.x() - bounds.width() / 2.0, position.y() - bounds.height() / 2.0)
+        item.setZValue(10000)
+        self._loading_item = item
+
+    def load_image(self, path: str | Path) -> int:
+        """Start two-stage image loading and return the request identifier.
+
+        TIFF decode, native-depth quantitative data, and the sampled preview
+        are prepared by :class:`ImageLoadWorker`.  This method returns before
+        decoding finishes; only QPixmap creation and scene updates run here on
+        the GUI thread.
+        """
+        normalized_path = str(Path(path).expanduser().resolve())
+        if not Path(normalized_path).is_file():
+            raise FileNotFoundError(normalized_path)
+
+        self.cancel_image_load(wait=False)
+        self._image_load_request_id += 1
+        request_id = self._image_load_request_id
+        self._reset_image_state()
+        self._image_loading = True
+        self._show_loading_state("Loading image…")
+
+        thread = QThread(self)
+        thread.setProperty("image_load_request_id", request_id)
+        worker = ImageLoadWorker(request_id, normalized_path)
+        worker.moveToThread(thread)
+        self._image_load_jobs[request_id] = (thread, worker)
+
+        thread.started.connect(worker.run)
+        worker.preview_ready.connect(self._on_image_preview_ready)
+        worker.finished.connect(self._on_image_load_finished)
+        worker.error.connect(self._on_image_load_error)
+        worker.cancelled.connect(self._on_image_load_cancelled)
+        for terminal_signal in (worker.finished, worker.error, worker.cancelled):
+            terminal_signal.connect(worker.deleteLater)
+            terminal_signal.connect(thread.quit, Qt.ConnectionType.DirectConnection)
+        thread.finished.connect(thread.deleteLater)
+        thread.destroyed.connect(self._on_image_load_thread_destroyed)
+        thread.start()
+        return request_id
+
+    def load_image_blocking(self, path: str | Path) -> None:
+        """Synchronous compatibility helper for scripts and deterministic tests."""
+        normalized_path = str(Path(path).expanduser().resolve())
+        if not Path(normalized_path).is_file():
+            raise FileNotFoundError(normalized_path)
+        self.cancel_image_load(wait=True)
+        self._image_load_request_id += 1
+        request_id = self._image_load_request_id
+        self._reset_image_state()
+        self._image_loading = True
+        self._show_loading_state("Loading image…")
+        worker = ImageLoadWorker(request_id, normalized_path)
+        worker.preview_ready.connect(self._on_image_preview_ready)
+        worker.finished.connect(self._on_image_load_finished)
+        worker.error.connect(self._on_image_load_error)
+        worker.run()
+        if worker.failure_message is not None:
+            raise ValueError(worker.failure_message)
+
+    @Slot(int, str, object)
+    def _on_image_preview_ready(self, request_id: int, path: str, payload: object) -> None:
+        if request_id != self._image_load_request_id or not isinstance(payload, dict):
+            return
+        preview = np.asarray(payload["pixels"], dtype=np.uint8)
+        height, width = payload["raw_shape"]
+        self._raw_image_shape = (int(height), int(width))
+        self._display_preview_stride = int(payload["stride"])
+        self._image_default_transform_params = payload["default_params"]
         self._image_transform_params = self._image_default_transform_params
-        self._display_source_pixels = image_array_to_uint16_luminance(arr)
+        self._image_memory_mapped = bool(payload["memory_mapped"])
 
-        px = self._make_display_pixmap()
-        if px.isNull():
-            raise ValueError(f"Could not load image: {path}")
-
-        # Store original size before any scaling
-        self._pixmap_original_size = QSizeF(px.width(), px.height())
-
-        self._pixmap_item = QGraphicsPixmapItem(px)
-        # Use high-quality transformation for this item during display
+        pixmap = self._pixmap_from_display_pixels(preview)
+        if pixmap.isNull():
+            self._on_image_load_error(request_id, path, f"Could not load image: {path}")
+            return
+        self._scene.clear()
+        self._loading_item = None
+        self._pixmap_item = QGraphicsPixmapItem(pixmap)
         self._pixmap_item.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
         self._scene.addItem(self._pixmap_item)
-        self._scene.setSceneRect(self._pixmap_item.boundingRect())
-        self.fitInView(self._pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
+        self._update_pixmap_scene_geometry()
         self.resetTransform()
         self.fitInView(self._pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
+        self._show_loading_state("Loading full-resolution data…")
+        self.image_preview_ready.emit(path)
+
+    @Slot(int, str, object)
+    def _on_image_load_finished(self, request_id: int, path: str, payload: object) -> None:
+        if request_id != self._image_load_request_id or not isinstance(payload, dict):
+            return
+        quantitative = _readonly(payload["quantitative_pixels"])
+        self._raw_quantification_pixels = quantitative
+        # Presentation conversion is now performed only on the sampled view;
+        # retaining a separate full-resolution uint16 display buffer is wasteful.
+        self._display_source_pixels = quantitative
+        self._raw_image_pixels = quantitative
+        height, width = payload["raw_shape"]
+        self._raw_image_shape = (int(height), int(width))
+        self._display_preview_stride = int(payload["stride"])
+        self._image_memory_mapped = bool(payload["memory_mapped"])
+        if self._loading_item is not None and self._loading_item.scene() is self._scene:
+            self._scene.removeItem(self._loading_item)
+        self._loading_item = None
+        if request_id in self._image_load_jobs:
+            self._pending_image_load_results[request_id] = ("finished", path, None)
+        else:
+            self._image_loading = False
+            self.image_load_finished.emit(path)
+
+    @Slot(int, str, str)
+    def _on_image_load_error(self, request_id: int, path: str, message: str) -> None:
+        if request_id != self._image_load_request_id:
+            return
+        self._reset_image_state()
+        self._show_loading_state("Image load failed")
+        if request_id in self._image_load_jobs:
+            self._pending_image_load_results[request_id] = ("failed", path, message)
+        else:
+            self._image_loading = False
+            self.image_load_failed.emit(path, message)
+
+    @Slot(int)
+    def _on_image_load_cancelled(self, request_id: int) -> None:
+        if request_id == self._image_load_request_id:
+            self._image_loading = False
+
+    @Slot(QObject)
+    def _on_image_load_thread_destroyed(self, thread_object: QObject | None = None) -> None:
+        if thread_object is None:
+            return
+        request_id = int(thread_object.property("image_load_request_id") or -1)
+        self._image_load_jobs.pop(request_id, None)
+        result = self._pending_image_load_results.pop(request_id, None)
+        if request_id != self._image_load_request_id or result is None:
+            return
+        self._image_loading = False
+        status, path, message = result
+        if status == "finished":
+            self.image_load_finished.emit(path)
+        else:
+            self.image_load_failed.emit(path, message or "Unknown image load error")
+
+    def cancel_image_load(self, *, wait: bool = False) -> None:
+        for thread, _worker in tuple(self._image_load_jobs.values()):
+            if thread.isRunning():
+                thread.requestInterruption()
+        if wait:
+            for thread, _worker in tuple(self._image_load_jobs.values()):
+                if thread.isRunning():
+                    thread.wait()
+                # ``wait`` does not run the GUI event queue, so explicitly
+                # finish deferred QThread deletion before a canvas/window can
+                # be destroyed. This prevents stale QObject ownership during
+                # fast close/reload paths.
+                thread.deleteLater()
+                QCoreApplication.sendPostedEvents(
+                    thread, QEvent.Type.DeferredDelete
+                )
+
+    def clear_image(self) -> None:
+        self.cancel_image_load(wait=False)
+        self._image_load_request_id += 1
+        self._image_loading = False
+        self._reset_image_state()
+
+    def is_loading(self) -> bool:
+        return self._image_loading
+
+    def is_memory_mapped(self) -> bool:
+        return self._image_memory_mapped
 
     def has_image_transform_source(self) -> bool:
         return self._display_source_pixels is not None
@@ -394,58 +798,117 @@ class ImageCanvas(QGraphicsView):
         if self._pixmap_item is None or self._display_source_pixels is None:
             return
         self._pixmap_item.setPixmap(self._make_display_pixmap())
-        self._scene.setSceneRect(self._pixmap_item.boundingRect())
+        self._update_pixmap_scene_geometry()
 
     def has_modified_image_transform(self) -> bool:
         return self._image_transform_params != self._image_default_transform_params
 
     def has_quantitative_image_transform(self) -> bool:
-        default = self._image_default_transform_params
-        params = self._image_transform_params
-        return (
-            params.low != default.low
-            or params.high != default.high
-            or abs(params.gamma - default.gamma) > 1e-6
-        )
+        """Compatibility API: display transforms are never quantitative."""
+        return False
 
     def current_display_pixels(self) -> np.ndarray | None:
         if self._display_source_pixels is None:
             return None
-        return np.ascontiguousarray(
-            transform_pixels_16_to_8(
-                self._display_source_pixels,
-                self._image_transform_params,
-            )
+        preview_source = self._display_source_pixels[
+            ::self._display_preview_stride,
+            ::self._display_preview_stride,
+        ]
+        preview_source = image_array_to_uint16_luminance(preview_source)
+        toned = transform_pixels_16_to_8(
+            preview_source,
+            self._image_transform_params,
         )
+        return apply_geometry_to_display(toned, self._geometry_transform)
 
     def current_analysis_pixels(self) -> np.ndarray | None:
-        """Return WB signal pixels; display-only inversion is intentionally ignored."""
-        if self._display_source_pixels is None:
+        """Return a safe copy of native-depth raw quantification pixels."""
+        if self._raw_quantification_pixels is None:
             return None
-        params = ImageTransformParams(
-            low=self._image_transform_params.low,
-            high=self._image_transform_params.high,
-            gamma=self._image_transform_params.gamma,
-            # Default display polarity presents WB signal as dark bands. The
-            # quantitative buffer is its opposite, so stronger signal is high.
-            inverted=not self._image_default_transform_params.inverted,
-        )
-        return np.ascontiguousarray(
-            transform_pixels_16_to_8(
-                self._display_source_pixels,
-                params,
-            )
-        )
+        return self._raw_quantification_pixels.copy()
 
     def get_analysis_transform_params(self) -> ImageTransformParams:
-        """Return the tone transform used for quantitative signal pixels."""
-        params = self.get_image_transform_params()
-        return ImageTransformParams(
-            low=params.low,
-            high=params.high,
-            gamma=params.gamma,
-            inverted=not self._image_default_transform_params.inverted,
-        ).sanitized()
+        """Deprecated compatibility API; quantification has no tone transform."""
+        return ImageTransformParams(inverted=False)
+
+    def get_geometry_transform(self) -> GeometryTransform:
+        return self._geometry_transform
+
+    def set_geometry_transform(self, transform: GeometryTransform) -> None:
+        """Apply non-destructive presentation geometry to the preview only."""
+        self._geometry_transform = transform.sanitized()
+        if self._pixmap_item is None or self._display_source_pixels is None:
+            return
+        pixmap = self._make_display_pixmap()
+        self._pixmap_item.setPixmap(pixmap)
+        self._update_pixmap_scene_geometry()
+
+    def raw_image_size(self) -> QSizeF | None:
+        if self._raw_image_shape is None:
+            return None
+        height, width = self._raw_image_shape
+        return QSizeF(width, height)
+
+    def map_canvas_points_to_raw(self, points: np.ndarray) -> np.ndarray:
+        size = self.raw_image_size()
+        if size is None:
+            raise ValueError("No raw image is loaded.")
+        return self._geometry_transform.map_points_to_raw(
+            points, int(size.width()), int(size.height())
+        )
+
+    def map_raw_points_to_canvas(self, points: np.ndarray) -> np.ndarray:
+        size = self.raw_image_size()
+        if size is None:
+            raise ValueError("No raw image is loaded.")
+        return self._geometry_transform.map_points_to_canvas(
+            points, int(size.width()), int(size.height())
+        )
+
+    def map_canvas_roi_to_raw(self, roi) -> dict:
+        """Inverse-map a Canvas rectangle/polygon to a raw-image polygon."""
+        metadata: dict = {}
+        if isinstance(roi, dict):
+            metadata = {
+                key: value
+                for key, value in roi.items()
+                if key not in {"x", "y", "width", "height", "w", "h", "points"}
+            }
+            if "points" in roi:
+                canvas_points = np.asarray(
+                    [
+                        (point["x"], point["y"]) if isinstance(point, dict) else point
+                        for point in roi["points"]
+                    ],
+                    dtype=np.float64,
+                )
+            else:
+                x = float(roi.get("x", 0.0))
+                y = float(roi.get("y", 0.0))
+                width = float(roi.get("width", roi.get("w", 1.0)))
+                height = float(roi.get("height", roi.get("h", 1.0)))
+                canvas_points = np.array(
+                    ((x, y), (x + width, y), (x + width, y + height), (x, y + height)),
+                    dtype=np.float64,
+                )
+        else:
+            x, y = float(roi.x()), float(roi.y())
+            width, height = float(roi.width()), float(roi.height())
+            canvas_points = np.array(
+                ((x, y), (x + width, y), (x + width, y + height), (x, y + height)),
+                dtype=np.float64,
+            )
+        raw_points = self.map_canvas_points_to_raw(canvas_points)
+        return {
+            **metadata,
+            "points": [
+                {"x": float(point[0]), "y": float(point[1])}
+                for point in raw_points
+            ],
+        }
+
+    def map_canvas_rois_to_raw(self, rois: list) -> list[dict]:
+        return [self.map_canvas_roi_to_raw(roi) for roi in rois]
 
     def reset_image_transform(self) -> ImageTransformParams:
         params = self._image_default_transform_params
@@ -456,7 +919,15 @@ class ImageCanvas(QGraphicsView):
         if self._display_source_pixels is None:
             params = self._image_default_transform_params
         else:
-            low, high = auto_scale_range_16(self._display_source_pixels)
+            source = self._display_source_pixels
+            if source.dtype == np.uint8:
+                low, high = auto_scale_range_16(source)
+                low *= 257
+                high *= 257
+            else:
+                low, high = auto_scale_range_16(
+                    image_array_to_uint16_luminance(source)
+                )
             params = ImageTransformParams(
                 low=low,
                 high=high,
@@ -470,6 +941,11 @@ class ImageCanvas(QGraphicsView):
         display = self.current_display_pixels()
         if display is None:
             return QPixmap()
+        return self._pixmap_from_display_pixels(display)
+
+    @staticmethod
+    def _pixmap_from_display_pixels(display: np.ndarray) -> QPixmap:
+        display = np.ascontiguousarray(np.asarray(display, dtype=np.uint8))
         height, width = display.shape
         qimage = QImage(
             display.data,
@@ -478,7 +954,34 @@ class ImageCanvas(QGraphicsView):
             display.strides[0],
             QImage.Format.Format_Grayscale8,
         )
-        return QPixmap.fromImage(qimage.copy())
+        # QPixmap.fromImage() takes its own native pixel storage synchronously;
+        # copying QImage first only duplicates the full preview buffer.
+        return QPixmap.fromImage(qimage)
+
+    def _update_pixmap_scene_geometry(self) -> None:
+        """Keep scene coordinates at full raw/presentation resolution.
+
+        Large previews are sampled for responsive display, but the pixmap item
+        is scaled back to the exact full-resolution presentation bounds.  ROI
+        coordinates therefore remain independent of preview resolution.
+        """
+        if self._pixmap_item is None:
+            return
+        raw_size = self.raw_image_size()
+        pixmap = self._pixmap_item.pixmap()
+        if raw_size is None or pixmap.isNull():
+            self._pixmap_original_size = None
+            return
+        _matrix, output_size = self._geometry_transform.affine(
+            int(raw_size.width()),
+            int(raw_size.height()),
+        )
+        scene_width, scene_height = output_size
+        scale_x = scene_width / max(1, pixmap.width())
+        scale_y = scene_height / max(1, pixmap.height())
+        self._pixmap_item.setTransform(QTransform.fromScale(scale_x, scale_y))
+        self._pixmap_original_size = QSizeF(scene_width, scene_height)
+        self._scene.setSceneRect(self._pixmap_item.sceneBoundingRect())
 
     def get_roi(self) -> QRectF | None:
         """Return current main lane ROI in image/scene coordinates, or None.
@@ -489,8 +992,8 @@ class ImageCanvas(QGraphicsView):
             return None
 
         scene_rect = self._roi_item.rect()
-        # Scene coordinates ARE original image coordinates (no scaling of the pixmap itself)
-        # Just return as-is
+        # The preview pixmap may be sampled, but its item transform keeps scene
+        # coordinates at full presentation resolution. Return the ROI as-is.
         return scene_rect
 
     def get_band_roi(self) -> QRectF | None:
@@ -503,7 +1006,7 @@ class ImageCanvas(QGraphicsView):
         """Return the loaded image size in scene/image coordinates."""
         if self._pixmap_item is None:
             return None
-        rect = self._pixmap_item.boundingRect()
+        rect = self._pixmap_item.sceneBoundingRect()
         return QSizeF(rect.width(), rect.height())
 
     def show_tutorial_roi_hint(self, rect: QRectF) -> None:
@@ -511,7 +1014,7 @@ class ImageCanvas(QGraphicsView):
         self.clear_tutorial_roi_hint()
         if self._pixmap_item is None:
             return
-        image_rect = self._pixmap_item.boundingRect()
+        image_rect = self._pixmap_item.sceneBoundingRect()
         hint = QRectF(rect).intersected(image_rect)
         if hint.width() <= 4 or hint.height() <= 4:
             return
@@ -851,7 +1354,7 @@ class ImageCanvas(QGraphicsView):
             for band in lane["bands"]:
                 item = EditableBandRectItem(
                     QRectF(band["band_rect"]),
-                    self._pixmap_item.boundingRect() if self._pixmap_item else QRectF(),
+                    self._pixmap_item.sceneBoundingRect() if self._pixmap_item else QRectF(),
                     self._emit_auto_rois_changed,
                 )
                 row_index = band.get("row_index")
@@ -1060,7 +1563,7 @@ class ImageCanvas(QGraphicsView):
             return
 
         self._remove_rotation_overlay()
-        bounds = self._pixmap_item.boundingRect()
+        bounds = self._pixmap_item.sceneBoundingRect()
         self._rotation_center = bounds.center()
 
         pen = QPen(QColor("#D84A4A"), 1.0, Qt.PenStyle.SolidLine)
@@ -1161,18 +1664,11 @@ class ImageCanvas(QGraphicsView):
     def get_image_scale(self) -> float:
         """Return scale factor to convert scene coords → original image pixel coords.
 
-        In this canvas the pixmap item is stored at full resolution in the scene and
-        only the view transform (fitInView) is used for display scaling, so scene
-        coordinates already equal image pixel coordinates and this returns 1.0.
-        The method exists as an explicit contract so callers don't need to know the
-        internal representation, and will remain correct if the pixmap item is ever
-        scaled directly (e.g. via setScale or setTransform on the item itself).
+        Scene coordinates deliberately stay at full raw/presentation resolution,
+        even when a large display preview is sampled and its pixmap item is scaled.
+        Therefore scene coordinates already equal image coordinates.
         """
-        if self._pixmap_item is None:
-            return 1.0
-        scene_w = self._pixmap_item.boundingRect().width()
-        img_w = self._pixmap_item.pixmap().width()
-        return img_w / scene_w if scene_w > 0 else 1.0
+        return 1.0
 
     def zoom_in(self) -> None:
         """Zoom in 20%, centered on viewport center. Max 800%."""
@@ -1208,6 +1704,9 @@ class ImageCanvas(QGraphicsView):
     # ── Mouse events ───────────────────────────────────────────────────────────
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if self._image_loading:
+            event.accept()
+            return
         if self._pixmap_item and event.button() in (
             Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton, Qt.MouseButton.MiddleButton
         ):
@@ -1261,7 +1760,7 @@ class ImageCanvas(QGraphicsView):
                 rect = self._default_auto_band_rect(scene_pos)
                 item = EditableBandRectItem(
                     rect,
-                    self._pixmap_item.boundingRect(),
+                    self._pixmap_item.sceneBoundingRect(),
                     self._emit_auto_rois_changed,
                 )
                 item.set_editing_enabled(True)
@@ -1298,7 +1797,7 @@ class ImageCanvas(QGraphicsView):
         if event.button() == Qt.MouseButton.LeftButton and self._pixmap_item:
             if self.dragMode() == QGraphicsView.DragMode.NoDrag:
                 sp = self.mapToScene(event.pos())
-                if self._pixmap_item.boundingRect().contains(sp):
+                if self._pixmap_item.sceneBoundingRect().contains(sp):
                     if (
                         self._wb_plot_roi_only
                         and self._auto_edit_enabled
@@ -1349,6 +1848,9 @@ class ImageCanvas(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._image_loading:
+            event.accept()
+            return
         if self._right_panning:
             delta = event.pos() - self._pan_last_pos
             self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
@@ -1401,6 +1903,9 @@ class ImageCanvas(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._image_loading:
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.RightButton and self._right_panning:
             self._right_panning = False
             self.setCursor(Qt.CursorShape.CrossCursor)
@@ -1452,6 +1957,9 @@ class ImageCanvas(QGraphicsView):
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
+        if self._image_loading:
+            event.accept()
+            return
         if self._pixmap_item is None:
             super().wheelEvent(event)
             return
@@ -1506,7 +2014,7 @@ class ImageCanvas(QGraphicsView):
     # ── Helpers ────────────────────────────────────────────────────────────────
 
     def _clamp_to_image(self, pt: QPointF) -> QPointF:
-        b = self._pixmap_item.boundingRect()
+        b = self._pixmap_item.sceneBoundingRect()
         return QPointF(
             max(b.left(), min(b.right(), pt.x())),
             max(b.top(), min(b.bottom(), pt.y())),
@@ -1527,7 +2035,7 @@ class ImageCanvas(QGraphicsView):
         fixed_size = self._current_fixed_roi_scene_size()
         if self._pixmap_item is None or fixed_size is None:
             return
-        bounds = self._pixmap_item.boundingRect()
+        bounds = self._pixmap_item.sceneBoundingRect()
         width = min(fixed_size.width(), bounds.width())
         height = min(fixed_size.height(), bounds.height())
         x = max(bounds.left(), min(bounds.right() - width, top_left.x()))

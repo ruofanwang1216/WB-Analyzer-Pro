@@ -5,8 +5,6 @@ import math
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-from PIL import Image
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QLineF
 from PySide6.QtGui import (
     QBrush,
@@ -32,7 +30,7 @@ from PySide6.QtWidgets import (
 # Direct reference to avoid MRO ambiguity in mousePressEvent bypass
 _QGraphicsItemBase = QGraphicsItem
 
-from core.image_transform import ImageTransformParams, image_array_to_uint16_luminance, transform_pixels_16_to_8
+from core.export_engine import _crop_qimage
 from gui.layout_editor_commands import ResizeItemCommand
 
 
@@ -428,6 +426,19 @@ class EditableTextItem(ResizableItemMixin, QGraphicsTextItem):
         return layer
 
     def mouseDoubleClickEvent(self, event) -> None:
+        # A graphics-scene double click is preceded by a normal mouse press.
+        # That press arms our manual drag implementation; if it remains armed,
+        # tiny pointer jitter while the caret is active can move the whole text
+        # box and interrupt typing. Enter editing from a clean drag state.
+        self._is_user_dragging = False
+        self._drag_start_scene_pos = None
+        self._drag_start_item_pos = None
+        self._drag_threshold_crossed = False
+        self._drag_group_start_positions.clear()
+        scene = self.scene()
+        clear_guides = getattr(scene, "clear_smart_guides", None)
+        if clear_guides is not None:
+            clear_guides()
         self._old_text = self.toPlainText()
         self.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditorInteraction)
         self.setFocus(Qt.FocusReason.MouseFocusReason)
@@ -1034,6 +1045,8 @@ class BlotPlaceholderItem(ResizableItemMixin, QGraphicsRectItem):
         image_path: str | None = None,
         roi: dict[str, float] | None = None,
         transform: dict[str, Any] | None = None,
+        geometry_transform: dict[str, Any] | None = None,
+        preserve_aspect: bool = False,
     ) -> None:
         super().__init__(QRectF(0, 0, rect.width(), rect.height()))
         self.setPos(rect.topLeft())
@@ -1041,6 +1054,8 @@ class BlotPlaceholderItem(ResizableItemMixin, QGraphicsRectItem):
         self.image_path = image_path
         self.roi = dict(roi or {})
         self.transform = dict(transform or {})
+        self.geometry_transform = dict(geometry_transform or {})
+        self.preserve_aspect = bool(preserve_aspect)
         self._preview_buffer: bytes | None = None
         self.setFlags(
             QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
@@ -1157,7 +1172,25 @@ class BlotPlaceholderItem(ResizableItemMixin, QGraphicsRectItem):
             painter.drawRect(self.rect())
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "No image")
             return
-        painter.drawImage(self.rect(), preview)
+        rect = self.rect()
+        if self.preserve_aspect:
+            source_width = max(1.0, float(preview.width()))
+            source_height = max(1.0, float(preview.height()))
+            scale = min(
+                rect.width() / source_width,
+                rect.height() / source_height,
+            )
+            target_width = source_width * scale
+            target_height = source_height * scale
+            target = QRectF(
+                rect.center().x() - target_width / 2.0,
+                rect.center().y() - target_height / 2.0,
+                target_width,
+                target_height,
+            )
+            painter.drawImage(target, preview)
+        else:
+            painter.drawImage(rect, preview)
         painter.setPen(self._frame_pen())
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRect(self.rect())
@@ -1166,31 +1199,13 @@ class BlotPlaceholderItem(ResizableItemMixin, QGraphicsRectItem):
         if not self.image_path or not Path(self.image_path).exists():
             return None
         try:
-            with Image.open(self.image_path) as img:
-                arr = np.array(img)
-            if self.roi:
-                x = max(0, int(self.roi.get("x", 0)))
-                y = max(0, int(self.roi.get("y", 0)))
-                w = max(1, int(self.roi.get("w", arr.shape[1] - x)))
-                h = max(1, int(self.roi.get("h", arr.shape[0] - y)))
-                arr = arr[y:y + h, x:x + w]
-            source = image_array_to_uint16_luminance(arr)
-            params = ImageTransformParams(
-                low=float(self.transform.get("low", 0.0)),
-                high=float(self.transform.get("high", 65535.0)),
-                gamma=float(self.transform.get("gamma", 1.0)),
-                inverted=bool(self.transform.get("inverted", True)),
+            image = _crop_qimage(
+                self.image_path,
+                self.roi,
+                self.transform,
+                geometry_transform=self.geometry_transform,
             )
-            mapped = transform_pixels_16_to_8(source, params)
-            mapped = np.ascontiguousarray(mapped)
-            self._preview_buffer = mapped.tobytes()
-            return QImage(
-                self._preview_buffer,
-                mapped.shape[1],
-                mapped.shape[0],
-                mapped.shape[1],
-                QImage.Format.Format_Grayscale8,
-            )
+            return None if image.isNull() else image
         except Exception:
             return None
 
@@ -1212,6 +1227,8 @@ class BlotPlaceholderItem(ResizableItemMixin, QGraphicsRectItem):
             "image_path": self.image_path,
             "roi": self.roi,
             "transform": self.transform,
+            "geometry_transform": self.geometry_transform,
+            "preserve_aspect": self.preserve_aspect,
         }
 
     @classmethod
@@ -1227,6 +1244,8 @@ class BlotPlaceholderItem(ResizableItemMixin, QGraphicsRectItem):
             image_path=data.get("image_path"),
             roi=data.get("roi"),
             transform=data.get("transform"),
+            geometry_transform=data.get("geometry_transform"),
+            preserve_aspect=bool(data.get("preserve_aspect", False)),
         )
         item.setRotation(float(data.get("rotation", 0.0)))
         return item

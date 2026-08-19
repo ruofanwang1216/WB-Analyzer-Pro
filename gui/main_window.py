@@ -4,7 +4,6 @@ from __future__ import annotations
 import shutil
 import sys
 import tempfile
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -33,11 +32,12 @@ from PySide6.QtWidgets import (
 from config.settings import APP_NAME
 from core.band_detector import group_auto_detected_rows
 from core.image_transform import (
+    GeometryTransform,
     ImageTransformParams,
-    flip_display_pixels_to_file,
-    image_transform_from_dict,
+    apply_geometry_to_display,
+    geometry_transform_from_dict,
+    geometry_transform_to_dict,
     image_transform_to_dict,
-    rotate_display_pixels_to_file,
 )
 from gui.figure_generation import FigureTypeDialog, ColumnSetupDialog, ColumnTableWindow
 from gui.image_canvas import ImageCanvas
@@ -163,14 +163,13 @@ def _image_operation_icon(operation: str, size: int = 18) -> QIcon:
     return QIcon(pixmap)
 
 
-def _infer_auto_fit_dark_on_light(
-    image_path: str,
+def _infer_auto_fit_dark_on_light_pixels(
+    detector_pixels: np.ndarray,
     search_roi: QRectF | None,
 ) -> bool:
     """Infer whether the rough ROI contains dark bands on a light background."""
     try:
-        with Image.open(image_path) as image:
-            pixels = np.asarray(image)
+        pixels = np.asarray(detector_pixels)
         if pixels.ndim == 3:
             rgb = pixels[:, :, :3].astype(np.float64)
             pixels = (
@@ -210,15 +209,31 @@ def _infer_auto_fit_dark_on_light(
         return False
 
 
+def _infer_auto_fit_dark_on_light(
+    image_path: str,
+    search_roi: QRectF | None,
+) -> bool:
+    """Backward-compatible path wrapper for Auto-Fit polarity inference."""
+    from core.band_detector import load_auto_detection_pixels
+
+    try:
+        pixels = load_auto_detection_pixels(image_path)
+    except Exception:
+        log.exception("Could not load WB Auto-Fit pixels; using light-on-dark first")
+        return False
+    return _infer_auto_fit_dark_on_light_pixels(pixels, search_roi)
+
+
 def _run_auto_fit_guided_with_polarity_fallback(
     image_path: str,
     *,
     search_roi: QRectF | None,
     expected_lane_count: int | None,
     sensitivity: float = 0.5,
+    detector_pixels: np.ndarray | None = None,
 ) -> tuple[list[dict], dict]:
     """Detect a figure strip and retry with reversed polarity when needed."""
-    from core.band_detector import auto_detect_guided
+    from core.band_detector import auto_detect_guided, auto_detect_guided_pixels
 
     common = {
         "sensitivity": sensitivity,
@@ -228,11 +243,22 @@ def _run_auto_fit_guided_with_polarity_fallback(
         "expected_rows_per_lane": None,
         "return_metadata": True,
     }
-    primary_dark_on_light = _infer_auto_fit_dark_on_light(
-        image_path, search_roi
-    )
-    detections, metadata = auto_detect_guided(
-        image_path,
+    if detector_pixels is None:
+        primary_dark_on_light = _infer_auto_fit_dark_on_light(
+            image_path, search_roi
+        )
+        detector = auto_detect_guided
+        detector_source = image_path
+    else:
+        presentation_pixels = np.asarray(detector_pixels)
+        primary_dark_on_light = _infer_auto_fit_dark_on_light_pixels(
+            presentation_pixels, search_roi
+        )
+        detector = auto_detect_guided_pixels
+        detector_source = presentation_pixels
+
+    detections, metadata = detector(
+        detector_source,
         dark_on_light=primary_dark_on_light,
         **common,
     )
@@ -244,8 +270,8 @@ def _run_auto_fit_guided_with_polarity_fallback(
         )
         return detections, metadata
 
-    reversed_detections, reversed_metadata = auto_detect_guided(
-        image_path,
+    reversed_detections, reversed_metadata = detector(
+        detector_source,
         dark_on_light=not primary_dark_on_light,
         **common,
     )
@@ -270,8 +296,7 @@ def _run_auto_fit_guided_with_polarity_fallback(
 
 class MeasurementWorker(QObject):
     """
-    Measures all band ROIs in a background thread using pure-Python
-    Pillow + numpy, replicating ImageJ 8-bit measurement behavior.
+    Measures inverse-mapped raw-image ROIs at the source image's native depth.
     """
 
     progress = Signal(str)      # status text
@@ -282,27 +307,16 @@ class MeasurementWorker(QObject):
         self,
         image_path: str,
         band_rois: list,
-        image_transform: dict | None = None,
-        image_pixels=None,
     ) -> None:
         super().__init__()
         self.image_path = image_path
         self.band_rois = band_rois
-        self.image_transform = dict(image_transform) if isinstance(image_transform, dict) else None
-        self.image_pixels = image_pixels.copy() if image_pixels is not None else None
 
     def run(self) -> None:
-        from core.measure import measure_all_lanes, measure_all_lanes_in_array
+        from core.measure import measure_all_lanes
         self.progress.emit(f"Measuring {len(self.band_rois)} lane(s)…")
         try:
-            if self.image_pixels is not None:
-                results = measure_all_lanes_in_array(self.image_pixels, self.band_rois)
-            else:
-                results = measure_all_lanes(
-                    self.image_path,
-                    self.band_rois,
-                    image_transform=self.image_transform,
-                )
+            results = measure_all_lanes(self.image_path, self.band_rois)
             self.finished.emit(results)
         except Exception as e:
             self.error.emit(str(e))
@@ -1358,6 +1372,27 @@ class MainWindow(QMainWindow):
         )
         return True
 
+    def _tutorial_images_ready(self) -> bool:
+        """Return whether both bundled tutorial canvases have quantitative data."""
+        required = {
+            str(path.expanduser().resolve())
+            for path in self._tutorial_asset_paths().values()
+        }
+        ready: set[str] = set()
+        for index, state in enumerate(self._slot_states):
+            current = state.get("path")
+            if not current:
+                continue
+            resolved = str(Path(current).expanduser().resolve())
+            canvas = self._image_panels[index].canvas
+            if (
+                resolved in required
+                and not canvas.is_loading()
+                and canvas.has_image_transform_source()
+            ):
+                ready.add(resolved)
+        return ready == required
+
     def _toggle_files_panel(self) -> None:
         self._set_files_panel_collapsed(not self._files_panel_collapsed)
 
@@ -1781,33 +1816,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _reset_canvas_widget(canvas: ImageCanvas) -> None:
-        canvas.clear_tutorial_roi_hint()
-        canvas._scene.clear()
-        canvas._pixmap_item = None
-        canvas._pixmap_original_size = None
-        canvas._display_source_pixels = None
-        canvas._roi_item = None
-        canvas._band_roi_item = None
-        canvas._lane_items.clear()
-        canvas._auto_band_items.clear()
-        canvas._auto_band_labels.clear()
-        canvas._manual_band_labels.clear()
-        canvas._auto_lane_frames.clear()
-        canvas._final_crop_item = None
-        canvas._rotation_mode = False
-        canvas._rotation_dragging = False
-        canvas._rotation_angle_deg = 0.0
-        canvas._rotation_h_line = None
-        canvas._rotation_v_line = None
-        canvas._rotation_angle_label = None
-        canvas._rotation_drag_start_mouse_angle_deg = None
-        canvas._rotation_drag_start_crosshair_angle_deg = 0.0
-        canvas._fixed_roi_enabled = False
-        canvas._fixed_roi_size = None
-        canvas._fixed_band_roi_relative = None
-        canvas._moving_fixed_roi = False
-        canvas._image_default_transform_params = ImageTransformParams(inverted=True)
-        canvas._image_transform_params = canvas._image_default_transform_params
+        canvas.clear_image()
 
     def _save_active_slot_state(self) -> None:
         if self._active_slot_index is None:
@@ -1870,7 +1879,10 @@ class MainWindow(QMainWindow):
             idx = loaded[0]
             for panel_idx in range(len(self._image_panels)):
                 self._set_panel_checkbox(panel_idx, panel_idx == idx, False)
-                self._set_panel_transform_enabled(panel_idx, panel_idx == idx)
+                self._set_panel_transform_enabled(
+                    panel_idx,
+                    panel_idx == idx and not self._image_panels[panel_idx].canvas.is_loading(),
+                )
             self._set_active_slot(idx)
             return
 
@@ -1886,7 +1898,10 @@ class MainWindow(QMainWindow):
             for idx in range(len(self._image_panels)):
                 if idx not in loaded:
                     self._set_panel_checkbox(idx, False, False)
-                self._set_panel_transform_enabled(idx, idx in loaded)
+                self._set_panel_transform_enabled(
+                    idx,
+                    idx in loaded and not self._image_panels[idx].canvas.is_loading(),
+                )
             self._set_active_slot(selected[0] if selected else None)
             return
 
@@ -2424,8 +2439,12 @@ class MainWindow(QMainWindow):
             "roi": QRectF(roi),
             "lane_count": 1,
             "image_transform": image_transform_to_dict(self.canvas.get_image_transform_params()),
+            "geometry_transform": geometry_transform_to_dict(
+                self.canvas.get_geometry_transform()
+            ),
             "auto_detections": self._clone_auto_detections(self._auto_detections),
             "image_size": self.canvas.image_scene_size(),
+            "raw_image_size": self.canvas.raw_image_size(),
         }
 
     def _run_wb_plot_auto_fit_detection(
@@ -2445,11 +2464,25 @@ class MainWindow(QMainWindow):
         image_path = str(source["image_path"])
         search_roi = source["roi"]
         try:
+            from core.band_detector import load_auto_detection_pixels
+
+            # Auto-Fit deliberately bypasses the sampled GUI preview and tone
+            # controls.  Geometry is applied to the detector's established
+            # full-resolution 8-bit representation, placing every subsequent
+            # operation in presentation coordinates.
+            detector_pixels = load_auto_detection_pixels(image_path)
+            detector_pixels = apply_geometry_to_display(
+                detector_pixels,
+                self.canvas.get_geometry_transform(),
+            )
+            detector_height, detector_width = detector_pixels.shape
+            source["image_size"] = QSizeF(detector_width, detector_height)
             detections, metadata = _run_auto_fit_guided_with_polarity_fallback(
                 image_path,
                 sensitivity=0.5,
                 search_roi=search_roi if isinstance(search_roi, QRectF) else None,
                 expected_lane_count=expected_lane_count,
+                detector_pixels=detector_pixels,
             )
         except Exception as exc:
             log.exception("WB Plot Auto-Fit detection failed")
@@ -2534,6 +2567,15 @@ class MainWindow(QMainWindow):
         self._language_combo.currentIndexChanged.connect(self._on_language_changed)
 
         for idx, panel in enumerate(self._image_panels):
+            panel.canvas.image_preview_ready.connect(
+                lambda path, i=idx: self._on_image_preview_ready_for_slot(i, path)
+            )
+            panel.canvas.image_load_finished.connect(
+                lambda path, i=idx: self._on_image_load_finished_for_slot(i, path)
+            )
+            panel.canvas.image_load_failed.connect(
+                lambda path, message, i=idx: self._on_image_load_failed_for_slot(i, path, message)
+            )
             panel.canvas.roi_changed.connect(lambda roi, i=idx: self._on_roi_changed_for_slot(i, roi))
             panel.canvas.band_roi_changed.connect(lambda band_roi, i=idx: self._on_band_roi_changed_for_slot(i, band_roi))
             panel.canvas.auto_rois_changed.connect(lambda detections, i=idx: self._on_auto_rois_changed_for_slot(i, detections))
@@ -2745,7 +2787,7 @@ class MainWindow(QMainWindow):
         if target_slot is None:
             return False
         try:
-            log.info("Opening uploaded TIFF in viewer slot %d: %s", target_slot + 1, image_path)
+            log.info("Starting TIFF load in viewer slot %d: %s", target_slot + 1, image_path)
             if self._active_slot_index is not None:
                 self._save_active_slot_state()
 
@@ -2767,21 +2809,90 @@ class MainWindow(QMainWindow):
             self._refresh_image_panel_layout()
             self._refresh_detection_actions()
 
-            loaded_after = self._loaded_slot_indices()
-            if len(loaded_after) > 1:
-                self._status_bar.showMessage(
-                    f"Loaded: {image_path.name}  —  viewer showing {len(loaded_after)} images. Select one image to draw ROIs."
-                )
-            else:
-                self._status_bar.showMessage(
-                    f"Loaded: {image_path.name}  —  draw a ROI to continue."
-                )
-            log.info("Loaded converted TIFF: %s", image_path)
+            self._status_bar.showMessage(
+                f"Loading {image_path.name} — preparing preview…"
+            )
             return True
         except Exception as e:
             log.exception("Image load error for %s", image_path)
             QMessageBox.critical(self, "Image Load Error", str(e))
             return False
+
+    def _on_image_preview_ready_for_slot(self, slot_index: int, image_path: str) -> None:
+        slot_path = self._slot_states[slot_index].get("path")
+        if not slot_path or Path(slot_path).expanduser().resolve() != Path(image_path):
+            return
+        self._status_bar.showMessage(
+            f"Preview ready: {Path(image_path).name} — loading full-resolution quantitative data…"
+        )
+
+    def _on_image_load_finished_for_slot(self, slot_index: int, image_path: str) -> None:
+        slot_path = self._slot_states[slot_index].get("path")
+        if not slot_path or Path(slot_path).expanduser().resolve() != Path(image_path):
+            return
+        self._refresh_image_panel_layout()
+        self._refresh_detection_actions()
+        loaded = self._loaded_slot_indices()
+        if len(loaded) > 1:
+            message = (
+                f"Loaded: {Path(image_path).name} — viewer showing {len(loaded)} images. "
+                "Select one image to draw ROIs."
+            )
+        else:
+            message = f"Loaded: {Path(image_path).name} — draw a ROI to continue."
+        self._status_bar.showMessage(message)
+        log.info(
+            "TIFF load finished in viewer slot %d (%s): %s",
+            slot_index + 1,
+            "memory-mapped" if self._image_panels[slot_index].canvas.is_memory_mapped() else "decoded",
+            image_path,
+        )
+        if (
+            self._tutorial_controller.active
+            and self._tutorial_controller.current_step_key == "import_images"
+            and self._tutorial_images_ready()
+        ):
+            self._select_tutorial_image("loading")
+            self._status_bar.showMessage(
+                tr(
+                    "Loaded the built-in Loading Control and Target Protein tutorial images.",
+                    self._language,
+                ),
+                5000,
+            )
+            self._tutorial_controller.notify_images_imported()
+
+    def _on_image_load_failed_for_slot(
+        self,
+        slot_index: int,
+        image_path: str,
+        message: str,
+    ) -> None:
+        slot = self._slot_states[slot_index]
+        slot_path = slot.get("path")
+        if not slot_path or Path(slot_path).expanduser().resolve() != Path(image_path):
+            return
+        if self._active_slot_index == slot_index:
+            self._active_slot_index = None
+            self._image_path = None
+            self._lane_rects.clear()
+            self._band_roi = None
+            self._auto_detections = []
+        slot.update({
+            "path": None,
+            "selected": False,
+            "lane_rects": [],
+            "band_roi": None,
+            "auto_detections": [],
+            "image_operation_history": [],
+        })
+        self._image_panels[slot_index].canvas.clear_image()
+        self._image_panels[slot_index].set_filename("")
+        self._refresh_image_panel_layout()
+        self._refresh_detection_actions()
+        self._status_bar.showMessage("Image load failed — see error dialog.")
+        log.error("Image load error for %s: %s", image_path, message)
+        QMessageBox.critical(self, "Image Load Error", message)
 
     def _upload_files(self) -> None:
         if self._tutorial_controller.handle_import_request():
@@ -3133,24 +3244,18 @@ class MainWindow(QMainWindow):
         if self._active_slot_index is None or self._image_path is None:
             return None
         return {
-            "path": self._image_path,
             "filename": self._image_panels[self._active_slot_index].filename_label.text(),
             "display_transform": image_transform_to_dict(
                 self.canvas.get_image_transform_params()
             ),
+            "geometry_transform": geometry_transform_to_dict(
+                self.canvas.get_geometry_transform()
+            ),
         }
-
-    def _operation_output_path(self, operation: str) -> Path:
-        source_path = Path(self._image_path or "image.tif").expanduser().resolve()
-        suffix = source_path.suffix if source_path.suffix else ".tif"
-        return self._conversion_cache_dir / (
-            f"{source_path.stem}_{operation}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{suffix}"
-        )
 
     def _commit_image_operation(
         self,
-        output_path: Path,
-        display_transform: ImageTransformParams,
+        geometry_transform: GeometryTransform,
         snapshot: dict,
         status: str,
     ) -> None:
@@ -3158,18 +3263,16 @@ class MainWindow(QMainWindow):
             return
         slot_index = self._active_slot_index
         panel_canvas = self._image_panels[slot_index].canvas
-        self._load_rotated_image_preserving_transform(
-            panel_canvas,
-            str(output_path),
-            display_transform,
-        )
+        view_transform = panel_canvas.transform()
+        panel_canvas.set_geometry_transform(geometry_transform)
+        panel_canvas.setTransform(view_transform)
+        if panel_canvas._pixmap_item is not None:
+            panel_canvas.centerOn(panel_canvas._pixmap_item)
         panel_canvas.cancel_rotation_mode()
-        self._image_panels[slot_index].set_filename(output_path.name)
+        panel_canvas.clear_roi()
 
-        self._image_path = str(output_path)
         slot = self._slot_states[slot_index]
         slot.setdefault("image_operation_history", []).append(snapshot)
-        slot["path"] = self._image_path
         slot["lane_rects"] = []
         slot["band_roi"] = None
         slot["auto_detections"] = []
@@ -3192,16 +3295,12 @@ class MainWindow(QMainWindow):
         if snapshot is None:
             return
         direction = "vertical" if vertical else "horizontal"
-        output_path = self._operation_output_path(f"flip_{direction}")
         try:
-            display_transform = flip_display_pixels_to_file(
-                self.canvas.current_display_pixels(),
-                output_path,
+            geometry_transform = self.canvas.get_geometry_transform().flipped_in_presentation(
                 vertical=vertical,
             )
             self._commit_image_operation(
-                output_path,
-                display_transform,
+                geometry_transform,
                 snapshot,
                 f"Image flipped {direction}. Use Rotate → Undo Image Operation to revert.",
             )
@@ -3224,22 +3323,22 @@ class MainWindow(QMainWindow):
             self._status_bar.showMessage("No image operation to undo.", 3000)
             return
         snapshot = history.pop()
-        previous_path = str(snapshot["path"])
-        previous_transform = image_transform_from_dict(snapshot.get("display_transform"))
+        previous_geometry = geometry_transform_from_dict(
+            snapshot.get("geometry_transform")
+        )
         try:
-            self._load_rotated_image_preserving_transform(
-                self.canvas,
-                previous_path,
-                previous_transform,
-            )
+            view_transform = self.canvas.transform()
+            self.canvas.set_geometry_transform(previous_geometry)
+            self.canvas.setTransform(view_transform)
+            if self.canvas._pixmap_item is not None:
+                self.canvas.centerOn(self.canvas._pixmap_item)
+            self.canvas.clear_roi()
         except Exception as exc:
             history.append(snapshot)
             QMessageBox.critical(self, "Undo Image Operation", f"Failed to restore image:\n{exc}")
             log.error("Image operation undo failed: %s", exc)
             return
 
-        self._image_path = previous_path
-        slot["path"] = previous_path
         slot["lane_rects"] = []
         slot["band_roi"] = None
         slot["auto_detections"] = []
@@ -3247,7 +3346,7 @@ class MainWindow(QMainWindow):
         self._band_roi = None
         self._auto_detections = []
         self._image_panels[self._active_slot_index].set_filename(
-            str(snapshot.get("filename") or Path(previous_path).name)
+            str(snapshot.get("filename") or Path(self._image_path).name)
         )
         self.param_panel.set_auto_edit_enabled(False)
         self.canvas.set_auto_edit_mode(False)
@@ -3281,52 +3380,31 @@ class MainWindow(QMainWindow):
             self._status_bar.showMessage("Rotation skipped (angle is near zero).")
             return
 
-        source_path = Path(self._image_path).expanduser().resolve()
         snapshot = self._image_operation_snapshot()
         if snapshot is None:
             return
-        rotated_path = self._operation_output_path("rot")
 
         try:
-            applied_rotation = float(angle_deg)
-            display_pixels = self.canvas.current_display_pixels()
+            # The crosshair is an alignment reference: once it follows the
+            # bands, returning that reference to horizontal must rotate the
+            # image by the opposite angle.
+            applied_rotation = -float(angle_deg)
             log.info(
                 "Custom rotate apply: displayed_angle=%+.3f deg, rotation_to_apply=%+.3f deg",
                 float(self.canvas.get_rotation_angle()),
                 applied_rotation,
             )
-            rotated_display_transform = rotate_display_pixels_to_file(
-                display_pixels,
-                rotated_path,
-                angle_deg=angle_deg,
+            geometry_transform = self.canvas.get_geometry_transform().rotated(
+                applied_rotation
             )
             self._commit_image_operation(
-                rotated_path,
-                rotated_display_transform,
+                geometry_transform,
                 snapshot,
                 f"Rotation applied ({angle_deg:+.2f}° reference). Use Rotate → Undo Image Operation to revert.",
             )
         except Exception as e:
             QMessageBox.critical(self, "Rotation Error", f"Failed to rotate image:\n{e}")
-            log.error("Rotation failed for %s: %s", source_path, e)
-
-    @staticmethod
-    def _load_rotated_image_preserving_transform(
-        canvas: ImageCanvas,
-        image_path: str,
-        display_transform: ImageTransformParams,
-    ) -> None:
-        # load_image() fits every newly loaded pixmap to the viewport.  Custom
-        # rotation creates a new, expanded TIFF, so that automatic fit used to
-        # make the WB image visibly jump to a different zoom level.  Preserve
-        # the existing view transform so source pixels keep the same on-screen
-        # scale before and after the operation.
-        view_transform = canvas.transform()
-        canvas.load_image(image_path)
-        canvas.setTransform(view_transform)
-        if canvas._pixmap_item is not None:
-            canvas.centerOn(canvas._pixmap_item)
-        canvas.set_image_transform_params(display_transform)
+            log.error("Rotation failed for %s: %s", self._image_path, e)
 
     def _clear_roi(self) -> None:
         """Clear all ROIs and lane overlays."""
@@ -3480,6 +3558,15 @@ class MainWindow(QMainWindow):
         if self._image_path is None:
             QMessageBox.warning(self, "No Image", "Upload files first.")
             return
+        if not self.canvas.get_geometry_transform().is_identity():
+            QMessageBox.information(
+                self,
+                "Manual Band ROI Required",
+                "After Rotate/Flip, draw the band ROI manually. This preserves "
+                "the exact inverse-mapped polygon instead of approximating it "
+                "with a raw-image bounding box.",
+            )
+            return
 
         params = self.param_panel.get_params()
         bands_per_lane = params["bands_per_lane"]
@@ -3585,23 +3672,20 @@ class MainWindow(QMainWindow):
             lane_count=len(self._lane_rects),
             band_count=total_band_rois,
         )
-        image_pixels = None
-        image_transform = None
-        if self.canvas.has_quantitative_image_transform():
-            image_pixels = self.canvas.current_analysis_pixels()
-            image_transform = image_transform_to_dict(
-                self.canvas.get_analysis_transform_params()
-            )
+        raw_band_rois = self.canvas.map_canvas_rois_to_raw(band_rois)
         self._start_measurement_worker(
             self._image_path,
-            band_rois,
-            image_transform=image_transform,
-            image_pixels=image_pixels,
+            raw_band_rois,
         )
 
     def _refresh_detection_actions(self) -> None:
         """Keep detection controls in sync with image/mode state."""
-        has_image = bool(self._loaded_slot_indices())
+        has_image = (
+            bool(self._loaded_slot_indices())
+            and self._active_slot_index is not None
+            and not self.canvas.is_loading()
+            and self.canvas.has_image_transform_source()
+        )
         is_manual = self.param_panel.get_mode() == "manual"
         has_roi = self.canvas.get_roi() is not None
         rotation_active = self._active_slot_index is not None and self.canvas.is_rotation_mode()
@@ -3625,8 +3709,6 @@ class MainWindow(QMainWindow):
         self,
         image_path: str,
         band_rois: list,
-        image_transform: dict | None = None,
-        image_pixels=None,
     ) -> None:
         """Launch MeasurementWorker in background thread."""
         self._act_analyze.setEnabled(False)
@@ -3636,8 +3718,6 @@ class MainWindow(QMainWindow):
         self._worker = MeasurementWorker(
             image_path,
             band_rois,
-            image_transform=image_transform,
-            image_pixels=image_pixels,
         )
         self._worker.moveToThread(self._worker_thread)
 
@@ -3696,5 +3776,7 @@ class MainWindow(QMainWindow):
             )
             event.ignore()
             return
+        for panel in self._image_panels:
+            panel.canvas.cancel_image_load(wait=True)
         shutil.rmtree(self._conversion_cache_dir, ignore_errors=True)
         super().closeEvent(event)

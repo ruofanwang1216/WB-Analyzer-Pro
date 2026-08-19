@@ -578,7 +578,10 @@ class TutorialController(QObject):
         """Return True only when tutorial mode intentionally owns Import."""
         if not self.active:
             return False
-        if self._host._load_tutorial_images():
+        if (
+            self._host._load_tutorial_images()
+            and self._host._tutorial_images_ready()
+        ):
             self.notify_images_imported()
         return True
 

@@ -10,7 +10,7 @@ from PIL import Image
 from PySide6.QtCore import QEvent, QLineF, QPoint, QPointF, QRectF, QSize, QSizeF, QTimer, Qt
 from PySide6.QtGui import QColor, QFont, QImage, QKeyEvent, QPainter, QPen, QTextCursor
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QFrame, QGraphicsItem, QGraphicsPixmapItem, QGraphicsRectItem, QGroupBox,
+    QApplication, QCheckBox, QComboBox, QFrame, QGraphicsItem, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsSceneMouseEvent, QGroupBox,
     QLabel, QPushButton, QRadioButton, QSpinBox, QToolButton, QInputDialog,
 )
 
@@ -104,7 +104,7 @@ class FigureCanvasTests(unittest.TestCase):
         canvas.render(layout, project)
         return canvas
 
-    def test_blot_pixmap_fills_fixed_frame_before_and_during_resize(self) -> None:
+    def test_blot_pixmap_preserves_aspect_ratio_before_and_during_resize(self) -> None:
         with TemporaryDirectory() as tmp:
             path = f"{tmp}/strip.png"
             Image.fromarray(np.full((20, 80), 128, dtype=np.uint8)).save(path)
@@ -112,6 +112,7 @@ class FigureCanvasTests(unittest.TestCase):
             slot = project.panels[0].blot_slots[0]
             slot.source_image_path = path
             slot.bounding_box = ImageBBox(0.0, 0.0, 80.0, 20.0)
+            slot.preserve_image_aspect = True
             canvas = FigureCanvas()
             canvas.render(LayoutEngine().compute(project), project)
 
@@ -122,18 +123,27 @@ class FigureCanvasTests(unittest.TestCase):
                 if isinstance(item, QGraphicsPixmapItem)
             )
             frame = canvas._blot_frames[key]
+            rendered = pixmap.sceneBoundingRect()
             self.assertAlmostEqual(
-                pixmap.sceneBoundingRect().width(), frame.rect().width()
+                rendered.width() / rendered.height(),
+                4.0,
             )
             self.assertAlmostEqual(
-                pixmap.sceneBoundingRect().height(), frame.rect().height()
+                rendered.center().x(), frame.sceneBoundingRect().center().x()
             )
+            self.assertAlmostEqual(
+                rendered.center().y(), frame.sceneBoundingRect().center().y()
+            )
+            self.assertLessEqual(rendered.width(), frame.rect().width() + 0.01)
+            self.assertLessEqual(rendered.height(), frame.rect().height() + 0.01)
 
             canvas._selected_blot_keys = {key}
             canvas._resize_blot_content_to_frame(key, frame, 90.0, 90.0)
             rendered = pixmap.sceneBoundingRect()
             self.assertAlmostEqual(rendered.width(), 90.0)
-            self.assertAlmostEqual(rendered.height(), 90.0)
+            self.assertAlmostEqual(rendered.height(), 22.5)
+            self.assertAlmostEqual(rendered.center().x(), frame.pos().x() + 45.0)
+            self.assertAlmostEqual(rendered.center().y(), frame.pos().y() + 45.0)
 
     def test_builtin_text_uses_toolbar_font_and_delete(self) -> None:
         canvas = self._render_default_canvas()
@@ -437,6 +447,38 @@ class FigureCanvasTests(unittest.TestCase):
         self.assertEqual(text_item.pos(), start)
         self.assertEqual(text_item.current_offset(), QPointF(0.0, 0.0))
 
+    def test_double_click_clears_pending_drag_before_text_editing(self) -> None:
+        canvas = self._render_default_canvas()
+        text_item = next(iter(canvas._text_items.values()))
+        text_item._is_user_dragging = True
+        text_item._drag_start_scene_pos = QPointF(10.0, 10.0)
+        text_item._drag_start_item_pos = QPointF(text_item.pos())
+        text_item._drag_threshold_crossed = True
+        text_item._drag_group_start_positions = {
+            text_item: QPointF(text_item.pos())
+        }
+        event = QGraphicsSceneMouseEvent(
+            QEvent.Type.GraphicsSceneMouseDoubleClick
+        )
+        event.setButton(Qt.MouseButton.LeftButton)
+        event.setButtons(Qt.MouseButton.LeftButton)
+        event.setPos(text_item.editor_rect().center())
+        event.setScenePos(
+            text_item.mapToScene(text_item.editor_rect().center())
+        )
+
+        text_item.mouseDoubleClickEvent(event)
+
+        self.assertFalse(text_item._is_user_dragging)
+        self.assertIsNone(text_item._drag_start_scene_pos)
+        self.assertIsNone(text_item._drag_start_item_pos)
+        self.assertFalse(text_item._drag_threshold_crossed)
+        self.assertFalse(text_item._drag_group_start_positions)
+        self.assertEqual(
+            text_item.textInteractionFlags(),
+            Qt.TextInteractionFlag.TextEditorInteraction,
+        )
+
     def test_builtin_text_uses_overlay_text_box_structure(self) -> None:
         canvas = self._render_default_canvas()
         text_item = next(item for item in canvas._scene.items() if isinstance(item, EditableTextItem))
@@ -489,6 +531,121 @@ class FigureCanvasTests(unittest.TestCase):
                 )
             else:
                 self.assertAlmostEqual(text_item.pos().x(), pt_to_scene(source.x_pt))
+
+    def test_condition_cells_keep_scene_center_while_text_length_changes(self) -> None:
+        project = TemplateEngine.build_project("normal_wb", 1, 2, 4)
+        project.global_layout.show_condition_table = True
+        project.panels[0].condition_table = (
+            FigureModeWindow._make_custom_condition_table(
+                4,
+                2,
+                [[(1, 2), (3, 4)]],
+            )
+        )
+        canvas = FigureCanvas()
+        canvas.render(LayoutEngine().compute(project), project)
+        condition_items = [
+            item
+            for item in canvas._text_items.values()
+            if item.source_ref.field == "condition_cell"
+        ]
+        self.assertTrue(condition_items)
+
+        for text_item in condition_items:
+            original_center = text_item.mapToScene(text_item.editor_rect().center())
+            original_offset = QPointF(text_item.current_offset())
+            text_item.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextEditorInteraction
+            )
+            cursor = text_item.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            text_item.setTextCursor(cursor)
+            text_item.keyPressEvent(QKeyEvent(
+                QEvent.Type.KeyPress,
+                Qt.Key.Key_X,
+                Qt.KeyboardModifier.NoModifier,
+                "X",
+            ))
+            self.assertTrue(text_item.toPlainText().endswith("X"))
+            text_item.setPlainText(
+                "A substantially longer condition or lane-group label"
+            )
+
+            new_center = text_item.mapToScene(text_item.editor_rect().center())
+            self.assertAlmostEqual(new_center.x(), original_center.x(), places=4)
+            self.assertAlmostEqual(new_center.y(), original_center.y(), places=4)
+            self.assertEqual(text_item.current_offset(), original_offset)
+
+    def test_fit_center_and_canvas_resize_do_not_change_condition_geometry(self) -> None:
+        project = TemplateEngine.build_project("normal_wb", 1, 2, 4)
+        project.global_layout.show_condition_table = True
+        project.panels[0].condition_table = (
+            FigureModeWindow._make_custom_condition_table(
+                4,
+                2,
+                [[(1, 2), (3, 4)]],
+            )
+        )
+        canvas = FigureCanvas()
+        canvas.resize(900, 600)
+        canvas.show()
+        canvas.render(LayoutEngine().compute(project), project)
+        self._app.processEvents()
+
+        condition_items = {
+            key: item
+            for key, item in canvas._text_items.items()
+            if item.source_ref.field == "condition_cell"
+        }
+        frame_key, frame = next(iter(canvas._blot_frames.items()))
+
+        group_item = next(
+            item
+            for item in condition_items.values()
+            if item.toPlainText().startswith("Group ")
+        )
+        original_group_center = group_item.mapToScene(
+            group_item.editor_rect().center()
+        )
+        group_item.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextEditorInteraction
+        )
+        group_item.setFocus(Qt.FocusReason.OtherFocusReason)
+        group_item.setPlainText("A much longer experimental lane group")
+        group_item.clearFocus()
+        self._app.processEvents()
+        edited_group_center = group_item.mapToScene(
+            group_item.editor_rect().center()
+        )
+        self.assertAlmostEqual(
+            edited_group_center.x(), original_group_center.x(), places=4
+        )
+        self.assertAlmostEqual(
+            edited_group_center.y(), original_group_center.y(), places=4
+        )
+
+        def relative_geometry() -> dict[tuple, tuple[float, float, float, float]]:
+            frame_pos = frame.scenePos()
+            return {
+                key: (
+                    item.scenePos().x() - frame_pos.x(),
+                    item.scenePos().y() - frame_pos.y(),
+                    item.editor_rect().width(),
+                    item.editor_rect().height(),
+                )
+                for key, item in condition_items.items()
+            }
+
+        expected = relative_geometry()
+        for size in (QSize(620, 420), QSize(1280, 760), QSize(840, 520)):
+            canvas.resize(size)
+            canvas.fit_frame_content_to_view()
+            self._app.processEvents()
+            self._app.processEvents()
+            self.assertEqual(relative_geometry(), expected)
+
+        self.assertIn(frame_key, canvas._blot_frames)
+        canvas.close()
 
     def test_manually_resized_builtin_text_width_survives_rerender(self) -> None:
         project = TemplateEngine.build_project("normal_wb", 1, 2, 4)
@@ -1333,8 +1490,10 @@ class FigureModeStructureTests(unittest.TestCase):
         self.assertEqual(window._grp4.title_text(), "Step 2: Fill Blot Frames")
         self.assertEqual(window._SIDEBAR_WIDTH, 210)
         self.assertTrue(window._auto_detect_radio.isChecked())
-        self.assertEqual(window._auto_fit_h_margin.value(), 3)
-        self.assertEqual(window._auto_fit_v_margin.value(), 3)
+        self.assertEqual(window._auto_fit_h_margin.value(), 4)
+        self.assertEqual(window._auto_fit_v_margin.value(), 4)
+        self.assertEqual(window._auto_fit_h_margin.singleStep(), 4)
+        self.assertEqual(window._auto_fit_v_margin.singleStep(), 4)
         self.assertEqual(window._grp5.title_text(), "Saved Blot Files")
         self.assertEqual(window._grp5._step_badge.text(), "3")
         self.assertEqual(window._grp6._step_badge.text(), "4")
@@ -3853,6 +4012,7 @@ class FigureModeStructureTests(unittest.TestCase):
             self._app.processEvents()
 
         self.assertEqual(slot.bounding_box, ImageBBox(2.0, 3.0, 18.0, 9.0))
+        self.assertFalse(slot.preserve_image_aspect)
         self.assertEqual(slot.lane_count, original_lane_count)
         self.assertEqual(slot.lane_rois, original_lane_rois)
         self.assertEqual(
@@ -3894,11 +4054,15 @@ class FigureModeStructureTests(unittest.TestCase):
             item for item in window._canvas._blot_content_items[key]
             if isinstance(item, QGraphicsPixmapItem)
         )
-        self.assertLessEqual(
-            pixmap.sceneBoundingRect().width(), frame.rect().width() + 0.01
+        self.assertAlmostEqual(
+            pixmap.sceneBoundingRect().width(),
+            frame.rect().width(),
+            places=4,
         )
-        self.assertLessEqual(
-            pixmap.sceneBoundingRect().height(), frame.rect().height() + 0.01
+        self.assertAlmostEqual(
+            pixmap.sceneBoundingRect().height(),
+            frame.rect().height(),
+            places=4,
         )
         self.assertEqual(
             slot.image_transform,
@@ -3972,6 +4136,11 @@ class FigureModeStructureTests(unittest.TestCase):
                         "gamma": 1.0,
                         "inverted": False,
                     },
+                    "geometry_transform": {
+                        "rotation": 0.0,
+                        "flip_x": True,
+                        "flip_y": False,
+                    },
                     "auto_detections": detections,
                     "image_size": QSizeF(140.0, 100.0),
                     "reused": reuse,
@@ -3981,17 +4150,44 @@ class FigureModeStructureTests(unittest.TestCase):
 
             self.assertTrue(window.apply_roi_to_selected_slot())
 
-        self.assertEqual(slot.bounding_box, ImageBBox(17.0, 41.0, 99.0, 16.0))
+        self.assertEqual(
+            slot.bounding_box,
+            ImageBBox(16.0, 40.0, 101.0, 18.0),
+        )
         self.assertEqual(slot.lane_crops, [])
+        self.assertTrue(slot.preserve_image_aspect)
+        self.assertEqual(
+            slot.geometry_transform,
+            {
+                "rotation": 0.0,
+                "flip_x": True,
+                "flip_y": False,
+            },
+        )
         self.assertEqual(slot.lane_count, original_lane_count)
         self.assertEqual(slot.lane_rois, original_lane_rois)
-        self.assertEqual(
-            (slot.display_width_pt, slot.display_height_pt),
-            original_display_size,
+        self.assertEqual(slot.display_width_pt, original_display_size[0])
+        self.assertAlmostEqual(
+            slot.display_height_pt,
+            scene_to_pt(original_frame_rect.width())
+            / (slot.bounding_box.w / slot.bounding_box.h),
         )
         frame = window._canvas._blot_frames[key]
         self.assertEqual(frame.pos(), original_frame_pos)
-        self.assertEqual(frame.rect(), original_frame_rect)
+        self.assertAlmostEqual(frame.rect().width(), original_frame_rect.width())
+        self.assertAlmostEqual(
+            frame.rect().height(),
+            original_frame_rect.width()
+            / (slot.bounding_box.w / slot.bounding_box.h),
+        )
+        self.assertAlmostEqual(
+            slot.bounding_box.w / slot.bounding_box.h,
+            frame.rect().width() / frame.rect().height(),
+        )
+        self.assertLessEqual(slot.bounding_box.x, 20.0)
+        self.assertGreaterEqual(slot.bounding_box.x + slot.bounding_box.w, 113.0)
+        self.assertLessEqual(slot.bounding_box.y, 44.0)
+        self.assertGreaterEqual(slot.bounding_box.y + slot.bounding_box.h, 54.0)
         self.assertEqual(
             [
                 (
@@ -4011,14 +4207,64 @@ class FigureModeStructureTests(unittest.TestCase):
             item for item in window._canvas._blot_content_items[key]
             if isinstance(item, QGraphicsPixmapItem)
         )
-        self.assertLessEqual(
-            pixmap.sceneBoundingRect().width(), frame.rect().width() + 0.01
+        self.assertAlmostEqual(
+            pixmap.sceneBoundingRect().width(), frame.rect().width(), delta=0.01
         )
-        self.assertLessEqual(
-            pixmap.sceneBoundingRect().height(), frame.rect().height() + 0.01
+        self.assertAlmostEqual(
+            pixmap.sceneBoundingRect().height(), frame.rect().height(), delta=0.01
         )
         self.assertIsInstance(overlays[-1], QRectF)
         self.assertTrue(window._auto_detect_radio.isChecked())
+
+    def test_overlay_auto_fit_retains_presentation_geometry(self) -> None:
+        window = FigureModeWindow()
+        window._on_apply_template()
+        overlay = window._canvas.add_overlay_blot_frame(4)
+        detections = [
+            {
+                "lane_index": lane_index,
+                "lane_rect": QRectF(x, 15.0, 18.0, 60.0),
+                "bands": [{
+                    "band_index": 1,
+                    "row_index": 1,
+                    "band_rect": QRectF(x, 40.0, 18.0, 10.0),
+                }],
+            }
+            for lane_index, x in enumerate((15.0, 40.0, 65.0, 90.0), start=1)
+        ]
+        geometry = {
+            "rotation": -6.5,
+            "flip_x": True,
+            "flip_y": False,
+        }
+        original_width = overlay.rect().width()
+
+        with TemporaryDirectory() as tmp:
+            path = f"{tmp}/source.tif"
+            Image.fromarray(np.full((120, 160), 30000, dtype=np.uint16)).save(path)
+            window.set_auto_fit_detection_handler(
+                lambda expected, reuse: {
+                    "image_path": path,
+                    "roi": QRectF(0.0, 0.0, 160.0, 120.0),
+                    "image_transform": None,
+                    "geometry_transform": geometry,
+                    "auto_detections": detections,
+                    "image_size": QSizeF(160.0, 120.0),
+                    "reused": reuse,
+                }
+            )
+
+            self.assertTrue(window.apply_roi_to_selected_slot())
+
+        self.assertEqual(overlay.geometry_transform, geometry)
+        self.assertTrue(overlay.preserve_aspect)
+        self.assertIsNotNone(overlay.roi)
+        crop_ratio = overlay.roi["w"] / overlay.roi["h"]
+        self.assertAlmostEqual(overlay.rect().width(), original_width)
+        self.assertAlmostEqual(
+            overlay.rect().height(),
+            original_width / crop_ratio,
+        )
 
     def test_manual_roi_preserves_two_panel_template_geometry(self) -> None:
         window = FigureModeWindow()
@@ -4280,6 +4526,7 @@ class FigureModeStructureTests(unittest.TestCase):
         self.assertEqual(restored.lane_count, 7)
         self.assertIsNotNone(target)
         self.assertEqual(target[2], 7)
+        self.assertEqual(len(target), 3)
 
     def test_add_blot_frame_button_creates_free_roi_target(self) -> None:
         window = FigureModeWindow()

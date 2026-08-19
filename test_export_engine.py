@@ -29,6 +29,25 @@ if PPTX_AVAILABLE:
 
 
 class LaneCropExportTests(unittest.TestCase):
+    def test_geometry_is_rendered_before_canvas_space_crop(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = f"{tmp}/source.png"
+            pixels = np.array([[10, 20, 200, 240], [11, 21, 201, 241]], dtype=np.uint8)
+            Image.fromarray(pixels).save(path)
+            image = _crop_qimage(
+                path,
+                {"x": 0, "y": 0, "w": 2, "h": 2},
+                {"low": 0, "high": 65535, "gamma": 1.0, "inverted": False},
+                geometry_transform={"rotation": 0.0, "flip_x": True, "flip_y": False},
+            )
+
+        self.assertEqual(image.width(), 2)
+        self.assertEqual(image.height(), 2)
+        self.assertEqual(
+            [[image.pixelColor(x, y).red() for x in range(2)] for y in range(2)],
+            [[240, 200], [241, 201]],
+        )
+
     def test_export_composes_equal_lane_crops_before_scaling(self) -> None:
         with TemporaryDirectory() as tmp:
             path = f"{tmp}/source.png"
@@ -44,6 +63,35 @@ class LaneCropExportTests(unittest.TestCase):
             )
         self.assertEqual(image.width(), 24)
         self.assertEqual(image.height(), 9)
+
+    def test_continuous_crop_takes_priority_over_legacy_lane_crops(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = f"{tmp}/source.png"
+            pixels = np.zeros((20, 30), dtype=np.uint16)
+            pixels[5:7, 2:5] = 65535
+            pixels[8:10, 12:15] = 65535
+            pixels[11:13, 22:25] = 65535
+            Image.fromarray(pixels).save(path)
+            image = _crop_qimage(
+                path,
+                {"x": 0, "y": 0, "w": 30, "h": 20},
+                {"low": 0, "high": 65535, "gamma": 1.0, "inverted": False},
+                [
+                    {"x": 0, "y": 5, "w": 10, "h": 2},
+                    {"x": 10, "y": 8, "w": 10, "h": 2},
+                    {"x": 20, "y": 11, "w": 10, "h": 2},
+                ],
+            )
+        self.assertEqual(image.width(), 30)
+        self.assertEqual(image.height(), 20)
+        self.assertEqual(
+            [image.pixelColor(x, y).red() for x, y in ((3, 5), (13, 8), (23, 11))],
+            [255, 255, 255],
+        )
+        self.assertEqual(
+            [image.pixelColor(x, 5).red() for x in (13, 23)],
+            [0, 0],
+        )
 
 
 @unittest.skipUnless(PPTX_AVAILABLE, "python-pptx is not installed")

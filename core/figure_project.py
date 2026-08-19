@@ -2,7 +2,9 @@
 
 Coordinate-system conventions (strict — never mix between spaces):
 
-  IMAGE_PX  Source image pixels.
+  IMAGE_PX  Pixel coordinates in the source presentation. With identity
+            geometry these are raw source pixels; with a saved non-destructive
+            GeometryTransform they are coordinates in its expanded Canvas.
             Used in: ImageBBox, BlotSlot.bounding_box.
 
   REL       Unitless 0.0–1.0 relative to the owning BlotSlot bounding_box.
@@ -56,8 +58,11 @@ class SourceRef:
 
 @dataclass
 class ImageBBox:
-    """Bounding box in IMAGE_PX coordinates (source image pixels).
-    Never convert these values yourself — pass them to layout_engine helpers."""
+    """Bounding box in IMAGE_PX presentation coordinates.
+
+    When BlotSlot.geometry_transform is set, render geometry before applying
+    this box. Never use it for scientific quantification.
+    """
     x: float
     y: float
     w: float
@@ -100,12 +105,16 @@ class BlotSlot:
     bounding_box: ImageBBox | None # IMAGE_PX; None until ROI is drawn
     lane_count: int = 4
     lane_rois: list[LaneROI] = field(default_factory=list)
-    # Optional equal-size source crops, one per lane. Auto-Fit uses these to
-    # align signal anchors by translation while retaining original pixels.
+    # Legacy per-lane Auto-Fit crops. Current rendering prefers bounding_box
+    # so older files also retain the original continuous source geometry.
     lane_crops: list[ImageBBox] = field(default_factory=list)
+    # Auto ROI content is a continuous screenshot-style crop and must be
+    # uniformly scaled inside its frame without changing source proportions.
+    preserve_image_aspect: bool = False
     display_width_pt: float | None = None
     display_height_pt: float | None = None
     image_transform: dict | None = None
+    geometry_transform: dict | None = None
     # Lossless display-ready crop embedded in a saved blot file. When present,
     # render/export use it so reopening cannot reinterpret TIFF polarity or
     # tone controls differently from what the user saved.

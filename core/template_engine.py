@@ -272,6 +272,7 @@ class TemplateEngine:
                     "display_width_pt": slot.display_width_pt,
                     "display_height_pt": slot.display_height_pt,
                     "image_transform": slot.image_transform,
+                    "geometry_transform": slot.geometry_transform,
                 }
                 for slot in panel.blot_slots
             ]
@@ -440,6 +441,8 @@ class TemplateEngine:
                     slot.display_height_pt = float(bd["display_height_pt"])
                 if isinstance(bd.get("image_transform"), dict):
                     slot.image_transform = dict(bd["image_transform"])
+                if isinstance(bd.get("geometry_transform"), dict):
+                    slot.geometry_transform = dict(bd["geometry_transform"])
                 blots.append(slot)
 
             ct = None

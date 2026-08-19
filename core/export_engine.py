@@ -31,12 +31,15 @@ from PySide6.QtGui import (
 )
 
 from core.image_transform import (
+    apply_geometry_to_display,
     default_inverted_for_pil_image,
+    geometry_transform_from_dict,
     image_array_to_uint16_luminance,
     image_transform_from_dict,
     transform_pixels_16_to_8,
 )
 from core.lane_composition import compose_lane_crops
+from core.band_auto_fit import aspect_fit_placement
 from core.layout_engine import (
     EXPORT_DPI, LayoutItem, LayoutResult, SCREEN_DPI, SCREEN_SCALE,
     emu_to_pt, pt_to_emu, pt_to_px,
@@ -207,11 +210,27 @@ def _fit_rect_to_slide(
     )
 
 
+def _crop_array(pixels: np.ndarray, crop_px: dict | None) -> np.ndarray:
+    if not crop_px:
+        return pixels
+    img_h, img_w = pixels.shape
+    if img_w <= 0 or img_h <= 0:
+        return pixels[0:0, 0:0]
+    x = max(0, min(img_w - 1, int(round(float(crop_px.get("x", 0.0))))))
+    y = max(0, min(img_h - 1, int(round(float(crop_px.get("y", 0.0))))))
+    crop_w = max(1, int(round(float(crop_px.get("w", img_w - x)))))
+    crop_h = max(1, int(round(float(crop_px.get("h", img_h - y)))))
+    right = max(x + 1, min(img_w, x + crop_w))
+    bottom = max(y + 1, min(img_h, y + crop_h))
+    return pixels[y:bottom, x:right]
+
+
 def _crop_qimage(
     image_path: str,
     crop_px: dict | None,
     image_transform: dict | None = None,
     lane_crops_px: list[dict] | None = None,
+    geometry_transform: dict | None = None,
 ) -> QImage:
     """Load *image_path* and crop to *crop_px* (IMAGE_PX coordinates).
 
@@ -226,29 +245,29 @@ def _crop_qimage(
     except Exception:
         return QImage()
 
-    if lane_crops_px:
-        pixels = compose_lane_crops(pixels, lane_crops_px)
-    elif crop_px:
-        img_h, img_w = pixels.shape
-        if img_w <= 0 or img_h <= 0:
-            return QImage()
-        x = max(0, min(img_w - 1, int(round(float(crop_px.get("x", 0.0))))))
-        y = max(0, min(img_h - 1, int(round(float(crop_px.get("y", 0.0))))))
-        crop_w = max(1, int(round(float(crop_px.get("w", img_w - x)))))
-        crop_h = max(1, int(round(float(crop_px.get("h", img_h - y)))))
-        right = max(x + 1, min(img_w, x + crop_w))
-        bottom = max(y + 1, min(img_h, y + crop_h))
-        pixels = pixels[y:bottom, x:right]
-    if pixels.size == 0:
-        return QImage()
-
-    display = transform_pixels_16_to_8(
-        pixels,
-        image_transform_from_dict(
-            image_transform,
-            default_inverted=default_inverted,
-        ),
+    tone = image_transform_from_dict(
+        image_transform,
+        default_inverted=default_inverted,
     )
+    geometry = geometry_transform_from_dict(geometry_transform)
+    if geometry.is_identity():
+        # The continuous crop is authoritative. Legacy Auto-Fit files may
+        # still contain per-lane raw-space crops.
+        if crop_px:
+            pixels = _crop_array(pixels, crop_px)
+        elif lane_crops_px:
+            pixels = compose_lane_crops(pixels, lane_crops_px)
+        if pixels.size == 0:
+            return QImage()
+        display = transform_pixels_16_to_8(pixels, tone)
+    else:
+        # Geometry belongs to presentation. Render it over the full immutable
+        # source first, then apply the Canvas-space crop saved by the project.
+        display = transform_pixels_16_to_8(pixels, tone)
+        display = apply_geometry_to_display(display, geometry)
+        display = _crop_array(display, crop_px)
+        if display.size == 0:
+            return QImage()
     display = np.ascontiguousarray(display)
     height, width = display.shape
     return QImage(
@@ -447,9 +466,21 @@ class PDFExporter:
                 item.image_crop_px,
                 item.image_transform,
                 item.image_lane_crops_px,
+                geometry_transform=item.geometry_transform,
             )
             if not img.isNull():
-                painter.drawImage(QRectF(rect), img)
+                if item.preserve_image_aspect:
+                    placement = aspect_fit_placement(
+                        img.width(), img.height(), rect.width(), rect.height()
+                    )
+                    painter.drawImage(QRectF(
+                        rect.x() + placement.x,
+                        rect.y() + placement.y,
+                        placement.width,
+                        placement.height,
+                    ), img)
+                else:
+                    painter.drawImage(QRectF(rect), img)
                 return
         # Placeholder — grey rectangle with dashed border
         painter.fillRect(rect, QColor("#D8D8D8"))
@@ -763,17 +794,31 @@ class PPTXExporter:
                 item.image_crop_px,
                 item.image_transform,
                 item.image_lane_crops_px,
+                geometry_transform=item.geometry_transform,
             )
             png_bytes = _qimage_to_png_bytes(image)
             if png_bytes:
                 import io
                 buf = io.BytesIO(png_bytes)
+                if item.preserve_image_aspect:
+                    placement = aspect_fit_placement(
+                        image.width(), image.height(), width, height
+                    )
+                    picture_left = left + int(round(placement.x))
+                    picture_top = top + int(round(placement.y))
+                    picture_width = int(round(placement.width))
+                    picture_height = int(round(placement.height))
+                else:
+                    picture_left = left
+                    picture_top = top
+                    picture_width = width
+                    picture_height = height
                 picture = slide.shapes.add_picture(
                     buf,
-                    left,
-                    top,
-                    width,
-                    height,
+                    picture_left,
+                    picture_top,
+                    picture_width,
+                    picture_height,
                 )
                 self._apply_blot_border(picture, scale)
                 return picture

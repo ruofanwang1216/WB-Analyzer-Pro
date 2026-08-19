@@ -52,12 +52,26 @@ from core.export_engine import (
     TIFFExporter,
 )
 from core.band_auto_fit import calculate_band_auto_fit
+from core.image_transform import geometry_transform_from_dict
+from core.condition_template import even_lane_group_ranges, make_condition_table
 from core.figure_project import (
     BlotSlot, ConditionTable, FigureProject,
     GlobalLayout, ImageBBox, LaneROI, Panel, SourceRef,
 )
-from core.layout_engine import LayoutEngine, LayoutItem, LayoutResult, pt_to_scene
+from core.layout_engine import (
+    LayoutEngine,
+    LayoutItem,
+    LayoutResult,
+    pt_to_scene,
+    scene_to_pt,
+)
 from core.template_engine import TemplateEngine
+from gui.condition_template_dialog import (
+    ConditionPreviewWidget as _ConditionPreviewWidget,
+    ConditionTemplateDialogController,
+    request_custom_lane_ranges,
+    request_custom_panel_lane_ranges,
+)
 from gui.figure_canvas import FigureCanvas
 from utils.i18n import LANG_EN, LANG_ZH_CN, tr, tr_display
 
@@ -215,579 +229,6 @@ class _FramePreviewWidget(QWidget):
                     )
 
 
-class _ConditionPreviewWidget(QWidget):
-    """Live miniature of a condition matrix and its lane groups."""
-
-    _GROUP_ROW_HEIGHT = 30.0
-    _CONDITION_ROW_HEIGHT = 20.0
-    _GROUP_FONT_SIZE_PT = 12.0
-    _CONDITION_FONT_SIZE_PT = 13.0
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self._lane_count = 6
-        self._row_count = 3
-        self._group_ranges = [(1, 3), (4, 6)]
-        self._conditions = [
-            (self._lane_count, self._row_count, [list(self._group_ranges)])
-        ]
-        self._cross_preview: dict | None = None
-        self._layout_items: list[LayoutItem] | None = None
-        self._layout_bounds: QRectF | None = None
-        self._layout_panel_markers: list[tuple[str, float, float, float]] = []
-        self.setFixedHeight(100)
-        self.setStyleSheet(
-            "background:#FFFFFF; border:1px solid #B8C7DA; border-radius:6px;"
-        )
-
-    def set_condition(
-        self,
-        lanes: int,
-        rows: int,
-        group_ranges: list[tuple[int, int]],
-    ) -> None:
-        self.set_conditions([(lanes, rows, group_ranges)])
-
-    def set_conditions(
-        self,
-        conditions: list[tuple[int, int, object]],
-    ) -> None:
-        self._layout_items = None
-        self._layout_bounds = None
-        self._layout_panel_markers = []
-        self._cross_preview = None
-        normalized = []
-        for lanes, rows, raw_groups in conditions:
-            groups = list(raw_groups) if isinstance(raw_groups, list) else []
-            if groups and isinstance(groups[0], tuple):
-                levels = [list(groups)]
-            elif groups and isinstance(groups[0], list):
-                levels = [list(level) for level in groups]
-            else:
-                levels = []
-            normalized.append((
-                max(1, int(lanes)),
-                max(1, int(rows)),
-                levels,
-            ))
-        if not normalized:
-            normalized = [(1, 1, [[(1, 1)]])]
-        self._conditions = normalized
-        self._lane_count, self._row_count, levels = normalized[0]
-        self._group_ranges = list(levels[0]) if levels else []
-        # Keep the preview compact like the actual condition table instead of
-        # stretching it to consume all remaining dialog height.
-        max_rows = max(rows for _lanes, rows, _levels in normalized)
-        max_levels = max(
-            sum(bool(level) for level in levels)
-            for _lanes, _rows, levels in normalized
-        )
-        panel_title_height = 13 if len(normalized) > 1 else 0
-        self.setFixedHeight(
-            min(
-                300,
-                10
-                + panel_title_height
-                + max_levels * self._GROUP_ROW_HEIGHT
-                + max_rows * self._CONDITION_ROW_HEIGHT,
-            )
-        )
-        self.update()
-
-    def set_cross_panel_conditions(
-        self,
-        lane_counts: list[int],
-        rows: int,
-        group_levels: list[list[tuple[int, int]]],
-        panel_start: int,
-        panel_end: int,
-    ) -> None:
-        self._layout_items = None
-        self._layout_bounds = None
-        self._layout_panel_markers = []
-        normalized_lanes = [max(1, int(value)) for value in lane_counts]
-        if not normalized_lanes:
-            normalized_lanes = [1]
-        start = max(0, min(len(normalized_lanes) - 1, int(panel_start)))
-        end = max(start, min(len(normalized_lanes) - 1, int(panel_end)))
-        normalized_levels = [list(level) for level in group_levels]
-        self._cross_preview = {
-            "lane_counts": normalized_lanes,
-            "rows": max(1, int(rows)),
-            "levels": normalized_levels,
-            "panel_start": start,
-            "panel_end": end,
-        }
-        self._conditions = [
-            (lanes, max(1, int(rows)), []) for lanes in normalized_lanes
-        ]
-        self._lane_count = normalized_lanes[0]
-        self._row_count = max(1, int(rows))
-        self._group_ranges = []
-        visible_levels = sum(bool(level) for level in normalized_levels)
-        self.setFixedHeight(
-            min(
-                300,
-                23
-                + visible_levels * self._GROUP_ROW_HEIGHT
-                + self._row_count * self._CONDITION_ROW_HEIGHT,
-            )
-        )
-        self.update()
-
-    def condition(self) -> tuple[int, int, list[tuple[int, int]]]:
-        return self._lane_count, self._row_count, list(self._group_ranges)
-
-    def conditions(self) -> list[tuple[int, int, object]]:
-        result: list[tuple[int, int, object]] = []
-        for lanes, rows, levels in self._conditions:
-            group_data: object = (
-                list(levels[0])
-                if len(levels) == 1
-                else [list(level) for level in levels]
-            )
-            result.append((lanes, rows, group_data))
-        return result
-
-    def set_layout_project(self, project: FigureProject) -> None:
-        """Preview the exact condition-table layout produced after Create."""
-        layout = LayoutEngine().compute(project)
-        items = [
-            item
-            for item in layout.items
-            if (
-                item.source_ref is not None
-                and item.source_ref.field in {
-                    "condition_cell",
-                    "condition_line",
-                }
-            )
-        ]
-        self._layout_items = items
-        self._cross_preview = None
-        self._layout_panel_markers = []
-        if not items:
-            self._layout_bounds = None
-            self.setFixedHeight(40)
-            self.update()
-            return
-        left = min(item.x_pt for item in items)
-        top = min(item.y_pt for item in items)
-        right = max(item.x_pt + item.w_pt for item in items)
-        bottom = max(item.y_pt + max(0.0, item.h_pt) for item in items)
-        panel_indices = sorted({
-            item.source_ref.panel_idx
-            for item in items
-            if item.source_ref is not None
-            and item.source_ref.panel_idx is not None
-        })
-        if len(panel_indices) > 1:
-            marker_ranges: list[tuple[str, float, float]] = []
-            panel_tops: list[float] = []
-            for panel_number, panel_index in enumerate(panel_indices, start=1):
-                panel_items = [
-                    item
-                    for item in items
-                    if (
-                        item.source_ref is not None
-                        and item.source_ref.panel_idx == panel_index
-                    )
-                ]
-                if not panel_items:
-                    continue
-                table = project.panels[panel_index].condition_table
-                condition_row_indices = {
-                    row_index
-                    for row_index, row in enumerate(table.rows if table else [])
-                    if row and row[0].startswith("Condition ")
-                }
-                lane_items = [
-                    item
-                    for item in panel_items
-                    if (
-                        item.source_ref is not None
-                        and item.source_ref.table_row in condition_row_indices
-                        and item.source_ref.table_col is not None
-                        and item.source_ref.table_col > 0
-                    )
-                ] or panel_items
-                panel_left = min(item.x_pt for item in lane_items)
-                panel_right = max(
-                    item.x_pt + item.w_pt for item in lane_items
-                )
-                panel_top = min(item.y_pt for item in panel_items)
-                marker_ranges.append((
-                    f"Panel {panel_number}",
-                    panel_left,
-                    panel_right,
-                ))
-                panel_tops.append(panel_top)
-            marker_y = min(panel_tops, default=top) - 15.0
-            for text, panel_left, panel_right in marker_ranges:
-                self._layout_panel_markers.append((
-                    text,
-                    panel_left,
-                    panel_right,
-                    marker_y,
-                ))
-            top = min(top, marker_y)
-        self._layout_bounds = QRectF(
-            left,
-            top,
-            max(1.0, right - left),
-            max(1.0, bottom - top),
-        )
-        available_width = max(40.0, self.width() - 20.0)
-        scale = available_width / self._layout_bounds.width()
-        self.setFixedHeight(
-            min(
-                300,
-                max(40, int(round(self._layout_bounds.height() * scale + 10))),
-            )
-        )
-        self.update()
-
-    def layout_items(self) -> list[LayoutItem]:
-        return list(self._layout_items or [])
-
-    def layout_panel_labels(self) -> list[str]:
-        return [marker[0] for marker in self._layout_panel_markers]
-
-    def layout_panel_markers(
-        self,
-    ) -> list[tuple[str, float, float, float]]:
-        return list(self._layout_panel_markers)
-
-    def paintEvent(self, event) -> None:
-        super().paintEvent(event)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        if self._layout_items is not None:
-            self._paint_layout_conditions(painter)
-            return
-        if self._cross_preview is not None:
-            self._paint_cross_panel_condition(painter)
-            return
-        area = QRectF(self.rect()).adjusted(10.0, 5.0, -10.0, -5.0)
-        panel_gap = 10.0 if len(self._conditions) > 1 else 0.0
-        panel_width = max(
-            40.0,
-            (
-                area.width()
-                - panel_gap * (len(self._conditions) - 1)
-            ) / len(self._conditions),
-        )
-        for panel_index, condition in enumerate(self._conditions):
-            panel_area = QRectF(
-                area.left() + panel_index * (panel_width + panel_gap),
-                area.top(),
-                panel_width,
-                area.height(),
-            )
-            self._paint_condition(
-                painter,
-                panel_area,
-                condition,
-                panel_index if len(self._conditions) > 1 else None,
-            )
-
-    def _paint_layout_conditions(self, painter: QPainter) -> None:
-        bounds = self._layout_bounds
-        items = self._layout_items or []
-        if bounds is None or not items:
-            return
-        area = QRectF(self.rect()).adjusted(10.0, 5.0, -10.0, -5.0)
-        scale = min(
-            area.width() / bounds.width(),
-            area.height() / bounds.height(),
-        )
-        offset_x = area.left() + (area.width() - bounds.width() * scale) / 2.0
-        offset_y = area.top() + (area.height() - bounds.height() * scale) / 2.0
-        if self._layout_panel_markers:
-            marker_font = QFont("Arial")
-            marker_font.setBold(True)
-            marker_font.setPointSizeF(
-                max(7.0, 10.0 * min(scale, 1.5) / 1.5)
-            )
-            painter.setFont(marker_font)
-            painter.setPen(QColor("#456455"))
-            for text, marker_left, marker_right, marker_y in (
-                self._layout_panel_markers
-            ):
-                x = offset_x + (marker_left - bounds.left()) * scale
-                y = offset_y + (marker_y - bounds.top()) * scale
-                painter.drawText(
-                    QRectF(
-                        x,
-                        y,
-                        max(1.0, marker_right - marker_left) * scale,
-                        15.0 * scale,
-                    ),
-                    Qt.AlignmentFlag.AlignCenter,
-                    text,
-                )
-        for item in sorted(items, key=lambda candidate: candidate.z_order):
-            x = offset_x + (item.x_pt - bounds.left()) * scale
-            y = offset_y + (item.y_pt - bounds.top()) * scale
-            width = item.w_pt * scale
-            height = item.h_pt * scale
-            if item.kind == "line":
-                painter.setPen(QPen(
-                    QColor(item.line_color),
-                    max(0.7, item.line_width_pt * scale),
-                ))
-                painter.drawLine(
-                    QPointF(x, y),
-                    QPointF(x + width, y + height),
-                )
-                continue
-            font = QFont(item.font_family)
-            font.setPointSizeF(
-                max(5.0, item.font_size_pt * min(scale, 1.5) / 1.5)
-            )
-            font.setBold(item.bold)
-            font.setItalic(item.italic)
-            font.setUnderline(item.underline)
-            painter.setFont(font)
-            painter.setPen(QColor("#111111"))
-            alignment = Qt.AlignmentFlag.AlignVCenter
-            if item.align == "center":
-                alignment |= Qt.AlignmentFlag.AlignHCenter
-            elif item.align == "right":
-                alignment |= Qt.AlignmentFlag.AlignRight
-            else:
-                alignment |= Qt.AlignmentFlag.AlignLeft
-            painter.drawText(
-                QRectF(x, y, width, height),
-                alignment,
-                item.text,
-            )
-
-    def _paint_cross_panel_condition(self, painter: QPainter) -> None:
-        model = self._cross_preview
-        if model is None:
-            return
-        lane_counts = model["lane_counts"]
-        row_count = model["rows"]
-        levels = [level for level in model["levels"] if level]
-        panel_start = model["panel_start"]
-        panel_end = model["panel_end"]
-        area = QRectF(self.rect()).adjusted(10.0, 5.0, -10.0, -5.0)
-        label_w = min(92.0, area.width() * 0.24)
-        matrix_x = area.left() + label_w
-        matrix_w = max(60.0, area.width() - label_w)
-        panel_gap = 10.0 if len(lane_counts) > 1 else 0.0
-        usable_w = max(40.0, matrix_w - panel_gap * (len(lane_counts) - 1))
-        total_lanes = max(1, sum(lane_counts))
-        panel_widths = [usable_w * lanes / total_lanes for lanes in lane_counts]
-        panel_lefts: list[float] = []
-        cursor_x = matrix_x
-        for width in panel_widths:
-            panel_lefts.append(cursor_x)
-            cursor_x += width + panel_gap
-
-        panel_font = painter.font()
-        panel_font.setPointSizeF(7.5)
-        panel_font.setBold(True)
-        painter.setFont(panel_font)
-        painter.setPen(QColor("#456455"))
-        for panel_index, (left, width) in enumerate(
-            zip(panel_lefts, panel_widths)
-        ):
-            painter.setPen(QColor("#456455"))
-            painter.drawText(
-                QRectF(left, area.top(), width, 13.0),
-                Qt.AlignmentFlag.AlignCenter,
-                f"Panel {panel_index + 1}",
-            )
-            if panel_index > 0:
-                boundary_x = left - panel_gap / 2.0
-                boundary_pen = QPen(QColor("#A8B5AF"), 0.8)
-                boundary_pen.setStyle(Qt.PenStyle.DotLine)
-                painter.setPen(boundary_pen)
-                painter.drawLine(
-                    QPointF(boundary_x, area.top() + 13.0),
-                    QPointF(boundary_x, area.bottom()),
-                )
-
-        selected_cells: list[tuple[float, float]] = []
-        for panel_index in range(panel_start, panel_end + 1):
-            lane_width = panel_widths[panel_index] / lane_counts[panel_index]
-            selected_cells.extend([
-                (
-                    panel_lefts[panel_index] + lane_index * lane_width,
-                    lane_width,
-                )
-                for lane_index in range(lane_counts[panel_index])
-            ])
-
-        group_font = painter.font()
-        group_font.setPointSizeF(self._GROUP_FONT_SIZE_PT)
-        group_font.setBold(True)
-        painter.setFont(group_font)
-        painter.setPen(QColor("#111111"))
-        for visual_row, group_ranges in enumerate(reversed(levels)):
-            level_y = (
-                area.top()
-                + 13.0
-                + visual_row * self._GROUP_ROW_HEIGHT
-            )
-            for group_index, (start, end) in enumerate(group_ranges):
-                if not selected_cells:
-                    continue
-                start = max(1, min(len(selected_cells), start))
-                end = max(start, min(len(selected_cells), end))
-                group_x = selected_cells[start - 1][0]
-                last_x, last_w = selected_cells[end - 1]
-                group_w = last_x + last_w - group_x
-                title_w = max(52.0, group_w)
-                painter.drawText(
-                    QRectF(
-                        group_x - (title_w - group_w) / 2.0,
-                        level_y,
-                        title_w,
-                        20.0,
-                    ),
-                    Qt.AlignmentFlag.AlignCenter,
-                    f"Group {group_index + 1}",
-                )
-                inset = max(5.0, min(10.0, group_w * 0.10))
-                painter.setPen(QPen(QColor("#111111"), 1.1))
-                painter.drawLine(
-                    QPointF(group_x + inset, level_y + 24.0),
-                    QPointF(group_x + group_w - inset, level_y + 24.0),
-                )
-
-        group_height = self._GROUP_ROW_HEIGHT * len(levels)
-        body_top = area.top() + 13.0 + group_height
-        body_h = max(
-            self._CONDITION_ROW_HEIGHT,
-            (area.bottom() - body_top) / row_count,
-        )
-        body_font = painter.font()
-        body_font.setPointSizeF(self._CONDITION_FONT_SIZE_PT)
-        body_font.setBold(False)
-        for row_index in range(row_count):
-            y = body_top + row_index * body_h
-            label_font = QFont(body_font)
-            label_font.setBold(True)
-            painter.setFont(label_font)
-            painter.setPen(QColor("#111111"))
-            painter.drawText(
-                QRectF(area.left(), y, label_w - 5.0, body_h),
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                f"Condition {row_index + 1}",
-            )
-            painter.setFont(body_font)
-            for panel_index, lane_count in enumerate(lane_counts):
-                lane_width = panel_widths[panel_index] / lane_count
-                for lane_index in range(lane_count):
-                    value = "+" if (lane_index + row_index) % 3 == 1 else "-"
-                    painter.drawText(
-                        QRectF(
-                            panel_lefts[panel_index] + lane_index * lane_width,
-                            y,
-                            lane_width,
-                            body_h,
-                        ),
-                        Qt.AlignmentFlag.AlignCenter,
-                        value,
-                    )
-
-    def _paint_condition(
-        self,
-        painter: QPainter,
-        area: QRectF,
-        condition: tuple[int, int, list[list[tuple[int, int]]]],
-        panel_index: int | None,
-    ) -> None:
-        lane_count, row_count, group_levels = condition
-        visible_group_levels = [
-            group_ranges for group_ranges in group_levels if group_ranges
-        ]
-        panel_title_h = 13.0 if panel_index is not None else 0.0
-        if panel_index is not None:
-            panel_font = painter.font()
-            panel_font.setPointSizeF(7.5)
-            panel_font.setBold(True)
-            painter.setFont(panel_font)
-            painter.setPen(QColor("#456455"))
-            painter.drawText(
-                QRectF(area.left(), area.top(), area.width(), panel_title_h),
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                f"Panel {panel_index + 1}",
-            )
-        area = area.adjusted(0.0, panel_title_h, 0.0, 0.0)
-        label_w = (
-            min(115.0, area.width() * 0.42)
-            if panel_index is not None
-            else min(105.0, area.width() * 0.30)
-        )
-        matrix_x = area.left() + label_w
-        matrix_w = max(40.0, area.width() - label_w)
-        col_w = matrix_w / lane_count
-        group_h = self._GROUP_ROW_HEIGHT * len(visible_group_levels)
-        row_h = max(
-            self._CONDITION_ROW_HEIGHT,
-            (area.height() - group_h) / row_count,
-        )
-
-        group_font = painter.font()
-        group_font.setPointSizeF(self._GROUP_FONT_SIZE_PT)
-        group_font.setBold(True)
-        painter.setFont(group_font)
-        painter.setPen(QColor("#111111"))
-        # Higher levels appear above Level 1, matching the final canvas.
-        for visual_row, group_ranges in enumerate(reversed(visible_group_levels)):
-            level_y = area.top() + visual_row * self._GROUP_ROW_HEIGHT
-            for group_index, (start, end) in enumerate(group_ranges):
-                start = max(1, min(lane_count, start))
-                end = max(start, min(lane_count, end))
-                x = matrix_x + (start - 1) * col_w
-                width = (end - start + 1) * col_w
-                group_font.setPointSizeF(self._GROUP_FONT_SIZE_PT)
-                painter.setFont(group_font)
-                title_width = max(width, 54.0)
-                painter.drawText(
-                    QRectF(
-                        x - (title_width - width) / 2.0,
-                        level_y,
-                        title_width,
-                        20.0,
-                    ),
-                    Qt.AlignmentFlag.AlignCenter,
-                    f"Group {group_index + 1}",
-                )
-                inset = max(5.0, min(12.0, width * 0.10))
-                painter.setPen(QPen(QColor("#111111"), 1.2))
-                painter.drawLine(
-                    QPointF(x + inset, level_y + 24.0),
-                    QPointF(x + width - inset, level_y + 24.0),
-                )
-
-        body_font = painter.font()
-        body_font.setPointSizeF(self._CONDITION_FONT_SIZE_PT)
-        body_font.setBold(False)
-        painter.setFont(body_font)
-        for row_index in range(row_count):
-            y = area.top() + group_h + row_index * row_h
-            label_font = QFont(body_font)
-            label_font.setBold(True)
-            painter.setFont(label_font)
-            painter.setPen(QColor("#111111"))
-            painter.drawText(
-                QRectF(area.left(), y, label_w - 5.0, row_h),
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                f"Condition {row_index + 1}",
-            )
-            painter.setFont(body_font)
-            for lane_index in range(lane_count):
-                value = "+" if (lane_index + row_index) % 3 == 1 else "-"
-                painter.drawText(
-                    QRectF(matrix_x + lane_index * col_w, y, col_w, row_h),
-                    Qt.AlignmentFlag.AlignCenter,
-                    value,
-                )
 
 
 # ── Collapsible group box ─────────────────────────────────────────────────────
@@ -1854,6 +1295,7 @@ class FigureModeWindow(QWidget):
         ]
 
     def _on_create_condition_template(self) -> None:
+        """Open the condition-template workflow and apply its model result."""
         targets = self._current_condition_targets()
         if not targets:
             QMessageBox.information(
@@ -1863,1077 +1305,35 @@ class FigureModeWindow(QWidget):
             )
             return
 
-        panel_count = len(targets)
-        lane_counts = [lane_count for _panel_index, lane_count in targets]
-        shared_lane_count = max(1, min(lane_counts))
-
-        dialog = QDialog(self)
-        dialog.setObjectName("modernConditionDialog")
-        dialog.setWindowTitle("Create Blot Condition Template")
-        dialog.setModal(True)
-        dialog.setMinimumWidth(620)
-        dialog.setStyleSheet(
-            "QDialog#modernConditionDialog { background:#F3F6F5; "
-            "color:#26322D; font-family:'Avenir Next','Helvetica Neue',Arial; "
-            "font-size:12px; } "
-            "QDialog#modernConditionDialog QLabel, "
-            "QDialog#modernConditionDialog QWidget#conditionRowsHost, "
-            "QDialog#modernConditionDialog QWidget#conditionRowsShared, "
-            "QDialog#modernConditionDialog QWidget#conditionRowsIndividual, "
-            "QDialog#modernConditionDialog QWidget#conditionLevelsHost, "
-            "QDialog#modernConditionDialog QWidget#conditionLevelContainer, "
-            "QDialog#modernConditionDialog QWidget#conditionLevelHeading, "
-            "QDialog#modernConditionDialog QWidget#conditionLevelControls, "
-            "QDialog#modernConditionDialog QWidget#conditionPanelLevelControls, "
-            "QDialog#modernConditionDialog QWidget#conditionPanelLevelRow, "
-            "QDialog#modernConditionDialog QWidget#conditionLaneDistributionColumn { "
-            "background:transparent; border:none; } "
-            "QFrame#conditionRowsCard, QFrame#conditionLaneGroupsCard { "
-            "background:#FFFFFF; border:1px solid #D6E0DB; "
-            "border-radius:10px; } "
-            "QLabel#conditionSectionTitle { color:#214B39; font-size:12px; "
-            "font-weight:600; } "
-            "QLabel#conditionFieldLabel { color:#34423B; font-size:11px; } "
-            "QLabel#conditionGroupHeading { color:#285A44; font-size:11px; "
-            "font-weight:600; } "
-            "QLabel#conditionPanelLabel { color:#34423B; font-size:11px; } "
-            "QLabel#conditionHint { color:#6C7B74; font-size:10px; } "
-            "QSpinBox, QComboBox { background:#FFFFFF; color:#26322D; "
-            "border:1px solid #BCC9C3; border-radius:5px; padding:3px 6px; "
-            "min-height:20px; } "
-            "QSpinBox:focus, QComboBox:focus { border:1px solid #5E9A7F; } "
-            "QToolButton[conditionModeSelector=\"true\"] { "
-            "background:#F7FAF8; border:1px solid #C5D1CB; "
-            "border-radius:4px; padding:2px 5px; color:#34423B; "
-            "font-size:10px; text-align:center; } "
-            "QToolButton[conditionModeSelector=\"true\"]:hover { "
-            "border-color:#7FA590; background:#EDF5F1; } "
-            "QToolButton[conditionModeSelector=\"true\"]::menu-indicator { "
-            "image:none; width:0px; } "
-            "QMenu#conditionModeMenu { background:#FFFFFF; color:#26322D; "
-            "border:1px solid #C5D1CB; padding:4px; } "
-            "QMenu#conditionModeMenu::item { padding:5px 20px 5px 8px; "
-            "border-radius:4px; } "
-            "QMenu#conditionModeMenu::item:selected { background:#E4F0EA; "
-            "color:#214B39; } "
-            "QPushButton#conditionCreateButton { background:#315F4B; "
-            "border:1px solid #315F4B; border-radius:6px; padding:6px 18px; "
-            "color:#FFFFFF; font-weight:600; } "
-            "QPushButton#conditionCreateButton:hover { background:#274E3D; } "
-            "QPushButton#conditionCancelButton { background:#FFFFFF; "
-            "border:1px solid #C5D1CB; border-radius:6px; padding:6px 18px; "
-            "color:#34423B; }"
+        controller = ConditionTemplateDialogController(
+            self,
+            targets,
+            self._project,
+            self._language,
+            self._tutorial_mode,
+            preview_factory=_ConditionPreviewWidget,
+            make_spin=self._make_structure_spin,
+            request_custom_ranges=self._request_custom_lane_ranges,
+            retranslate=self._retranslate_widget_tree,
         )
-
-        outer = QVBoxLayout(dialog)
-        outer.setContentsMargins(22, 20, 22, 18)
-        outer.setSpacing(14)
-
-        def section_title(text: str) -> QLabel:
-            label = QLabel(tr(text, self._language))
-            label.setObjectName("conditionSectionTitle")
-            return label
-
-        def field_label(text: str) -> QLabel:
-            label = QLabel(tr(text, self._language))
-            label.setObjectName("conditionFieldLabel")
-            label.setAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
-            return label
-
-        def panel_label(panel_position: int) -> QLabel:
-            label = QLabel(
-                tr("Panel {number}", self._language, number=panel_position + 1)
-            )
-            label.setObjectName("conditionPanelLabel")
-            label.setMinimumWidth(54)
-            label.setAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
-            return label
-
-        def group_heading_label(text: str = "") -> QLabel:
-            label = QLabel(text)
-            label.setObjectName("conditionGroupHeading")
-            label.setAlignment(
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-            )
-            return label
-
-        def popup_selector(
-            object_name: str,
-            text: str,
-            width: int,
-        ) -> tuple[QToolButton, QMenu]:
-            selector = QToolButton()
-            selector.setObjectName(object_name)
-            selector.setProperty("conditionModeSelector", True)
-            selector.setText(tr(text, self._language))
-            selector.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-            selector.setPopupMode(
-                QToolButton.ToolButtonPopupMode.InstantPopup
-            )
-            selector.setFixedSize(width, 22)
-            menu = QMenu(selector)
-            menu.setObjectName("conditionModeMenu")
-            selector.setMenu(menu)
-            return selector, menu
-
-        def section_mode_selector(
-            object_name: str,
-        ) -> tuple[QToolButton, QAction, QAction]:
-            selector, menu = popup_selector(
-                object_name,
-                "Apply to all panels",
-                146,
-            )
-            apply_all = menu.addAction(tr("Apply to all panels", self._language))
-            individual = menu.addAction(tr("Set individual panels", self._language))
-            apply_all.setCheckable(True)
-            individual.setCheckable(True)
-            apply_all.setChecked(True)
-            selector.setVisible(panel_count > 1)
-            return selector, apply_all, individual
-
-        modes = {
-            "rows_individual": False,
-            "groups_individual": False,
-        }
-
-        def finish_spin_input_on_return(spin: QSpinBox) -> None:
-            editor = spin.lineEdit()
-
-            def finish_input() -> None:
-                spin.interpretText()
-                editor.deselect()
-                spin.clearFocus()
-
-            editor.returnPressed.connect(
-                lambda: QTimer.singleShot(0, finish_input)
-            )
-
-        # Condition rows section.
-        rows_card = QFrame()
-        rows_card.setObjectName("conditionRowsCard")
-        rows_card_layout = QVBoxLayout(rows_card)
-        rows_card_layout.setContentsMargins(16, 14, 16, 14)
-        rows_card_layout.setSpacing(9)
-        rows_header = QHBoxLayout()
-        rows_header.setSpacing(9)
-        rows_header.addWidget(section_title("Condition rows"))
-        rows_mode_selector, rows_apply_action, rows_individual_action = (
-            section_mode_selector("conditionRowsModeSelector")
-        )
-        rows_header.addWidget(rows_mode_selector)
-        rows_header.addStretch(1)
-        rows_card_layout.addLayout(rows_header)
-
-        rows_shared = QWidget()
-        rows_shared.setObjectName("conditionRowsShared")
-        rows_shared_layout = QHBoxLayout(rows_shared)
-        rows_shared_layout.setContentsMargins(0, 0, 0, 0)
-        rows_shared_layout.setSpacing(8)
-        rows_shared_layout.addWidget(group_heading_label("Condition rows #:"))
-        shared_rows_spin = self._make_structure_spin(1, 20, 1)
-        finish_spin_input_on_return(shared_rows_spin)
-        shared_rows_spin.setObjectName("conditionRowsSpin_common")
-        rows_shared_layout.addWidget(shared_rows_spin)
-        rows_shared_layout.addStretch(1)
-        rows_card_layout.addWidget(rows_shared)
-
-        rows_individual = QWidget()
-        rows_individual.setObjectName("conditionRowsIndividual")
-        rows_individual_layout = QGridLayout(rows_individual)
-        rows_individual_layout.setContentsMargins(0, 0, 0, 0)
-        rows_individual_layout.setHorizontalSpacing(8)
-        rows_individual_layout.setVerticalSpacing(6)
-        rows_individual_layout.addWidget(
-            group_heading_label("Condition rows #:"),
-            0,
-            0,
-            1,
-            2,
-            Qt.AlignmentFlag.AlignLeft,
-        )
-        panel_rows_spins: list[QSpinBox] = []
-        for panel_position in range(panel_count):
-            spin = self._make_structure_spin(1, 20, 1)
-            finish_spin_input_on_return(spin)
-            spin.setObjectName(
-                f"conditionRowsSpin_panel_{panel_position + 1}"
-            )
-            rows_individual_layout.addWidget(
-                panel_label(panel_position), panel_position + 1, 0
-            )
-            rows_individual_layout.addWidget(
-                spin,
-                panel_position + 1,
-                1,
-                Qt.AlignmentFlag.AlignLeft,
-            )
-            panel_rows_spins.append(spin)
-        rows_individual_layout.setColumnStretch(2, 1)
-        rows_individual.hide()
-        rows_card_layout.addWidget(rows_individual)
-        outer.addWidget(rows_card)
-
-        # Lane groups section.
-        lane_card = QFrame()
-        lane_card.setObjectName("conditionLaneGroupsCard")
-        lane_layout = QVBoxLayout(lane_card)
-        lane_layout.setContentsMargins(16, 14, 16, 14)
-        lane_layout.setSpacing(10)
-        lane_header = QHBoxLayout()
-        lane_header.setSpacing(9)
-        lane_header.addWidget(section_title("Lane groups"))
-        groups_mode_selector, groups_apply_action, groups_individual_action = (
-            section_mode_selector("laneGroupsModeSelector")
-        )
-        lane_header.addWidget(groups_mode_selector)
-        lane_header.addStretch(1)
-        lane_layout.addLayout(lane_header)
-
-        levels_host = QWidget()
-        levels_host.setObjectName("conditionLevelsHost")
-        levels_layout = QHBoxLayout(levels_host)
-        levels_layout.setContentsMargins(0, 0, 0, 0)
-        levels_layout.setSpacing(10)
-        levels_layout.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
-        )
-        lane_layout.addWidget(levels_host)
-
-        levels: list[dict] = []
-        def make_add_level_button() -> QToolButton:
-            button = QToolButton()
-            button.setText("+")
-            button.setToolTip(tr("Add another lane-group level", self._language))
-            button.setFixedSize(22, 22)
-            button.setStyleSheet(
-                "QToolButton { border:1px solid #8FB7A6; "
-                "border-radius:5px; background:#E8F3EE; color:#24513D; "
-                "font-size:13px; font-weight:700; } "
-                "QToolButton:hover { background:#D3E9DF; }"
-            )
-            return button
-
-        add_level_buttons = [
-            make_add_level_button() for _panel_position in range(panel_count)
-        ]
-        add_level_btn = add_level_buttons[0]
-
-        empty_row = QWidget()
-        empty_layout = QHBoxLayout(empty_row)
-        empty_layout.setContentsMargins(0, 0, 0, 0)
-        empty_layout.setSpacing(7)
-        empty_level_label = QLabel(tr("No lane groups", self._language))
-        empty_level_label.setObjectName("conditionHint")
-        empty_layout.addWidget(empty_level_label)
-        empty_layout.addWidget(add_level_btn)
-        empty_layout.addStretch(1)
-        levels_layout.addWidget(empty_row)
-        empty_individual_rows = QWidget()
-        empty_individual_layout = QVBoxLayout(empty_individual_rows)
-        empty_individual_layout.setContentsMargins(0, 0, 0, 0)
-        empty_individual_layout.setSpacing(6)
-        empty_panel_layouts: list[QHBoxLayout] = []
-        for panel_position in range(panel_count):
-            panel_empty_row = QWidget(empty_individual_rows)
-            panel_empty_row.setObjectName("conditionPanelLevelRow")
-            panel_empty_layout = QHBoxLayout(panel_empty_row)
-            panel_empty_layout.setContentsMargins(0, 0, 0, 0)
-            panel_empty_layout.setSpacing(6)
-            panel_empty_layout.addWidget(panel_label(panel_position))
-            panel_empty_layout.addStretch(1)
-            empty_individual_layout.addWidget(panel_empty_row)
-            empty_panel_layouts.append(panel_empty_layout)
-        empty_individual_rows.hide()
-        levels_layout.addWidget(empty_individual_rows)
-        levels_layout.addStretch(1)
-
-        preview = _ConditionPreviewWidget(dialog)
-        preview.setFixedWidth(
-            430 if panel_count == 1 else min(810, panel_count * 270)
-        )
-        preview.setStyleSheet(
-            "background:#FFFFFF; border:1px solid #D6E0DB; "
-            "border-radius:8px;"
-        )
-
-        def resize_dialog_to_visible_content() -> None:
-            layout = dialog.layout()
-            if layout is None:
-                return
-            layout.invalidate()
-            layout.activate()
-            hint = dialog.sizeHint()
-            dialog.resize(max(dialog.minimumWidth(), hint.width()), hint.height())
-
-        def condition_rows_for(panel_position: int) -> int:
-            if modes["rows_individual"] and panel_count > 1:
-                return panel_rows_spins[panel_position].value()
-            return shared_rows_spin.value()
-
-        def control_ranges(
-            control: dict,
-            lanes: int,
-        ) -> list[tuple[int, int]]:
-            groups = min(control["group_spin"].value(), max(1, lanes))
-            if groups <= 0:
-                return []
-            if (
-                control["group_mode"].currentData() == "custom"
-                and control["custom_lane_count"] == lanes
-                and control["custom_ranges"] is not None
-                and len(control["custom_ranges"]) == groups
-            ):
-                return list(control["custom_ranges"])
-            return self._even_lane_group_ranges(lanes, groups)
-
-        def level_control(level: dict, panel_position: int) -> dict:
-            if modes["groups_individual"] and panel_count > 1:
-                return level["panel_controls"][panel_position]
-            return level["shared_control"]
-
-        def current_levels(
-            panel_position: int,
-        ) -> list[list[tuple[int, int]]]:
-            lanes = lane_counts[panel_position]
-            result: list[list[tuple[int, int]]] = []
-            for level in levels:
-                control = level_control(level, panel_position)
-                if (
-                    modes["groups_individual"]
-                    and panel_count > 1
-                    and not control["active"]
-                ):
-                    continue
-                result.append(control_ranges(control, lanes))
-            return result
-
-        def refresh_preview() -> None:
-            preview_project = copy.deepcopy(self._project)
-            if preview_project is None:
-                return
-            preview_conditions = [
-                (
-                    lane_count,
-                    condition_rows_for(panel_position),
-                    current_levels(panel_position),
-                )
-                for panel_position, lane_count in enumerate(lane_counts)
-            ]
-            preview.set_conditions(preview_conditions)
-            for panel_position, (panel_index, lane_count) in enumerate(targets):
-                preview_project.panels[panel_index].condition_table = (
-                    self._make_custom_condition_table(
-                        lane_count,
-                        preview_conditions[panel_position][1],
-                        preview_conditions[panel_position][2],
-                    )
-                )
-            preview_project.global_layout.show_condition_table = True
-            preview_project.global_layout.condition_table_row_height_pt = 13.0
-            preview.set_layout_project(preview_project)
-
-        def update_control(control: dict, lanes: int) -> None:
-            control["group_spin"].setMaximum(max(1, lanes))
-            has_groups = control["group_spin"].value() > 0
-            # A zero-valued individual placeholder is still the panel's Level
-            # 1 control. Keep its selected distribution mode intact so adding
-            # the level again restores the same setup instead of silently
-            # resetting it to Evenly.
-            control["group_mode"].setEnabled(True)
-            evenly = control["group_mode"].currentData() != "custom"
-            control["selector_layout"].setContentsMargins(
-                0,
-                12 if evenly else 0,
-                0,
-                0,
-            )
-            control["mode_selector"].setEnabled(True)
-            selector_width = 53
-            control["mode_selector"].setFixedSize(selector_width, 22)
-            control["mode_selector"].setText(
-                tr("Evenly", self._language)
-                if evenly
-                else tr("Custom", self._language)
-            )
-            control["mode_selector"].setToolTip(
-                tr("Divide lanes evenly", self._language)
-                if evenly
-                else tr("Custom lane ranges…", self._language)
-            )
-            control["custom_btn"].setFixedSize(selector_width, 22)
-            control["layout"].setAlignment(
-                control["individual_remove_btn"],
-                Qt.AlignmentFlag.AlignVCenter
-                if evenly
-                else Qt.AlignmentFlag.AlignTop,
-            )
-            control["default_action"].setChecked(evenly)
-            control["custom_action"].setChecked(not evenly)
-            control["custom_btn"].setVisible(has_groups and not evenly)
-
-        def place_add_level_buttons() -> None:
-            for button in add_level_buttons:
-                button.setParent(levels_host)
-                button.hide()
-            if not levels:
-                individual = (
-                    modes["groups_individual"] and panel_count > 1
-                )
-                empty_row.setVisible(not individual)
-                empty_individual_rows.setVisible(individual)
-                if individual:
-                    for panel_position, button in enumerate(
-                        add_level_buttons
-                    ):
-                        target_layout = empty_panel_layouts[panel_position]
-                        target_layout.insertWidget(
-                            max(1, target_layout.count() - 1),
-                            button,
-                        )
-                        button.show()
-                else:
-                    empty_layout.insertWidget(1, add_level_btn)
-                    add_level_btn.show()
-                return
-            empty_row.hide()
-            empty_individual_rows.hide()
-            last_level = levels[-1]
-            if modes["groups_individual"] and panel_count > 1:
-                for panel_position, button in enumerate(add_level_buttons):
-                    active_levels = [
-                        level
-                        for level in levels
-                        if level["panel_controls"][panel_position]["active"]
-                    ]
-                    if active_levels:
-                        target_control = active_levels[-1]["panel_controls"][
-                            panel_position
-                        ]
-                        target_layout = target_control["layout"]
-                    else:
-                        target_control = levels[0]["panel_controls"][
-                            panel_position
-                        ]
-                        target_control["panel_row"].show()
-                        target_control["panel_label"].show()
-                        target_control["row"].show()
-                        with QSignalBlocker(target_control["group_spin"]):
-                            target_control["group_spin"].setValue(0)
-                        update_control(
-                            target_control,
-                            lane_counts[panel_position],
-                        )
-                        target_control["individual_remove_btn"].hide()
-                        target_layout = target_control["layout"]
-                    target_layout.insertWidget(
-                        max(0, target_layout.count() - 1),
-                        button,
-                        0,
-                        (
-                            Qt.AlignmentFlag.AlignVCenter
-                            if target_control["group_mode"].currentData()
-                            != "custom"
-                            else Qt.AlignmentFlag.AlignTop
-                        ),
-                    )
-                    button.show()
-            else:
-                target_layout = last_level["shared_control"]["layout"]
-                target_layout.insertWidget(
-                    max(0, target_layout.count() - 1),
-                    add_level_btn,
-                    0,
-                    (
-                        Qt.AlignmentFlag.AlignVCenter
-                        if last_level["shared_control"]["group_mode"]
-                        .currentData()
-                        != "custom"
-                        else Qt.AlignmentFlag.AlignTop
-                    ),
-                )
-                add_level_btn.show()
-
-        def update_level_names() -> None:
-            for level_index, level in enumerate(levels, start=1):
-                level["heading"].setText(
-                    tr("Group Level {number}", self._language, number=level_index)
-                )
-                level["remove_btn"].setObjectName(
-                    f"removeLaneGroupLevel_common_level{level_index}"
-                )
-                level["remove_btn"].setToolTip(
-                    tr(
-                        "Remove Group Level {number}",
-                        self._language,
-                        number=level_index,
-                    )
-                )
-                shared = level["shared_control"]
-                shared["group_spin"].setObjectName(
-                    "laneGroupSpin_common"
-                    if level_index == 1
-                    else f"laneGroupSpin_common_level{level_index}"
-                )
-                shared["group_mode"].setObjectName(
-                    "laneGroupingCombo_common"
-                    if level_index == 1
-                    else f"laneGroupingCombo_common_level{level_index}"
-                )
-                shared["mode_selector"].setObjectName(
-                    "laneGroupingSelector_common"
-                    if level_index == 1
-                    else f"laneGroupingSelector_common_level{level_index}"
-                )
-                for panel_position, control in enumerate(
-                    level["panel_controls"], start=1
-                ):
-                    suffix = (
-                        f"panel_{panel_position}"
-                        if level_index == 1
-                        else f"panel_{panel_position}_level{level_index}"
-                    )
-                    control["group_spin"].setObjectName(
-                        f"laneGroupSpin_{suffix}"
-                    )
-                    control["group_mode"].setObjectName(
-                        f"laneGroupingCombo_{suffix}"
-                    )
-                    control["mode_selector"].setObjectName(
-                        f"laneGroupingSelector_{suffix}"
-                    )
-                    control["individual_remove_btn"].setObjectName(
-                        f"removeLaneGroupLevel_{suffix}"
-                    )
-            for panel_position, button in enumerate(add_level_buttons):
-                active_count = (
-                    sum(
-                        level["panel_controls"][panel_position]["active"]
-                        for level in levels
-                    )
-                    if modes["groups_individual"] and panel_count > 1
-                    else len(levels)
-                )
-                prefix = (
-                    "common"
-                    if panel_position == 0
-                    else f"panel_{panel_position + 1}"
-                )
-                button.setObjectName(
-                    f"addLaneGroupLevel_{prefix}_level{active_count}"
-                    if active_count
-                    else f"addLaneGroupLevel_{prefix}_empty"
-                )
-            place_add_level_buttons()
-
-        def update_levels() -> None:
-            individual = modes["groups_individual"] and panel_count > 1
-            for level in levels:
-                update_control(level["shared_control"], shared_lane_count)
-                level["shared_control"]["individual_remove_btn"].hide()
-                for panel_position, control in enumerate(
-                    level["panel_controls"]
-                ):
-                    if control["active"]:
-                        update_control(control, lane_counts[panel_position])
-                    else:
-                        control["group_spin"].setMaximum(
-                            lane_counts[panel_position]
-                        )
-                        with QSignalBlocker(control["group_spin"]):
-                            control["group_spin"].setValue(0)
-                        update_control(
-                            control,
-                            lane_counts[panel_position],
-                        )
-                    # Keep an empty row slot in every level column. Without
-                    # it, an active Panel 2 Level 2 collapses upward into the
-                    # Panel 1 row when Panel 1 has no Level 2.
-                    control["panel_row"].setVisible(individual)
-                    control["panel_label"].setVisible(
-                        individual and control["active"]
-                    )
-                    control["row"].setVisible(control["active"])
-                    control["individual_remove_btn"].setVisible(
-                        individual and control["active"]
-                    )
-                level["shared_row"].setVisible(
-                    not individual
-                )
-                level["individual_rows"].setVisible(
-                    individual
-                )
-                level["remove_btn"].setVisible(not individual)
-            if individual:
-                for panel_position in range(panel_count):
-                    panel_row_height = max([
-                        26,
-                        *(
-                            level["panel_controls"][panel_position]["row"]
-                            .sizeHint()
-                            .height()
-                            for level in levels
-                        ),
-                    ])
-                    for level in levels:
-                        level["panel_controls"][panel_position][
-                            "panel_row"
-                        ].setFixedHeight(panel_row_height)
-            update_level_names()
-            refresh_preview()
-
-        def edit_custom_ranges(control: dict, lanes: int) -> bool:
-            groups = min(control["group_spin"].value(), lanes)
-            defaults = control_ranges(control, lanes)
-            result = self._request_custom_lane_ranges(
-                lanes,
-                groups,
-                defaults,
-            )
-            if result is None:
-                return False
-            control["custom_ranges"] = result
-            control["custom_lane_count"] = lanes
-            refresh_preview()
-            return True
-
-        def on_group_mode_changed(control: dict, lanes: int) -> None:
-            if control["group_spin"].value() <= 0:
-                control["custom_ranges"] = None
-                control["custom_lane_count"] = None
-                update_levels()
-                return
-            if control["group_mode"].currentData() == "custom":
-                groups = min(control["group_spin"].value(), lanes)
-                control["custom_ranges"] = self._even_lane_group_ranges(
-                    lanes,
-                    groups,
-                )
-                control["custom_lane_count"] = lanes
-                if not edit_custom_ranges(control, lanes):
-                    control["group_mode"].blockSignals(True)
-                    control["group_mode"].setCurrentIndex(0)
-                    control["group_mode"].blockSignals(False)
-                    control["custom_ranges"] = None
-                    control["custom_lane_count"] = None
-            else:
-                control["custom_ranges"] = None
-                control["custom_lane_count"] = None
-            update_levels()
-
-        def make_group_control(parent: QWidget, lanes: int) -> dict:
-            row = QWidget(parent)
-            row.setObjectName("conditionLevelControls")
-            layout = QHBoxLayout(row)
-            layout.setContentsMargins(0, 0, 0, 0)
-            layout.setSpacing(6)
-            group_spin = self._make_structure_spin(0, lanes, min(1, lanes))
-            finish_spin_input_on_return(group_spin)
-            group_mode = QComboBox(parent)
-            group_mode.addItem(tr("Divide lanes evenly", self._language), "default")
-            group_mode.addItem(tr("Custom lane ranges…", self._language), "custom")
-            group_mode.hide()
-            mode_selector, mode_menu = popup_selector("", "Evenly", 53)
-            default_action = mode_menu.addAction(
-                tr("Divide lanes evenly", self._language)
-            )
-            custom_action = mode_menu.addAction(
-                tr("Custom lane ranges…", self._language)
-            )
-            default_action.setCheckable(True)
-            custom_action.setCheckable(True)
-            default_action.setChecked(True)
-            custom_btn = QPushButton(tr("Edit", self._language))
-            custom_btn.setToolTip(tr("Edit Custom Ranges…", self._language))
-            custom_btn.setStyleSheet(_SMALL_BTN_STYLE)
-            custom_btn.setFixedSize(53, 22)
-            custom_btn.hide()
-            selector_column = QWidget(row)
-            selector_column.setObjectName(
-                "conditionLaneDistributionColumn"
-            )
-            # Reserve the two compact button slots in both modes. Switching
-            # between Evenly and Custom therefore never changes the control,
-            # row, card, or dialog dimensions.
-            selector_column.setFixedSize(53, 47)
-            selector_layout = QVBoxLayout(selector_column)
-            selector_layout.setContentsMargins(0, 0, 0, 0)
-            selector_layout.setSpacing(3)
-            selector_layout.addWidget(mode_selector)
-            selector_layout.addWidget(custom_btn)
-            selector_layout.addStretch(1)
-            individual_remove_btn = QToolButton()
-            individual_remove_btn.setText("×")
-            individual_remove_btn.setToolTip(
-                tr("Remove this panel's group level", self._language)
-            )
-            individual_remove_btn.setFixedSize(20, 20)
-            individual_remove_btn.setStyleSheet(
-                "QToolButton { border:1px solid #B8C5BF; border-radius:5px; "
-                "background:#F7FAF8; color:#52625A; font-weight:700; } "
-                "QToolButton:hover { border-color:#C98282; "
-                "background:#FBECEC; color:#9B3F3F; }"
-            )
-            individual_remove_btn.hide()
-            layout.addWidget(group_spin)
-            layout.addWidget(selector_column, 0, Qt.AlignmentFlag.AlignTop)
-            layout.addWidget(
-                individual_remove_btn,
-                0,
-                Qt.AlignmentFlag.AlignTop,
-            )
-            layout.addStretch(1)
-            control = {
-                "row": row,
-                "layout": layout,
-                "group_spin": group_spin,
-                "group_mode": group_mode,
-                "mode_selector": mode_selector,
-                "default_action": default_action,
-                "custom_action": custom_action,
-                "custom_btn": custom_btn,
-                "selector_column": selector_column,
-                "selector_layout": selector_layout,
-                "individual_remove_btn": individual_remove_btn,
-                "custom_ranges": None,
-                "custom_lane_count": None,
-                "active": True,
-            }
-            group_spin.valueChanged.connect(update_levels)
-            group_mode.currentIndexChanged.connect(
-                lambda _=0, ctl=control, count=lanes: (
-                    on_group_mode_changed(ctl, count)
-                )
-            )
-            default_action.triggered.connect(
-                lambda _=False, combo=group_mode: combo.setCurrentIndex(0)
-            )
-            custom_action.triggered.connect(
-                lambda _=False, combo=group_mode: combo.setCurrentIndex(1)
-            )
-            custom_btn.clicked.connect(
-                lambda _=False, ctl=control, count=lanes: (
-                    edit_custom_ranges(ctl, count)
-                )
-            )
-            return control
-
-        def remove_level(level: dict) -> None:
-            if level not in levels:
-                return
-            levels.remove(level)
-            level["container"].hide()
-            level["container"].setParent(None)
-            level["container"].deleteLater()
-            update_levels()
-            QTimer.singleShot(0, resize_dialog_to_visible_content)
-
-        def copy_panel_control_state(source: dict, target: dict) -> None:
-            with QSignalBlocker(target["group_spin"]):
-                target["group_spin"].setValue(source["group_spin"].value())
-            with QSignalBlocker(target["group_mode"]):
-                target["group_mode"].setCurrentIndex(
-                    source["group_mode"].currentIndex()
-                )
-            target["custom_ranges"] = copy.deepcopy(source["custom_ranges"])
-            target["custom_lane_count"] = source["custom_lane_count"]
-            target["active"] = source["active"]
-
-        def remove_panel_level(panel_position: int, level: dict) -> None:
-            if level not in levels:
-                return
-            level_index = levels.index(level)
-            control = level["panel_controls"][panel_position]
-            if not control["active"]:
-                return
-            panel_active_count = sum(
-                candidate["panel_controls"][panel_position]["active"]
-                for candidate in levels
-            )
-            if panel_active_count == 1:
-                # The final Level 1 is a persistent per-panel placeholder:
-                # deleting it changes only its number to zero. Its lane
-                # distribution selection stays attached to that panel.
-                with QSignalBlocker(control["group_spin"]):
-                    control["group_spin"].setValue(0)
-                update_levels()
-                QTimer.singleShot(0, resize_dialog_to_visible_content)
-                return
-            for index in range(level_index, len(levels) - 1):
-                source = levels[index + 1]["panel_controls"][panel_position]
-                target = levels[index]["panel_controls"][panel_position]
-                copy_panel_control_state(source, target)
-            last_control = levels[-1]["panel_controls"][panel_position]
-            last_control["active"] = False
-            last_control["custom_ranges"] = None
-            last_control["custom_lane_count"] = None
-            while len(levels) > 1 and not any(
-                control["active"]
-                for control in levels[-1]["panel_controls"]
-            ):
-                removed = levels.pop()
-                removed["container"].hide()
-                removed["container"].setParent(None)
-                removed["container"].deleteLater()
-            update_levels()
-            QTimer.singleShot(0, resize_dialog_to_visible_content)
-
-        def create_level(active_panels: set[int] | None = None) -> None:
-            container = QWidget()
-            container.setObjectName("conditionLevelContainer")
-            container.setSizePolicy(
-                QSizePolicy.Policy.Maximum,
-                QSizePolicy.Policy.Preferred,
-            )
-            container_layout = QVBoxLayout(container)
-            container_layout.setContentsMargins(0, 0, 0, 0)
-            container_layout.setSpacing(6)
-
-            heading_row = QWidget(container)
-            heading_row.setObjectName("conditionLevelHeading")
-            heading_layout = QHBoxLayout(heading_row)
-            heading_layout.setContentsMargins(0, 0, 0, 0)
-            heading_layout.setSpacing(5)
-            heading = group_heading_label()
-            remove_btn = QToolButton()
-            remove_btn.setText("×")
-            remove_btn.setFixedSize(20, 20)
-            remove_btn.setStyleSheet(
-                "QToolButton { border:1px solid #B8C5BF; border-radius:5px; "
-                "background:#F7FAF8; color:#52625A; font-weight:700; } "
-                "QToolButton:hover { border-color:#C98282; "
-                "background:#FBECEC; color:#9B3F3F; }"
-            )
-            heading_layout.addWidget(heading)
-            heading_layout.addWidget(remove_btn)
-            heading_layout.addStretch(1)
-            container_layout.addWidget(heading_row)
-
-            shared_control = make_group_control(
-                container,
-                shared_lane_count,
-            )
-            shared_row = shared_control["row"]
-            container_layout.addWidget(shared_row)
-
-            individual_rows = QWidget(container)
-            individual_rows.setObjectName("conditionPanelLevelControls")
-            individual_layout = QVBoxLayout(individual_rows)
-            individual_layout.setContentsMargins(0, 0, 0, 0)
-            individual_layout.setSpacing(6)
-            panel_controls: list[dict] = []
-            for panel_position, lanes in enumerate(lane_counts):
-                panel_row = QWidget(individual_rows)
-                panel_row.setObjectName("conditionPanelLevelRow")
-                panel_row_layout = QHBoxLayout(panel_row)
-                panel_row_layout.setContentsMargins(0, 0, 0, 0)
-                panel_row_layout.setSpacing(8)
-                row_panel_label = panel_label(panel_position)
-                panel_row_layout.addWidget(row_panel_label)
-                control = make_group_control(panel_row, lanes)
-                panel_row_layout.addWidget(control["row"])
-                control["panel_row"] = panel_row
-                control["panel_label"] = row_panel_label
-                control["panel_row_layout"] = panel_row_layout
-                control["active"] = (
-                    active_panels is None or panel_position in active_panels
-                )
-                panel_controls.append(control)
-                individual_layout.addWidget(panel_row)
-            individual_rows.hide()
-            container_layout.addWidget(individual_rows)
-
-            level = {
-                "container": container,
-                "heading": heading,
-                "remove_btn": remove_btn,
-                "shared_row": shared_row,
-                "shared_control": shared_control,
-                "individual_rows": individual_rows,
-                "panel_controls": panel_controls,
-            }
-            levels.append(level)
-            levels_layout.insertWidget(
-                levels_layout.indexOf(empty_row),
-                container,
-                0,
-                Qt.AlignmentFlag.AlignTop,
-            )
-            remove_btn.clicked.connect(
-                lambda _=False, lv=level: remove_level(lv)
-            )
-            for panel_position, control in enumerate(panel_controls):
-                control["individual_remove_btn"].clicked.connect(
-                    lambda _=False, position=panel_position, lv=level: (
-                        remove_panel_level(position, lv)
-                    )
-                )
-            update_levels()
-            QTimer.singleShot(0, resize_dialog_to_visible_content)
-
-        def add_level_for_panel(panel_position: int) -> None:
-            individual = modes["groups_individual"] and panel_count > 1
-            if not individual:
-                create_level()
-                return
-            active_count = sum(
-                level["panel_controls"][panel_position]["active"]
-                for level in levels
-            )
-            if active_count < len(levels):
-                control = levels[active_count]["panel_controls"][
-                    panel_position
-                ]
-                control["active"] = True
-                with QSignalBlocker(control["group_spin"]):
-                    control["group_spin"].setValue(1)
-                if control["group_mode"].currentData() == "custom":
-                    control["custom_ranges"] = self._even_lane_group_ranges(
-                        lane_counts[panel_position],
-                        1,
-                    )
-                    control["custom_lane_count"] = lane_counts[panel_position]
-                else:
-                    control["custom_ranges"] = None
-                    control["custom_lane_count"] = None
-                update_levels()
-                QTimer.singleShot(0, resize_dialog_to_visible_content)
-                return
-            create_level({panel_position})
-
-        for panel_position, button in enumerate(add_level_buttons):
-            button.clicked.connect(
-                lambda _=False, position=panel_position: (
-                    add_level_for_panel(position)
-                )
-            )
-
-        def set_rows_mode(individual: bool) -> None:
-            new_individual = bool(individual and panel_count > 1)
-            if new_individual and not modes["rows_individual"]:
-                for spin in panel_rows_spins:
-                    with QSignalBlocker(spin):
-                        spin.setValue(shared_rows_spin.value())
-            modes["rows_individual"] = new_individual
-            rows_mode_selector.setText(
-                tr("Set individual panels", self._language)
-                if modes["rows_individual"]
-                else tr("Apply to all panels", self._language)
-            )
-            rows_apply_action.setChecked(not modes["rows_individual"])
-            rows_individual_action.setChecked(modes["rows_individual"])
-            rows_shared.setVisible(not modes["rows_individual"])
-            rows_individual.setVisible(modes["rows_individual"])
-            refresh_preview()
-            QTimer.singleShot(0, resize_dialog_to_visible_content)
-
-        def set_groups_mode(individual: bool) -> None:
-            new_individual = bool(individual and panel_count > 1)
-            if new_individual and not modes["groups_individual"]:
-                for level in levels:
-                    shared_control = level["shared_control"]
-                    for panel_control in level["panel_controls"]:
-                        copy_panel_control_state(
-                            shared_control,
-                            panel_control,
-                        )
-                        panel_control["active"] = True
-            modes["groups_individual"] = new_individual
-            groups_mode_selector.setText(
-                tr("Set individual panels", self._language)
-                if modes["groups_individual"]
-                else tr("Apply to all panels", self._language)
-            )
-            groups_apply_action.setChecked(not modes["groups_individual"])
-            groups_individual_action.setChecked(modes["groups_individual"])
-            update_levels()
-            QTimer.singleShot(0, resize_dialog_to_visible_content)
-
-        rows_apply_action.triggered.connect(
-            lambda _=False: set_rows_mode(False)
-        )
-        rows_individual_action.triggered.connect(
-            lambda _=False: set_rows_mode(True)
-        )
-        groups_apply_action.triggered.connect(
-            lambda _=False: set_groups_mode(False)
-        )
-        groups_individual_action.triggered.connect(
-            lambda _=False: set_groups_mode(True)
-        )
-        shared_rows_spin.valueChanged.connect(refresh_preview)
-        for spin in panel_rows_spins:
-            spin.valueChanged.connect(refresh_preview)
-
-        outer.addWidget(lane_card)
-        outer.addWidget(section_title("Condition Preview"))
-        outer.addWidget(preview, 0, Qt.AlignmentFlag.AlignHCenter)
-
-        button_row = QHBoxLayout()
-        button_row.addStretch(1)
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setObjectName("conditionCancelButton")
-        create_btn = QPushButton("Create")
-        create_btn.setObjectName("conditionCreateButton")
-        # Return/Enter belongs to the focused editor in this dialog. Creation
-        # and cancellation must remain explicit button actions.
-        for button in (cancel_btn, create_btn):
-            button.setAutoDefault(False)
-            button.setDefault(False)
-        button_row.addWidget(cancel_btn)
-        button_row.addWidget(create_btn)
-        outer.addLayout(button_row)
-        cancel_btn.clicked.connect(dialog.reject)
-        create_btn.clicked.connect(dialog.accept)
-
-        if self._tutorial_mode:
-            # Screenshot-defined tutorial preset: one row and one evenly
-            # distributed first group level. Normal dialogs still start with
-            # no lane-group level until the user adds one.
-            create_level()
-        set_rows_mode(False)
-        set_groups_mode(False)
-
-        self._retranslate_widget_tree(dialog)
         if self._tutorial_mode:
             self.workflowEvent.emit("condition_template_dialog_opened")
-        if dialog.exec() != QDialog.DialogCode.Accepted:
+        result = controller.exec()
+        if result is None:
             if self._tutorial_mode:
                 self.workflowEvent.emit("condition_template_dialog_cancelled")
             return
 
-        self._apply_condition_templates_to_panels([
-            (
-                panel_index,
-                lane_count,
-                condition_rows_for(panel_position),
-                current_levels(panel_position),
-            )
-            for panel_position, (panel_index, lane_count) in enumerate(targets)
-        ])
+        self._apply_condition_templates_to_panels(result)
         self.workflowEvent.emit("condition_template_applied")
+
 
     @staticmethod
     def _even_lane_group_ranges(
         lane_count: int, group_count: int
     ) -> list[tuple[int, int]]:
-        lane_count = max(1, lane_count)
-        group_count = min(group_count, lane_count)
-        if group_count <= 0:
-            return []
-        base, remainder = divmod(lane_count, group_count)
-        ranges: list[tuple[int, int]] = []
-        start = 1
-        for group_index in range(group_count):
-            size = base + (1 if group_index < remainder else 0)
-            end = start + size - 1
-            ranges.append((start, end))
-            start = end + 1
-        return ranges
+        """Compatibility wrapper for the extracted grouping service."""
+        return even_lane_group_ranges(lane_count, group_count)
 
     def _request_custom_lane_ranges(
         self,
@@ -2941,50 +1341,15 @@ class FigureModeWindow(QWidget):
         group_count: int,
         defaults: list[tuple[int, int]],
     ) -> list[tuple[int, int]] | None:
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Custom Lane Groups")
-        dialog.setModal(True)
-        outer = QVBoxLayout(dialog)
-        outer.setContentsMargins(18, 16, 18, 14)
-        info = QLabel("Choose the inclusive lane range for each group.")
-        info.setStyleSheet("color:#5C7167; font-size:10px;")
-        outer.addWidget(info)
-        form = QFormLayout()
-        range_spins: list[tuple[QSpinBox, QSpinBox]] = []
-        for group_index in range(group_count):
-            start_spin = self._make_structure_spin(
-                1, lane_count, defaults[group_index][0]
-            )
-            end_spin = self._make_structure_spin(
-                1, lane_count, defaults[group_index][1]
-            )
-            row = QWidget()
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.addWidget(QLabel("Lane"))
-            row_layout.addWidget(start_spin)
-            row_layout.addWidget(QLabel("–"))
-            row_layout.addWidget(end_spin)
-            form.addRow(
-                tr("Group {number}:", self._language, number=group_index + 1),
-                row,
-            )
-            range_spins.append((start_spin, end_spin))
-        outer.addLayout(form)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Cancel
-            | QDialogButtonBox.StandardButton.Ok
+        return request_custom_lane_ranges(
+            self,
+            self._language,
+            self._make_structure_spin,
+            self._retranslate_widget_tree,
+            lane_count,
+            group_count,
+            defaults,
         )
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        outer.addWidget(buttons)
-        self._retranslate_widget_tree(dialog)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return None
-        return [
-            (min(start.value(), end.value()), max(start.value(), end.value()))
-            for start, end in range_spins
-        ]
 
     def _request_custom_panel_lane_ranges(
         self,
@@ -2994,105 +1359,16 @@ class FigureModeWindow(QWidget):
         *,
         panel_number_offset: int = 0,
     ) -> list[tuple[int, int]] | None:
-        lane_counts = [max(1, int(count)) for count in lane_counts]
-        if not lane_counts or group_count <= 0:
-            return []
-
-        cumulative: list[int] = [0]
-        for count in lane_counts:
-            cumulative.append(cumulative[-1] + count)
-
-        def address(global_lane: int) -> tuple[int, int]:
-            lane = max(1, min(cumulative[-1], int(global_lane)))
-            for panel_index, end in enumerate(cumulative[1:]):
-                if lane <= end:
-                    return panel_index, lane - cumulative[panel_index]
-            return len(lane_counts) - 1, lane_counts[-1]
-
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Custom Panel/Lane Ranges")
-        dialog.setModal(True)
-        dialog.setStyleSheet(
-            "QDialog { background:#F3F6F5; color:#26322D; "
-            "font-family:'Avenir Next','Helvetica Neue',Arial; } "
-            "QComboBox, QSpinBox { background:#FFFFFF; border:1px solid #BCC9C3; "
-            "border-radius:5px; padding:3px 6px; }"
+        return request_custom_panel_lane_ranges(
+            self,
+            self._language,
+            self._make_structure_spin,
+            self._retranslate_widget_tree,
+            lane_counts,
+            group_count,
+            defaults,
+            panel_number_offset=panel_number_offset,
         )
-        outer = QVBoxLayout(dialog)
-        outer.setContentsMargins(18, 16, 18, 14)
-        outer.setSpacing(10)
-        info = QLabel("Choose the first and last panel/lane for each group.")
-        info.setStyleSheet("color:#5C7167; font-size:10px;")
-        outer.addWidget(info)
-        form = QFormLayout()
-        form.setHorizontalSpacing(12)
-        range_controls: list[tuple[QComboBox, QSpinBox, QComboBox, QSpinBox]] = []
-
-        for group_index in range(group_count):
-            default_start, default_end = defaults[group_index]
-            start_panel_index, start_lane_value = address(default_start)
-            end_panel_index, end_lane_value = address(default_end)
-            start_panel = QComboBox()
-            end_panel = QComboBox()
-            for panel_index in range(len(lane_counts)):
-                label = tr(
-                    "Panel {number}",
-                    self._language,
-                    number=panel_number_offset + panel_index + 1,
-                )
-                start_panel.addItem(label, panel_index)
-                end_panel.addItem(label, panel_index)
-            start_panel.setCurrentIndex(start_panel_index)
-            end_panel.setCurrentIndex(end_panel_index)
-            start_lane = self._make_structure_spin(
-                1, lane_counts[start_panel_index], start_lane_value
-            )
-            end_lane = self._make_structure_spin(
-                1, lane_counts[end_panel_index], end_lane_value
-            )
-            start_panel.currentIndexChanged.connect(
-                lambda index, spin=start_lane: spin.setMaximum(lane_counts[index])
-            )
-            end_panel.currentIndexChanged.connect(
-                lambda index, spin=end_lane: spin.setMaximum(lane_counts[index])
-            )
-            row = QWidget()
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setSpacing(6)
-            row_layout.addWidget(start_panel)
-            row_layout.addWidget(QLabel("Lane"))
-            row_layout.addWidget(start_lane)
-            row_layout.addWidget(QLabel("→"))
-            row_layout.addWidget(end_panel)
-            row_layout.addWidget(QLabel("Lane"))
-            row_layout.addWidget(end_lane)
-            form.addRow(
-                tr("Group {number}:", self._language, number=group_index + 1),
-                row,
-            )
-            range_controls.append(
-                (start_panel, start_lane, end_panel, end_lane)
-            )
-
-        outer.addLayout(form)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Cancel
-            | QDialogButtonBox.StandardButton.Ok
-        )
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        outer.addWidget(buttons)
-        self._retranslate_widget_tree(dialog)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return None
-
-        result: list[tuple[int, int]] = []
-        for start_panel, start_lane, end_panel, end_lane in range_controls:
-            start_global = cumulative[start_panel.currentIndex()] + start_lane.value()
-            end_global = cumulative[end_panel.currentIndex()] + end_lane.value()
-            result.append((min(start_global, end_global), max(start_global, end_global)))
-        return result
 
     @staticmethod
     def _make_custom_condition_table(
@@ -3100,40 +1376,8 @@ class FigureModeWindow(QWidget):
         condition_rows: int,
         group_ranges: object,
     ) -> ConditionTable:
-        lane_count = max(1, int(lane_count))
-        headers = [f"Lane {index + 1}" for index in range(lane_count)]
-        raw_groups = list(group_ranges) if isinstance(group_ranges, list) else []
-        if raw_groups and isinstance(raw_groups[0], tuple):
-            group_levels = [raw_groups]
-        elif raw_groups and isinstance(raw_groups[0], list):
-            group_levels = [list(level) for level in raw_groups]
-        else:
-            group_levels = []
-        rows: list[list[str]] = []
-        # Highest level is drawn first; Level 1 stays closest to conditions.
-        for level_index in reversed(range(len(group_levels))):
-            if not group_levels[level_index]:
-                continue
-            group_row = (
-                ["__groups__"]
-                if level_index == 0
-                else ["__groups_level__", str(level_index + 1)]
-            )
-            for group_index, (start, end) in enumerate(
-                group_levels[level_index]
-            ):
-                group_row.extend([
-                    f"{start}-{end}",
-                    f"Group {group_index + 1}",
-                ])
-            rows.append(group_row)
-        for row_index in range(max(1, int(condition_rows))):
-            values = [
-                "+" if (lane_index + row_index) % 3 == 1 else "-"
-                for lane_index in range(lane_count)
-            ]
-            rows.append([f"Condition {row_index + 1}"] + values)
-        return ConditionTable(headers=headers, rows=rows)
+        """Compatibility wrapper for the extracted model converter."""
+        return make_condition_table(lane_count, condition_rows, group_ranges)
 
     def _apply_condition_templates_to_panels(
         self,
@@ -3239,7 +1483,9 @@ class FigureModeWindow(QWidget):
         options_layout.setVerticalSpacing(2)
         self._auto_fit_h_margin = QSpinBox()
         self._auto_fit_h_margin.setRange(0, 200)
-        self._auto_fit_h_margin.setValue(3)
+        self._auto_fit_h_margin.setValue(4)
+        self._auto_fit_h_margin.setSingleStep(4)
+        self._auto_fit_h_margin.setAccelerated(True)
         self._auto_fit_h_margin.setSuffix(" px")
         self._auto_fit_h_margin.setFixedHeight(22)
         self._auto_fit_h_margin.setStyleSheet(
@@ -3248,16 +1494,21 @@ class FigureModeWindow(QWidget):
         )
         self._auto_fit_h_margin.setToolTip(
             "Original-image background retained to the left and right of each "
-            "detected lane crop. It does not set condition-column alignment."
+            "detected lane crop. Arrow buttons adjust 4 px per step; type a "
+            "value for 1 px precision."
         )
         self._auto_fit_v_margin = QSpinBox()
         self._auto_fit_v_margin.setRange(0, 200)
-        self._auto_fit_v_margin.setValue(3)
+        self._auto_fit_v_margin.setValue(4)
+        self._auto_fit_v_margin.setSingleStep(4)
+        self._auto_fit_v_margin.setAccelerated(True)
         self._auto_fit_v_margin.setSuffix(" px")
         self._auto_fit_v_margin.setFixedHeight(22)
         self._auto_fit_v_margin.setStyleSheet(self._auto_fit_h_margin.styleSheet())
         self._auto_fit_v_margin.setToolTip(
-            "Original-image background retained above and below each aligned band crop."
+            "Original-image background retained above and below each aligned "
+            "band crop. Arrow buttons adjust 4 px per step; type a value for "
+            "1 px precision."
         )
         self._auto_fit_alignment = QComboBox()
         self._auto_fit_alignment.addItem("Auto (Smear-resistant)", "auto")
@@ -3666,9 +1917,13 @@ class FigureModeWindow(QWidget):
                         for lane_crop in bd.get("lane_crops", [])
                         if isinstance(lane_crop, dict)
                     ],
+                    preserve_image_aspect=bool(
+                        bd.get("preserve_image_aspect", bd.get("lane_crops"))
+                    ),
                     display_width_pt=bd.get("display_width_pt"),
                     display_height_pt=bd.get("display_height_pt"),
                     image_transform=dict(bd.get("image_transform")) if isinstance(bd.get("image_transform"), dict) else None,
+                    geometry_transform=dict(bd.get("geometry_transform")) if isinstance(bd.get("geometry_transform"), dict) else None,
                     saved_preview_path=str(bd.get("saved_preview_path", "")),
                 )
                 if not slot.lane_rois:
@@ -3790,7 +2045,9 @@ class FigureModeWindow(QWidget):
             return False
         return self._on_use_active_image_roi(ref.panel_idx, ref.slot_idx)
 
-    def _selected_auto_fit_target(self) -> tuple[list, SourceRef | None, int] | None:
+    def _selected_auto_fit_target(
+        self,
+    ) -> tuple[list, SourceRef | None, int] | None:
         floating_blots = self._canvas.selected_overlay_blot_items()
         if floating_blots:
             return (
@@ -3905,14 +2162,30 @@ class FigureModeWindow(QWidget):
 
         transform = source.get("image_transform")
         image_transform = dict(transform) if isinstance(transform, dict) else None
+        geometry_value = source.get("geometry_transform")
+        geometry_transform = (
+            dict(geometry_value) if isinstance(geometry_value, dict) else None
+        )
+        if geometry_transform_from_dict(geometry_transform).is_identity():
+            # Preserve the legacy identity representation while retaining all
+            # non-identity presentation geometry with its presentation crop.
+            geometry_transform = None
         roi = crop.to_dict()
+        crop_aspect_ratio = crop.w / crop.h
         blot_view_state = self._canvas.capture_blot_view_state()
         self._remember_canvas_undo_state()
         if floating_blots:
             for item in floating_blots:
+                frame_width = item.rect().width()
+                item.resize_to_local_size(
+                    frame_width,
+                    frame_width / crop_aspect_ratio,
+                )
                 item.image_path = image_path
                 item.roi = dict(roi)
                 item.transform = dict(image_transform or {})
+                item.geometry_transform = dict(geometry_transform or {})
+                item.preserve_aspect = True
                 item.update()
             self._canvas.viewport().update()
         elif ref is not None and ref.panel_idx is not None and ref.slot_idx is not None:
@@ -3922,12 +2195,16 @@ class FigureModeWindow(QWidget):
             slot.source_image_path = image_path
             slot.bounding_box = crop
             slot.image_transform = image_transform
+            slot.geometry_transform = geometry_transform
             slot.lane_crops = list(result.lane_crop_boxes)
+            slot.preserve_image_aspect = True
             slot.saved_preview_path = ""
-            # ROI assignment is a content replacement only.  Keep the slot's
-            # lane model and display dimensions untouched so condition-table
-            # geometry, frame size, and every existing layout position remain
-            # exactly as designed.
+            frame = self._canvas._blot_frames.get(ref.key())
+            if frame is not None:
+                frame_width_pt = scene_to_pt(frame.rect().width())
+                slot.display_height_pt = frame_width_pt / crop_aspect_ratio
+            # Keep lane definitions and frame width unchanged. Only Auto-Fit
+            # height follows the tight crop so contain-scaling fills the frame.
             self._rebuild_step4()
             self._recompute_and_refresh(fit_view=False)
             self._canvas.restore_blot_view_state(blot_view_state)
@@ -3985,7 +2262,9 @@ class FigureModeWindow(QWidget):
             ))
         return rois
 
-    def _active_image_roi_payload(self) -> tuple[str, dict[str, float], dict | None] | None:
+    def _active_image_roi_payload(
+        self,
+    ) -> tuple[str, dict[str, float], dict | None, dict | None] | None:
         if self._active_image_provider is None:
             QMessageBox.warning(self, "No Active Image", "The main WB image viewer is not connected.")
             return None
@@ -4004,6 +2283,10 @@ class FigureModeWindow(QWidget):
 
         image_transform = source.get("image_transform")
         transform = dict(image_transform) if isinstance(image_transform, dict) else None
+        geometry_value = source.get("geometry_transform")
+        geometry_transform = (
+            dict(geometry_value) if isinstance(geometry_value, dict) else None
+        )
         return (
             image_path,
             {
@@ -4013,18 +2296,21 @@ class FigureModeWindow(QWidget):
                 "h": float(roi.height()),
             },
             transform,
+            geometry_transform,
         )
 
     def _on_use_active_image_roi_for_overlay(self, items: list) -> bool:
         payload = self._active_image_roi_payload()
         if payload is None:
             return False
-        image_path, roi, transform = payload
+        image_path, roi, transform, geometry_transform = payload
         self._remember_canvas_undo_state()
         for item in items:
             item.image_path = image_path
             item.roi = dict(roi)
             item.transform = dict(transform or {})
+            item.geometry_transform = dict(geometry_transform or {})
+            item.preserve_aspect = False
             item.update()
         self._canvas.viewport().update()
         return True
@@ -4041,7 +2327,7 @@ class FigureModeWindow(QWidget):
         payload = self._active_image_roi_payload()
         if payload is None:
             return False
-        image_path, roi, image_transform = payload
+        image_path, roi, image_transform, geometry_transform = payload
 
         blot_view_state = self._canvas.capture_blot_view_state()
         self._remember_canvas_undo_state()
@@ -4053,7 +2339,9 @@ class FigureModeWindow(QWidget):
             h=roi["h"],
         )
         slot.image_transform = image_transform
+        slot.geometry_transform = geometry_transform
         slot.lane_crops = []
+        slot.preserve_image_aspect = False
         slot.saved_preview_path = ""
         # Preserve lane_count, lane_rois, display width/height and all canvas
         # offsets.  The selected ROI only changes the pixels inside the frame.
@@ -5438,7 +3726,9 @@ class FigureModeWindow(QWidget):
             slot.source_image_path = ""
             slot.bounding_box = None
             slot.image_transform = None
+            slot.geometry_transform = None
             slot.lane_crops = []
+            slot.preserve_image_aspect = False
             slot.saved_preview_path = ""
             slot.lane_count = max(1, n_lanes)
             slot.reset_equal_lanes()

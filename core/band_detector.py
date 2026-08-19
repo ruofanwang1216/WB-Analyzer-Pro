@@ -45,9 +45,14 @@ class _AutoDetectParams:
     lane_gap_fill_frac: float
 
 
-def _load_8bit(image_path: str) -> np.ndarray:
-    img = Image.open(image_path)
-    arr = np.array(img)
+def image_array_to_auto_detection_pixels(pixels: np.ndarray) -> np.ndarray:
+    """Return the exact 8-bit grayscale representation used by detection.
+
+    Keeping this conversion shared between the path and ndarray entry points
+    guarantees that identity-geometry Auto-Fit retains its established pixel
+    semantics.
+    """
+    arr = np.asarray(pixels)
     if arr.ndim == 2:
         if arr.dtype == np.uint16:
             return (arr / 256).astype(np.uint8)
@@ -57,6 +62,17 @@ def _load_8bit(image_path: str) -> np.ndarray:
         gray = 0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2]
         return gray.round().clip(0, 255).astype(np.uint8)
     raise ValueError(f"Unexpected image shape: {arr.shape}")
+
+
+def load_auto_detection_pixels(image_path: str) -> np.ndarray:
+    """Decode a source image at full resolution for Auto-Fit detection."""
+    with Image.open(image_path) as image:
+        return image_array_to_auto_detection_pixels(np.asarray(image))
+
+
+def _load_8bit(image_path: str) -> np.ndarray:
+    """Backward-compatible path loader used by existing detector APIs."""
+    return load_auto_detection_pixels(image_path)
 
 
 def _smooth(signal: np.ndarray, sigma: float) -> np.ndarray:
@@ -1435,15 +1451,15 @@ def _finalize_auto_detections(
     return detections, metadata
 
 
-def _prepare_auto_detect_region(
-    image_path: str,
+def _prepare_auto_detect_pixels(
+    pixels: np.ndarray,
     dark_on_light: bool,
     sensitivity: float,
     *,
     mode: str,
     search_rect: QRectF | None = None,
 ) -> tuple[np.ndarray | None, np.ndarray | None, _AutoDetectParams | None, dict]:
-    arr = _load_8bit(image_path)
+    arr = image_array_to_auto_detection_pixels(pixels)
     img_h, img_w = arr.shape
     dark_on_light = bool(dark_on_light)
     polarity_label = "Dark on Light" if dark_on_light else "Light on Dark"
@@ -1486,6 +1502,23 @@ def _prepare_auto_detect_region(
     signal = _prepare_signal_for_auto_detection(arr, dark_on_light, params)
     metadata["search_offsets"] = (search_x1, search_y1, search_h)
     return arr, signal, params, metadata
+
+
+def _prepare_auto_detect_region(
+    image_path: str,
+    dark_on_light: bool,
+    sensitivity: float,
+    *,
+    mode: str,
+    search_rect: QRectF | None = None,
+) -> tuple[np.ndarray | None, np.ndarray | None, _AutoDetectParams | None, dict]:
+    return _prepare_auto_detect_pixels(
+        _load_8bit(image_path),
+        dark_on_light,
+        sensitivity,
+        mode=mode,
+        search_rect=search_rect,
+    )
 
 
 def auto_detect_all(
@@ -1583,15 +1616,38 @@ def auto_detect_guided(
     expected_rows_per_lane: int | None = None,
     return_metadata: bool = False,
 ) -> list[dict] | tuple[list[dict], dict]:
+    """Guided auto mode for callers that provide an image path."""
+    return auto_detect_guided_pixels(
+        _load_8bit(image_path),
+        dark_on_light=dark_on_light,
+        sensitivity=sensitivity,
+        search_rect=search_rect,
+        expected_lane_count=expected_lane_count,
+        target_band_row=target_band_row,
+        expected_rows_per_lane=expected_rows_per_lane,
+        return_metadata=return_metadata,
+    )
+
+
+def auto_detect_guided_pixels(
+    pixels: np.ndarray,
+    dark_on_light: bool = False,
+    sensitivity: float = 0.5,
+    search_rect: QRectF | None = None,
+    expected_lane_count: int | None = None,
+    target_band_row: int | None = None,
+    expected_rows_per_lane: int | None = None,
+    return_metadata: bool = False,
+) -> list[dict] | tuple[list[dict], dict]:
     """
-    Guided auto mode. This path is reserved for explicit constraints such as a
-    search ROI, expected lane count, target row, or expected row count, so the
-    advanced heuristics stay isolated from the stable default path. Guided mode
-    still uses the real per-lane ROIs returned by _detect_bands_in_lane() and
-    does not apply any cross-lane template harmonization.
+    Guided auto mode operating directly on a full-resolution pixel array.
+
+    The detection, background correction, lane/band search, and FWHM logic are
+    identical to the path API.  Only image decoding is bypassed so callers can
+    supply pixels in presentation coordinates after geometry has been applied.
     """
-    _, signal, params, metadata = _prepare_auto_detect_region(
-        image_path,
+    _, signal, params, metadata = _prepare_auto_detect_pixels(
+        pixels,
         dark_on_light,
         sensitivity,
         mode="guided",

@@ -109,8 +109,8 @@ def calculate_band_auto_fit(
     search_roi: Any,
     image_width: int,
     image_height: int,
-    horizontal_margin_px: int = 8,
-    vertical_margin_px: int = 8,
+    horizontal_margin_px: int = 4,
+    vertical_margin_px: int = 4,
     alignment: str = "center",
     target_row: int | None = None,
     expected_lane_count: int | None = None,
@@ -189,22 +189,6 @@ def calculate_band_auto_fit(
     band_right = max(
         rect[0] + rect[2] for rect in band_signal_by_lane.values()
     )
-    if len(lane_centers) >= 2:
-        spacings = [
-            right - left
-            for left, right in zip(lane_centers, lane_centers[1:])
-            if right - left > 0.5
-        ]
-        lane_pitch = median(spacings) if spacings else 0.0
-    else:
-        lane_pitch = 0.0
-
-    # H/V margins are exact additions around detected signal bounds. The
-    # condition table follows stored lane centres, so no implicit half-lane
-    # background needs to be added for column alignment.
-    desired_left = band_left - horizontal_margin
-    desired_right = band_right + horizontal_margin
-
     band_top = min(rect[1] for rect in band_signal_by_lane.values())
     band_bottom = max(
         rect[1] + rect[3] for rect in band_signal_by_lane.values()
@@ -241,6 +225,9 @@ def calculate_band_auto_fit(
     if alignment_used not in {"center", "top", "bottom", "peak"}:
         alignment_used = "center"
 
+    # H/V margins define the protected minimum crop around detected signal.
+    desired_left = band_left - horizontal_margin
+    desired_right = band_right + horizontal_margin
     desired_top = band_top - vertical_margin
     desired_bottom = band_bottom + vertical_margin
     # The rough ROI restricts detection, not the final background margin.
@@ -261,71 +248,14 @@ def calculate_band_auto_fit(
         )
     )
 
-    ordered_lanes = sorted(band_by_lane)
-    standard_lane_width = max(
-        1.0,
-        max(rect[2] for rect in band_signal_by_lane.values())
-        + 2.0 * horizontal_margin,
-    )
-
-    lane_anchors: dict[int, float] = {}
-    for lane in ordered_lanes:
-        rect = band_signal_by_lane[lane]
-        if alignment_used == "top":
-            anchor = rect[1]
-        elif alignment_used == "bottom":
-            anchor = rect[1] + rect[3]
-        elif alignment_used == "peak":
-            anchor = band_peak_by_lane[lane]
-        else:
-            anchor = rect[1] + rect[3] / 2.0
-        lane_anchors[lane] = anchor
-
-    above_extent = max(
-        lane_anchors[lane] - band_signal_by_lane[lane][1]
-        for lane in ordered_lanes
-    )
-    below_extent = max(
-        band_signal_by_lane[lane][1]
-        + band_signal_by_lane[lane][3]
-        - lane_anchors[lane]
-        for lane in ordered_lanes
-    )
-    crop_above = max(0.0, above_extent) + vertical_margin
-    standard_lane_height = max(
-        1.0,
-        crop_above + max(0.0, below_extent) + vertical_margin,
-    )
-    anchor_spread = max(lane_anchors.values()) - min(lane_anchors.values())
-    needs_lane_composition = (
-        len(ordered_lanes) > 1
-        and anchor_spread > max(2.5, median_height * 0.20)
-    )
-    if needs_lane_composition:
-        lane_crop_boxes = tuple(
-            ImageBBox(
-                lane_centers[index] - standard_lane_width / 2.0,
-                lane_anchors[lane] - crop_above,
-                standard_lane_width,
-                standard_lane_height,
-            )
-            for index, lane in enumerate(ordered_lanes)
-        )
-        composite_width = standard_lane_width * len(lane_crop_boxes)
-        composite_height = standard_lane_height
-    else:
-        # Preserve the continuous source strip when its band anchors are
-        # already aligned. This avoids unnecessary lane seams entirely.
-        lane_crop_boxes = ()
-        composite_width = right - left
-        composite_height = bottom - top
-    padding_required = any(
-        crop.x < 0.0
-        or crop.y < 0.0
-        or crop.x + crop.w > image_width
-        or crop.y + crop.h > image_height
-        for crop in lane_crop_boxes
-    )
+    # Auto mode must remain a screenshot-style crop of one continuous source
+    # rectangle. Never extract lanes independently or translate their vertical
+    # anchors: doing so changes the lanes' original spatial relationship and
+    # makes naturally staggered bands appear artificially level.
+    lane_crop_boxes: tuple[ImageBBox, ...] = ()
+    composite_width = right - left
+    composite_height = bottom - top
+    padding_required = False
 
     unique_lanes = len({lane for lane, _rect, _anchor in band_records})
     expected = max(1, int(expected_lane_count or unique_lanes))

@@ -20,6 +20,11 @@ from core.band_detector import (
     _merge_oversplit_lanes,
     _refine_band_horizontal_signal_bounds,
 )
+from core.image_transform import (
+    GeometryTransform,
+    ImageTransformParams,
+    apply_geometry_to_display,
+)
 from gui.figure_generation import ColumnTableWindow
 from gui.main_window import MainWindow
 from gui.image_canvas import ImageCanvas
@@ -429,6 +434,79 @@ class AutoDetectPerLaneBandRoiTests(unittest.TestCase):
 
         self.assertEqual([band["row_index"] for band in normalized[0]["bands"]], [2])
         self.assertEqual([band["row_index"] for band in normalized[1]["bands"]], [2])
+
+    def test_wb_auto_fit_uses_full_resolution_presentation_pixels(self) -> None:
+        raw_pixels = np.arange(40 * 60, dtype=np.uint8).reshape(40, 60)
+        geometry = GeometryTransform(rotation=11.0, flip_x=True)
+        expected_pixels = apply_geometry_to_display(raw_pixels, geometry)
+        detections = [{
+            "lane_index": 1,
+            "lane_rect": QRectF(8, 6, 20, 24),
+            "bands": [{
+                "band_index": 1,
+                "row_index": 1,
+                "band_rect": QRectF(8, 14, 20, 8),
+            }],
+        }]
+        with (
+            patch("gui.main_window.AppPersistence.update_config", return_value=None),
+            patch("gui.main_window.AppPersistence.read_config", return_value={"ui": {}}),
+        ):
+            window = MainWindow()
+        try:
+            window._image_path = "full-resolution-source.tif"
+            window.canvas.set_geometry_transform(geometry)
+            window.canvas.set_image_transform_params(ImageTransformParams(
+                low=12000,
+                high=28000,
+                gamma=3.2,
+                inverted=True,
+            ))
+            roi = QRectF(
+                0,
+                0,
+                expected_pixels.shape[1],
+                expected_pixels.shape[0],
+            )
+            with (
+                patch.object(window.canvas, "get_roi", return_value=roi),
+                patch(
+                    "core.band_detector.load_auto_detection_pixels",
+                    return_value=raw_pixels,
+                ) as load_pixels,
+                patch(
+                    "gui.main_window._run_auto_fit_guided_with_polarity_fallback",
+                    return_value=(detections, {"failure_stage": None}),
+                ) as detector,
+                patch.object(window.canvas, "set_auto_edit_mode"),
+                patch.object(window.canvas, "set_auto_detect_overlays"),
+            ):
+                source = window._run_wb_plot_auto_fit_detection(1, False)
+
+            load_pixels.assert_called_once_with("full-resolution-source.tif")
+            np.testing.assert_array_equal(
+                detector.call_args.kwargs["detector_pixels"],
+                expected_pixels,
+            )
+            self.assertEqual(
+                source["image_size"],
+                QSizeF(expected_pixels.shape[1], expected_pixels.shape[0]),
+            )
+            self.assertEqual(
+                source["geometry_transform"],
+                {
+                    "rotation": 11.0,
+                    "flip_x": True,
+                    "flip_y": False,
+                },
+            )
+            self.assertEqual(len(source["auto_detections"]), 1)
+            self.assertEqual(
+                source["auto_detections"][0]["bands"][0]["band_rect"],
+                detections[0]["bands"][0]["band_rect"],
+            )
+        finally:
+            window.close()
 
     def test_densitometry_param_panel_is_manual_only(self) -> None:
         panel = ParamPanel()

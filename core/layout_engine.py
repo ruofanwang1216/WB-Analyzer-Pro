@@ -104,11 +104,15 @@ class LayoutItem:
 
     # Image data (only for kind == "blot")
     image_path: str | None = None
-    # Crop in IMAGE_PX coordinates; None means use full image
+    # Crop in IMAGE_PX presentation coordinates; None means use full image.
+    # If geometry_transform is set, render geometry before applying this crop.
     image_crop_px: dict | None = None   # {"x", "y", "w", "h"}
     image_lane_crops_px: list[dict] | None = None
+    preserve_image_aspect: bool = False
     # Optional display transform captured from the source WB image viewer.
     image_transform: dict | None = None
+    # Optional non-destructive raw-image -> presentation geometry.
+    geometry_transform: dict | None = None
 
     # Typography
     font_family: str = "Arial"
@@ -717,6 +721,7 @@ class LayoutEngine:
                 saved_preview = (
                     slot.saved_preview_path
                     if slot.saved_preview_path
+                    and not slot.lane_crops
                     and Path(slot.saved_preview_path).exists()
                     else ""
                 )
@@ -740,6 +745,9 @@ class LayoutEngine:
                             lane_crop.to_dict() for lane_crop in slot.lane_crops
                         ] or None
                     ),
+                    preserve_image_aspect=(
+                        slot.preserve_image_aspect or bool(slot.lane_crops)
+                    ),
                     image_transform=(
                         {
                             "low": 0,
@@ -749,6 +757,9 @@ class LayoutEngine:
                         }
                         if saved_preview
                         else slot.image_transform
+                    ),
+                    geometry_transform=(
+                        None if saved_preview else slot.geometry_transform
                     ),
                     z_order=1,
                     source_ref=SourceRef(panel_idx=pi, slot_idx=si, field="blot"),

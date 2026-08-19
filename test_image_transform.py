@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-from pathlib import Path
-from tempfile import TemporaryDirectory
 import unittest
 
 import numpy as np
-from PIL import Image
 
 from core.image_transform import (
+    GeometryTransform,
     ImageTransformParams,
+    apply_geometry_to_display,
     auto_scale_range_16,
     border_median_fill_value,
     default_inverted_for_pil_image,
-    flip_display_pixels_to_file,
+    geometry_transform_from_dict,
+    geometry_transform_to_dict,
     image_array_to_uint16_luminance,
-    rotate_display_pixels_to_file,
     transform_pixel_16_to_8,
     transform_pixels_16_to_8,
 )
@@ -41,6 +40,26 @@ class ImageTransformTests(unittest.TestCase):
         params = ImageTransformParams(low=100, high=1100, gamma=1.0, inverted=True)
 
         self.assertEqual(transform_pixels_16_to_8(pixels, params).tolist(), [255, 128, 0])
+
+    def test_default_full_range_fast_path_matches_scalar_transform(self) -> None:
+        pixels = np.arange(65536, dtype=np.uint16)
+
+        for inverted in (False, True):
+            params = ImageTransformParams(inverted=inverted)
+            expected = np.array(
+                [transform_pixel_16_to_8(int(value), params) for value in pixels],
+                dtype=np.uint8,
+            )
+            actual = transform_pixels_16_to_8(pixels, params)
+
+            np.testing.assert_array_equal(actual, expected)
+
+    def test_identity_geometry_reuses_new_display_buffer(self) -> None:
+        pixels = np.arange(12, dtype=np.uint8).reshape(3, 4)
+
+        rendered = apply_geometry_to_display(pixels, GeometryTransform())
+
+        self.assertIs(rendered, pixels)
 
     def test_extended_tone_range_supports_adjustment_beyond_both_source_ends(self) -> None:
         pixels = np.array([0, 65535], dtype=np.uint16)
@@ -110,36 +129,54 @@ class ImageTransformTests(unittest.TestCase):
 
         self.assertEqual(border_median_fill_value(pixels), (240.0, 241.0, 242.0))
 
-    def test_rotate_display_pixels_saves_visible_polarity_as_black_is_zero(self) -> None:
-        pixels = np.full((80, 120), 255, dtype=np.uint8)
-        pixels[30:38, 30:95] = 25
+    def test_geometry_transform_round_trips_points_and_serializes(self) -> None:
+        transform = GeometryTransform(rotation=-17.25, flip_x=True)
+        points = np.array([[0.0, 0.0], [120.0, 0.0], [30.0, 50.0]])
+        mapped = transform.map_points_to_canvas(points, 120, 80)
+        restored = transform.map_points_to_raw(mapped, 120, 80)
 
-        with TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "rotated.tif"
-            transform = rotate_display_pixels_to_file(pixels, path, angle_deg=7.0)
+        np.testing.assert_allclose(restored, points, atol=1e-9)
+        self.assertEqual(
+            geometry_transform_from_dict(geometry_transform_to_dict(transform)),
+            transform,
+        )
 
-            with Image.open(path) as img:
-                rotated = np.array(img)
-                self.assertEqual(img.mode, "L")
-                self.assertEqual(img.tag_v2.get(262), 1)
-
-        self.assertFalse(transform.inverted)
-        self.assertGreaterEqual(int(rotated[0, 0]), 250)
-        self.assertLessEqual(int(rotated.min()), 30)
-
-    def test_flip_display_pixels_flips_the_visible_image(self) -> None:
+    def test_geometry_flip_changes_preview_without_changing_source(self) -> None:
         pixels = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.uint8)
+        original = pixels.copy()
 
-        with TemporaryDirectory() as tmpdir:
-            vertical_path = Path(tmpdir) / "vertical.tif"
-            horizontal_path = Path(tmpdir) / "horizontal.tif"
-            flip_display_pixels_to_file(pixels, vertical_path, vertical=True)
-            flip_display_pixels_to_file(pixels, horizontal_path, vertical=False)
+        vertical = apply_geometry_to_display(
+            pixels, GeometryTransform(flip_y=True)
+        )
+        horizontal = apply_geometry_to_display(
+            pixels, GeometryTransform(flip_x=True)
+        )
 
-            with Image.open(vertical_path) as image:
-                self.assertEqual(np.array(image).tolist(), [[4, 5, 6], [1, 2, 3]])
-            with Image.open(horizontal_path) as image:
-                self.assertEqual(np.array(image).tolist(), [[3, 2, 1], [6, 5, 4]])
+        self.assertEqual(vertical.tolist(), [[4, 5, 6], [1, 2, 3]])
+        self.assertEqual(horizontal.tolist(), [[3, 2, 1], [6, 5, 4]])
+        np.testing.assert_array_equal(pixels, original)
+
+    def test_arbitrary_rotation_expands_preview_without_mutating_source(self) -> None:
+        pixels = np.full((20, 30), 240, dtype=np.uint8)
+        pixels[8:12, 5:25] = 10
+        original = pixels.copy()
+
+        rotated = apply_geometry_to_display(
+            pixels, GeometryTransform(rotation=13.0)
+        )
+
+        self.assertGreater(rotated.shape[0], pixels.shape[0])
+        self.assertGreater(rotated.shape[1], pixels.shape[1])
+        np.testing.assert_array_equal(pixels, original)
+
+    def test_right_angle_rotation_has_exact_pixel_alignment(self) -> None:
+        pixels = np.arange(6, dtype=np.uint8).reshape(2, 3)
+
+        rotated = apply_geometry_to_display(
+            pixels, GeometryTransform(rotation=90.0)
+        )
+
+        self.assertEqual(rotated.tolist(), [[3, 0], [4, 1], [5, 2]])
 
 
 if __name__ == "__main__":

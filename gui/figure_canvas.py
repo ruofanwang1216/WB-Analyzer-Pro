@@ -55,6 +55,8 @@ from PySide6.QtWidgets import (
 )
 
 from core.figure_project import FigureProject, SourceRef
+from core.export_engine import _crop_qimage
+from core.band_auto_fit import aspect_fit_placement
 from core.layout_engine import (
     DEFAULT_LANE_WIDTH_PT, LayoutItem, LayoutResult,
     pt_to_scene, scene_to_pt,
@@ -284,6 +286,36 @@ class EditableTextItem(_OverlayTextItem):
         self.setDefaultTextColor(QColor("#000000"))
 
     # ── Event overrides ───────────────────────────────────────────────────
+
+    def _fit_width_during_edit(self) -> None:
+        """Auto-fit condition cells without moving their scene centre."""
+        if self._source_ref.field != "condition_cell":
+            super()._fit_width_during_edit()
+            return
+        if (
+            self._live_text_resize_in_progress
+            or self.textInteractionFlags()
+            == Qt.TextInteractionFlag.NoTextInteraction
+        ):
+            return
+
+        self._live_text_resize_in_progress = True
+        try:
+            previous_offset = self.current_offset()
+            fixed_center = self.mapToScene(self.editor_rect().center())
+            self.fit_width_to_text(preserve_anchor=False)
+            resized_center = self.mapToScene(self.editor_rect().center())
+            center_delta = fixed_center - resized_center
+            if center_delta.manhattanLength() > 0.001:
+                self.setPos(self.pos() + center_delta)
+
+            # Width fitting is computed geometry, not a user drag. Retain any
+            # pre-existing fine offset without saving the centring shift as a
+            # new offset that would be applied again on the next render.
+            self.accept_current_position_as_computed(previous_offset)
+            self._emit_position_changed()
+        finally:
+            self._live_text_resize_in_progress = False
 
     def focusOutEvent(self, event) -> None:
         previous_offset = self.current_offset()
@@ -997,14 +1029,26 @@ class FigureCanvas(QGraphicsView):
         if pm:
             gi = QGraphicsPixmapItem(pm)
             gi.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
-            gi.setPos(x + ox, y + oy)
-            gi.setTransform(
-                QTransform.fromScale(
-                    w / max(1.0, pm.width()),
-                    h / max(1.0, pm.height()),
-                ),
-                False,
-            )
+            gi._preserve_image_aspect = bool(item.preserve_image_aspect)
+            if item.preserve_image_aspect:
+                placement = aspect_fit_placement(pm.width(), pm.height(), w, h)
+                gi.setPos(
+                    x + ox + placement.x,
+                    y + oy + placement.y,
+                )
+                gi.setTransform(
+                    QTransform.fromScale(placement.scale, placement.scale),
+                    False,
+                )
+            else:
+                gi.setPos(x + ox, y + oy)
+                gi.setTransform(
+                    QTransform.fromScale(
+                        w / max(1.0, pm.width()),
+                        h / max(1.0, pm.height()),
+                    ),
+                    False,
+                )
             gi.setZValue(item.z_order)
             self._scene.addItem(gi)
             content_group.append(gi)
@@ -1046,52 +1090,17 @@ class FigureCanvas(QGraphicsView):
     def _make_blot_pixmap(
         self, item: LayoutItem, w_scene: float, h_scene: float
     ) -> QPixmap | None:
+        del w_scene, h_scene
         if not item.image_path or not Path(item.image_path).exists():
             return None
-        try:
-            with Image.open(item.image_path) as img:
-                default_inverted = default_inverted_for_pil_image(img, fallback=True)
-                pixels = image_array_to_uint16_luminance(np.array(img))
-        except Exception:
-            return None
-
-        # Auto-Fit composes equal-size lane crops by translation only. Manual
-        # ROI mode continues to use the single source crop below.
-        if item.image_lane_crops_px:
-            pixels = compose_lane_crops(pixels, item.image_lane_crops_px)
-        elif item.image_crop_px:
-            c = item.image_crop_px
-            img_h, img_w = pixels.shape
-            if img_w <= 0 or img_h <= 0:
-                return None
-            x = max(0, min(img_w - 1, int(round(float(c.get("x", 0.0))))))
-            y = max(0, min(img_h - 1, int(round(float(c.get("y", 0.0))))))
-            crop_w = max(1, int(round(float(c.get("w", img_w - x)))))
-            crop_h = max(1, int(round(float(c.get("h", img_h - y)))))
-            right = max(x + 1, min(img_w, x + crop_w))
-            bottom = max(y + 1, min(img_h, y + crop_h))
-            pixels = pixels[y:bottom, x:right]
-        if pixels.size == 0:
-            return None
-
-        display = transform_pixels_16_to_8(
-            pixels,
-            image_transform_from_dict(
-                item.image_transform,
-                default_inverted=default_inverted,
-            ),
+        qimage = _crop_qimage(
+            item.image_path,
+            item.image_crop_px,
+            item.image_transform,
+            item.image_lane_crops_px,
+            geometry_transform=item.geometry_transform,
         )
-        display = np.ascontiguousarray(display)
-        height, width = display.shape
-        qimage = QImage(
-            display.data,
-            width,
-            height,
-            display.strides[0],
-            QImage.Format.Format_Grayscale8,
-        ).copy()
-
-        return QPixmap.fromImage(qimage)
+        return None if qimage.isNull() else QPixmap.fromImage(qimage)
 
     # ── Text ──────────────────────────────────────────────────────────────
 
@@ -1703,14 +1712,30 @@ class FigureCanvas(QGraphicsView):
             if isinstance(item, QGraphicsPixmapItem):
                 pm = item.pixmap()
                 if not pm.isNull():
-                    item.setPos(frame_pos)
-                    item.setTransform(
-                        QTransform.fromScale(
-                            width / max(1.0, pm.width()),
-                            height / max(1.0, pm.height()),
-                        ),
-                        False,
-                    )
+                    if bool(getattr(item, "_preserve_image_aspect", False)):
+                        placement = aspect_fit_placement(
+                            pm.width(), pm.height(), width, height
+                        )
+                        item.setPos(
+                            frame_pos.x() + placement.x,
+                            frame_pos.y() + placement.y,
+                        )
+                        item.setTransform(
+                            QTransform.fromScale(
+                                placement.scale,
+                                placement.scale,
+                            ),
+                            False,
+                        )
+                    else:
+                        item.setPos(frame_pos)
+                        item.setTransform(
+                            QTransform.fromScale(
+                                width / max(1.0, pm.width()),
+                                height / max(1.0, pm.height()),
+                            ),
+                            False,
+                        )
             elif isinstance(item, QGraphicsRectItem):
                 item.setPos(QPointF(0.0, 0.0))
                 item.setRect(QRectF(frame_pos.x(), frame_pos.y(), width, height))
@@ -2191,6 +2216,9 @@ class FigureCanvas(QGraphicsView):
         layout_item = self._blot_layout_items.get(key)
         roi = dict(layout_item.image_crop_px or {}) if layout_item is not None else {}
         transform = dict(layout_item.image_transform or {}) if layout_item is not None else {}
+        geometry_transform = (
+            dict(layout_item.geometry_transform or {}) if layout_item is not None else {}
+        )
         return {
             "type": _OverlayBlotItem.TypeName,
             "x": frame.pos().x(),
@@ -2202,6 +2230,11 @@ class FigureCanvas(QGraphicsView):
             "image_path": layout_item.image_path if layout_item is not None else None,
             "roi": roi,
             "transform": transform,
+            "geometry_transform": geometry_transform,
+            "preserve_aspect": bool(
+                layout_item.preserve_image_aspect
+                if layout_item is not None else False
+            ),
         }
 
     def copy_selected_text_boxes(self) -> bool:
@@ -2333,6 +2366,8 @@ class FigureCanvas(QGraphicsView):
                     image_path=item.image_path or None,
                     image_crop_px=item.roi or None,
                     image_transform=item.transform or None,
+                    geometry_transform=item.geometry_transform or None,
+                    preserve_image_aspect=item.preserve_aspect,
                     z_order=z,
                 ))
             elif isinstance(item, _OverlayLineItem):
