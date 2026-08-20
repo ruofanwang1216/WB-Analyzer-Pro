@@ -30,12 +30,21 @@ tutorial_assets_dir = project_root / "assets" / "tutorial"
 if tutorial_assets_dir.exists():
     datas.append((str(tutorial_assets_dir), "assets/tutorial"))
 
-# Saved blot files are private, user-created data stored outside the project at
-# ~/.wb_analyzer/blot_files.  They must never be bundled into a distributable
-# installer.  Keep this guard next to the explicit data declarations so a
-# future packaging change cannot include that directory accidentally.
-if any("blot_files" in Path(source).parts for source, _destination in datas):
-    raise RuntimeError("Saved blot files must not be included in release builds")
+# Saved blot files and user-created templates are private data stored outside
+# the project under ~/.wb_analyzer.  They must never be bundled into a
+# distributable installer.  The built-in 1-panel / 3-blot / 4-lane template is
+# defined in source code and remains available without copying user data.
+private_saved_data = {
+    (Path.home() / ".wb_analyzer" / "blot_files").resolve(),
+    (Path.home() / ".wb_analyzer" / "templates").resolve(),
+}
+for source, _destination in datas:
+    source_path = Path(source).resolve()
+    if any(source_path == private_dir or private_dir in source_path.parents
+           for private_dir in private_saved_data):
+        raise RuntimeError(
+            "Private saved blot files/templates must not be included in release builds"
+        )
 
 hiddenimports = [
     "PySide6.QtCore",
@@ -116,7 +125,7 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "WB Analyzer Pro",
             "CFBundleDisplayName": "WB Analyzer Pro",
-            "CFBundleShortVersionString": "0.3.0",
+            "CFBundleShortVersionString": "0.3.1",
             "NSHighResolutionCapable": True,
         },
     )
