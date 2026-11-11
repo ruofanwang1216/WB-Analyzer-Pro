@@ -16,7 +16,11 @@ from pathlib import Path
 
 block_cipher = None
 project_root = Path(SPECPATH)
-app_icon = project_root / "assets" / "WBAnalyzerPro.icns"
+# macOS wants .icns; Windows needs .ico for the .exe icon. Both are generated
+# from assets/icon/WBAnalyzerPro.svg.
+app_icon = project_root / "assets" / (
+    "WBAnalyzerPro.ico" if sys.platform == "win32" else "WBAnalyzerPro.icns"
+)
 
 # Bundle the vendored WB-TIFF-exporter helper modules (used by the optional
 # "upload/convert" feature in gui/main_window.py). These are plain .py files
