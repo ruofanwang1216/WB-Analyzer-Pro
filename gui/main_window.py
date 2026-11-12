@@ -28,7 +28,14 @@ from PySide6.QtWidgets import (
     QLabel, QListWidget, QListWidgetItem, QDialog, QGridLayout, QMenu, QComboBox,
 )
 
-from config.settings import APP_NAME
+from config.settings import (
+    APP_NAME,
+    COLOR_ACCENT_LIGHT,
+    COLOR_ACCENT_TEXT,
+    COLOR_ROW_ALT,
+    COLOR_SURFACE,
+    COLOR_TEXT_MUTED,
+)
 from core.band_detector import group_auto_detected_rows
 from core.image_transform import (
     GeometryTransform,
@@ -380,13 +387,13 @@ class _ImagePanelWidget(QFrame):
         self.setObjectName("image_panel")
         self.setMinimumSize(180, 150)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setStyleSheet("""
-            QFrame#image_panel {
+        self.setStyleSheet(f"""
+            QFrame#image_panel {{
                 background-color: #EDF3F7;
                 border: 1px solid #C6D6DF;
                 border-radius: 8px;
-            }
-            QCheckBox#panel_select_checkbox {
+            }}
+            QCheckBox#panel_select_checkbox {{
                 background: transparent;
                 min-width: 14px;
                 max-width: 14px;
@@ -394,24 +401,24 @@ class _ImagePanelWidget(QFrame):
                 max-height: 14px;
                 margin: 0px;
                 padding: 0px;
-            }
-            QCheckBox#panel_select_checkbox::indicator {
+            }}
+            QCheckBox#panel_select_checkbox::indicator {{
                 width: 12px;
                 height: 12px;
                 border-radius: 2px;
                 border: 1px solid #9CB0BC;
                 background: #FFFFFF;
-            }
-            QCheckBox#panel_select_checkbox::indicator:checked {
+            }}
+            QCheckBox#panel_select_checkbox::indicator:checked {{
                 border: 1px solid #7DA897;
-                background: #D4EDE4;
-            }
-            QLabel#panel_filename_label {
+                background: {COLOR_ACCENT_LIGHT};
+            }}
+            QLabel#panel_filename_label {{
                 background: transparent;
                 color: #4A6070;
                 font-size: 10px;
-            }
-            QPushButton#panel_remove_btn {
+            }}
+            QPushButton#panel_remove_btn {{
                 background-color: rgba(245, 248, 250, 225);
                 border: 1px solid #A7B7C1;
                 border-radius: 7px;
@@ -422,12 +429,12 @@ class _ImagePanelWidget(QFrame):
                 max-height: 16px;
                 padding: 0px;
                 font-size: 10px;
-            }
-            QPushButton#panel_remove_btn:hover {
+            }}
+            QPushButton#panel_remove_btn:hover {{
                 color: #C0504A;
                 border-color: #B8908C;
-            }
-            QPushButton#panel_transform_btn {
+            }}
+            QPushButton#panel_transform_btn {{
                 background-color: rgba(245, 248, 250, 225);
                 border: 1px solid #9FB3BE;
                 border-radius: 7px;
@@ -439,13 +446,13 @@ class _ImagePanelWidget(QFrame):
                 padding: 0px;
                 font-size: 13px;
                 font-weight: 700;
-            }
-            QPushButton#panel_transform_btn:hover {
-                background-color: #D4EDE4;
+            }}
+            QPushButton#panel_transform_btn:hover {{
+                background-color: {COLOR_ACCENT_LIGHT};
                 border-color: #7DA897;
-                color: #2A5E48;
-            }
-            QToolButton#panel_rotate_btn {
+                color: {COLOR_ACCENT_TEXT};
+            }}
+            QToolButton#panel_rotate_btn {{
                 background-color: rgba(245, 248, 250, 225);
                 border: 1px solid #9FB3BE;
                 border-radius: 7px;
@@ -457,17 +464,17 @@ class _ImagePanelWidget(QFrame):
                 padding: 0px;
                 font-size: 13px;
                 font-weight: 700;
-            }
-            QToolButton#panel_rotate_btn:hover {
-                background-color: #D4EDE4;
+            }}
+            QToolButton#panel_rotate_btn:hover {{
+                background-color: {COLOR_ACCENT_LIGHT};
                 border-color: #7DA897;
-                color: #2A5E48;
-            }
-            QToolButton#panel_rotate_btn::menu-indicator {
+                color: {COLOR_ACCENT_TEXT};
+            }}
+            QToolButton#panel_rotate_btn::menu-indicator {{
                 image: none;
                 width: 0px;
-            }
-            QToolButton#panel_zoom_btn {
+            }}
+            QToolButton#panel_zoom_btn {{
                 background-color: rgba(245, 248, 250, 225);
                 border: 1px solid #9FB3BE;
                 border-radius: 7px;
@@ -476,14 +483,14 @@ class _ImagePanelWidget(QFrame):
                 min-height: 18px;
                 max-height: 18px;
                 padding: 0px;
-            }
-            QToolButton#panel_zoom_btn:hover {
-                background-color: #D4EDE4;
+            }}
+            QToolButton#panel_zoom_btn:hover {{
+                background-color: {COLOR_ACCENT_LIGHT};
                 border-color: #7DA897;
-            }
-            QToolButton#panel_zoom_btn:pressed {
+            }}
+            QToolButton#panel_zoom_btn:pressed {{
                 background-color: #C5E2D7;
-            }
+            }}
         """)
 
         root = QVBoxLayout(self)
@@ -692,105 +699,105 @@ class MainWindow(QMainWindow):
         tb = QToolBar("Main", self)
         tb.setMovable(False)
         tb.setFloatable(False)
-        tb.setStyleSheet("""
-            QToolBar {
+        tb.setStyleSheet(f"""
+            QToolBar {{
                 background-color: #ECF2F0;
                 border: none;
                 spacing: 8px;
                 padding: 6px 8px;
-            }
-            QToolButton#tb_open_btn {
+            }}
+            QToolButton#tb_open_btn {{
                 background-color: #DCE9E2;
                 border: 1px solid #B8CCC1;
                 border-radius: 8px;
                 color: #2F4B3F;
                 padding: 7px 13px;
                 font-weight: 600;
-            }
-            QToolButton#tb_open_btn:hover {
+            }}
+            QToolButton#tb_open_btn:hover {{
                 background-color: #D1E2D9;
-            }
-            QFrame#section1_group {
+            }}
+            QFrame#section1_group {{
                 background-color: #D3E2DA;
                 border: 1px solid #B3C8BC;
                 border-radius: 10px;
-            }
-            QFrame#section2_group {
+            }}
+            QFrame#section2_group {{
                 background-color: #C7D8CE;
                 border: 1px solid #AEBFB5;
                 border-radius: 10px;
-            }
-            QToolButton#section_btn {
+            }}
+            QToolButton#section_btn {{
                 background-color: transparent;
                 border: 1px solid transparent;
                 border-radius: 7px;
                 color: #314A3F;
                 padding: 5px 10px;
-            }
-            QToolButton#section_btn:hover {
+            }}
+            QToolButton#section_btn:hover {{
                 background-color: rgba(255, 255, 255, 0.35);
                 border-color: #AFC3B7;
-            }
-            QToolButton#section_btn:disabled {
+            }}
+            QToolButton#section_btn:disabled {{
                 color: #7F9588;
-            }
-            QToolButton#analyze_btn {
+            }}
+            QToolButton#analyze_btn {{
                 background-color: #B9D5C5;
                 border: 1px solid #90B3A0;
                 border-radius: 7px;
                 color: #274E3B;
                 font-weight: 600;
                 padding: 5px 12px;
-            }
-            QToolButton#analyze_btn:hover {
+            }}
+            QToolButton#analyze_btn:hover {{
                 background-color: #A9C9B7;
-            }
-            QToolButton#analyze_btn:disabled {
+            }}
+            QToolButton#analyze_btn:disabled {{
                 background-color: #D8E4DE;
                 color: #81988D;
                 border-color: #C1D0C8;
-            }
-            QPushButton#figure_generation_btn {
+            }}
+            QPushButton#figure_generation_btn {{
                 background-color: #C2D3C8;
                 border: 1px solid #9EB3A8;
                 border-radius: 7px;
                 color: #2C4A3D;
                 padding: 5px 12px;
-            }
-            QPushButton#figure_generation_btn:hover {
+            }}
+            QPushButton#figure_generation_btn:hover {{
                 background-color: #B4C8BB;
-            }
-            QPushButton#wb_plot_generation_btn {
+            }}
+            QPushButton#wb_plot_generation_btn {{
                 background-color: #C8C2D3;
                 border: 1px solid #A89EB3;
                 border-radius: 7px;
                 color: #3A2C4A;
                 padding: 5px 12px;
-            }
-            QPushButton#wb_plot_generation_btn:hover {
+            }}
+            QPushButton#wb_plot_generation_btn:hover {{
                 background-color: #BBB4C8;
-            }
-            QComboBox#language_selector {
-                background-color: #F5F8FA;
+            }}
+            QComboBox#language_selector {{
+                background-color: {COLOR_SURFACE};
                 border: 1px solid #B6C8D5;
                 border-radius: 8px;
                 color: #345060;
                 padding: 5px 8px;
                 min-width: 92px;
                 font-weight: 600;
-            }
-            QPushButton#tutorial_btn {
+            }}
+            QPushButton#tutorial_btn {{
                 background-color: #FFF7E3;
                 border: 1px solid #D7B86A;
                 border-radius: 8px;
                 color: #655020;
                 padding: 6px 11px;
                 font-weight: 600;
-            }
-            QPushButton#tutorial_btn:hover {
+            }}
+            QPushButton#tutorial_btn:hover {{
                 background-color: #F8EBC8;
                 border-color: #C99E39;
-            }
+            }}
         """)
         self.addToolBar(tb)
 
@@ -886,17 +893,17 @@ class MainWindow(QMainWindow):
 
         self._files_panel = QFrame()
         self._files_panel.setObjectName("uploaded_files_panel")
-        self._files_panel.setStyleSheet("""
-            QFrame#uploaded_files_panel {
-                background-color: #EFF4F8;
+        self._files_panel.setStyleSheet(f"""
+            QFrame#uploaded_files_panel {{
+                background-color: {COLOR_ROW_ALT};
                 border-right: 1px solid #D4E0E8;
-            }
-            QLabel#files_panel_title {
+            }}
+            QLabel#files_panel_title {{
                 color: #5D7180;
                 font-size: 11px;
                 font-weight: 600;
-            }
-            QPushButton#files_panel_toggle {
+            }}
+            QPushButton#files_panel_toggle {{
                 background-color: #E2ECF3;
                 border: 1px solid #C2D1DC;
                 border-radius: 6px;
@@ -908,34 +915,34 @@ class MainWindow(QMainWindow):
                 padding: 0px;
                 font-size: 11px;
                 font-weight: 700;
-            }
-            QPushButton#files_panel_toggle:hover {
+            }}
+            QPushButton#files_panel_toggle:hover {{
                 background-color: #D6E3ED;
-            }
-            QListWidget#uploaded_files_list {
+            }}
+            QListWidget#uploaded_files_list {{
                 background-color: #F7FAFC;
                 border: 1px solid #D0DEE7;
                 border-radius: 6px;
                 color: #385161;
                 padding: 2px;
-            }
-            QListWidget#uploaded_files_list::item {
+            }}
+            QListWidget#uploaded_files_list::item {{
                 padding: 4px 6px;
-            }
-            QListWidget#uploaded_files_list::item:selected {
-                background-color: #D4EDE4;
-                color: #2A5E48;
-            }
-            QPushButton#export_all_tiffs_btn {
+            }}
+            QListWidget#uploaded_files_list::item:selected {{
+                background-color: {COLOR_ACCENT_LIGHT};
+                color: {COLOR_ACCENT_TEXT};
+            }}
+            QPushButton#export_all_tiffs_btn {{
                 background-color: #E6EEF3;
                 border: 1px solid #BACAD5;
                 border-radius: 6px;
                 color: #4B6473;
                 padding: 5px 8px;
-            }
-            QPushButton#export_all_tiffs_btn:hover {
+            }}
+            QPushButton#export_all_tiffs_btn:hover {{
                 background-color: #DCE7EE;
-            }
+            }}
         """)
         files_layout = QVBoxLayout(self._files_panel)
         files_layout.setContentsMargins(8, 8, 8, 8)
@@ -1002,7 +1009,7 @@ class MainWindow(QMainWindow):
         self._figure_table_host_layout.setContentsMargins(0, 0, 0, 0)
         self._figure_table_host_layout.setSpacing(0)
         self._figure_table_placeholder = QLabel("Figure Generation table will appear here.")
-        self._figure_table_placeholder.setStyleSheet("color: #6E8494; font-size: 11px; padding: 10px;")
+        self._figure_table_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding: 10px;")
         self._figure_table_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._figure_table_host_layout.addWidget(self._figure_table_placeholder)
 
@@ -1012,7 +1019,7 @@ class MainWindow(QMainWindow):
         self._figure_preview_host_layout.setContentsMargins(0, 0, 0, 0)
         self._figure_preview_host_layout.setSpacing(0)
         self._figure_preview_placeholder = QLabel("Generated figure preview will appear here.")
-        self._figure_preview_placeholder.setStyleSheet("color: #6E8494; font-size: 11px; padding: 10px;")
+        self._figure_preview_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding: 10px;")
         self._figure_preview_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._figure_preview_host_layout.addWidget(self._figure_preview_placeholder)
 
@@ -1034,7 +1041,7 @@ class MainWindow(QMainWindow):
         self._wb_plot_workspace_layout.setContentsMargins(0, 0, 0, 0)
         self._wb_plot_workspace_layout.setSpacing(0)
         self._wb_plot_placeholder = QLabel("WB Plot Figure Generation will appear here.")
-        self._wb_plot_placeholder.setStyleSheet("color: #6E8494; font-size: 11px; padding: 10px;")
+        self._wb_plot_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding: 10px;")
         self._wb_plot_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._wb_plot_workspace_layout.addWidget(self._wb_plot_placeholder)
 
@@ -1501,7 +1508,7 @@ class MainWindow(QMainWindow):
             tr("Figure Generation table will appear here.", self._language)
         )
         self._figure_table_placeholder.setStyleSheet(
-            "color: #6E8494; font-size: 11px; padding: 10px;"
+            f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding: 10px;"
         )
         self._figure_table_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._figure_table_host_layout.addWidget(self._figure_table_placeholder)
@@ -1509,7 +1516,7 @@ class MainWindow(QMainWindow):
             tr("Generated figure preview will appear here.", self._language)
         )
         self._figure_preview_placeholder.setStyleSheet(
-            "color: #6E8494; font-size: 11px; padding: 10px;"
+            f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding: 10px;"
         )
         self._figure_preview_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._figure_preview_host_layout.addWidget(self._figure_preview_placeholder)
@@ -1524,7 +1531,7 @@ class MainWindow(QMainWindow):
             tr("WB Plot Figure Generation will appear here.", self._language)
         )
         self._wb_plot_placeholder.setStyleSheet(
-            "color: #6E8494; font-size: 11px; padding: 10px;"
+            f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding: 10px;"
         )
         self._wb_plot_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._wb_plot_workspace_layout.addWidget(self._wb_plot_placeholder)
@@ -1621,7 +1628,7 @@ class MainWindow(QMainWindow):
         self._embedded_preview_placeholder = QLabel(
             tr("Generated figure preview will appear here.", self._language)
         )
-        self._embedded_preview_placeholder.setStyleSheet("color: #6E8494; font-size: 11px; padding: 10px;")
+        self._embedded_preview_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding: 10px;")
         self._embedded_preview_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._figure_preview_host_layout.addWidget(self._embedded_preview_placeholder)
 

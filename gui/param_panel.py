@@ -10,26 +10,39 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QSizePolicy,
     QListWidget, QListWidgetItem, QInputDialog, QToolButton,
 )
+from config.settings import (
+    COLOR_ACCENT,
+    COLOR_ACCENT_DARK,
+    COLOR_ACCENT_LIGHT,
+    COLOR_ACCENT_TEXT,
+    COLOR_BORDER,
+    COLOR_BORDER_LIGHT,
+    COLOR_SIDEBAR,
+    COLOR_SURFACE,
+    COLOR_TEXT,
+    COLOR_TEXT_HINT,
+    COLOR_TEXT_MUTED,
+)
 from utils.i18n import LANG_EN, tr
 
-_ACTIVE_BTN = """
-    QPushButton {
-        background-color: #8AB4A0;
-        border: 1px solid #6A9E88;
+_ACTIVE_BTN = f"""
+    QPushButton {{
+        background-color: {COLOR_ACCENT};
+        border: 1px solid {COLOR_ACCENT_DARK};
         border-radius: 6px;
-        color: #F5F8FA;
+        color: {COLOR_SURFACE};
         font-weight: bold;
         padding: 4px 16px;
-    }
+    }}
 """
-_INACTIVE_BTN = """
-    QPushButton {
-        background-color: #F5F8FA;
-        border: 1px solid #C8D8E4;
+_INACTIVE_BTN = f"""
+    QPushButton {{
+        background-color: {COLOR_SURFACE};
+        border: 1px solid {COLOR_BORDER};
         border-radius: 6px;
-        color: #6E8494;
+        color: {COLOR_TEXT_MUTED};
         padding: 4px 16px;
-    }
+    }}
 """
 
 _FIXED_ROI_NAME_ROLE = int(Qt.ItemDataRole.UserRole) + 1
@@ -60,96 +73,96 @@ class ParamPanel(QWidget):
     # ── Build ──────────────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #EBF1F6;
-            }
-            QLabel {
-                color: #6E8494;
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLOR_SIDEBAR};
+            }}
+            QLabel {{
+                color: {COLOR_TEXT_MUTED};
                 font-size: 9px;
-            }
-            QGroupBox {
-                color: #A0B4C0;
+            }}
+            QGroupBox {{
+                color: {COLOR_TEXT_HINT};
                 font-size: 9px;
                 font-weight: bold;
                 letter-spacing: 1px;
-                border: 1px solid #D8E6EE;
+                border: 1px solid {COLOR_BORDER_LIGHT};
                 border-radius: 6px;
                 margin-top: 8px;
                 padding-top: 8px;
-            }
-            QGroupBox::title {
+            }}
+            QGroupBox::title {{
                 subcontrol-origin: margin;
                 left: 8px;
-            }
-            QLineEdit, QSpinBox, QComboBox {
-                background-color: #F5F8FA;
-                border: 1px solid #C8D8E4;
+            }}
+            QLineEdit, QSpinBox, QComboBox {{
+                background-color: {COLOR_SURFACE};
+                border: 1px solid {COLOR_BORDER};
                 border-radius: 5px;
                 padding: 3px 4px;
-                color: #35393D;
+                color: {COLOR_TEXT};
                 font-size: 10px;
-            }
-            QSpinBox::up-button, QSpinBox::down-button {
+            }}
+            QSpinBox::up-button, QSpinBox::down-button {{
                 border: none;
                 background: transparent;
-                color: #8AB4A0;
-            }
-            QComboBox::drop-down {
+                color: {COLOR_ACCENT};
+            }}
+            QComboBox::drop-down {{
                 border: none;
                 background: transparent;
-            }
-            QComboBox::down-arrow {
+            }}
+            QComboBox::down-arrow {{
                 image: none;
                 width: 0;
-            }
-            QPushButton {
-                background-color: #8AB4A0;
-                border: 1px solid #6A9E88;
+            }}
+            QPushButton {{
+                background-color: {COLOR_ACCENT};
+                border: 1px solid {COLOR_ACCENT_DARK};
                 border-radius: 6px;
-                color: #F5F8FA;
+                color: {COLOR_SURFACE};
                 padding: 4px 5px;
                 font-size: 9px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #6A9E88;
-            }
-            QPushButton#lane_dec, QPushButton#lane_inc {
-                background-color: #F5F8FA;
-                border: 1px solid #C8D8E4;
+            }}
+            QPushButton:hover {{
+                background-color: {COLOR_ACCENT_DARK};
+            }}
+            QPushButton#lane_dec, QPushButton#lane_inc {{
+                background-color: {COLOR_SURFACE};
+                border: 1px solid {COLOR_BORDER};
                 border-radius: 5px;
-                color: #35393D;
+                color: {COLOR_TEXT};
                 font-size: 14px;
                 font-weight: 400;
                 padding: 0px;
-            }
-            QPushButton#lane_dec:hover, QPushButton#lane_inc:hover {
-                background-color: #D4EDE4;
-                border-color: #8AB4A0;
-                color: #2A5E48;
-            }
-            QPushButton#lane_dec:pressed, QPushButton#lane_inc:pressed {
-                background-color: #8AB4A0;
-                color: #F5F8FA;
-            }
-            QSlider::groove:horizontal {
+            }}
+            QPushButton#lane_dec:hover, QPushButton#lane_inc:hover {{
+                background-color: {COLOR_ACCENT_LIGHT};
+                border-color: {COLOR_ACCENT};
+                color: {COLOR_ACCENT_TEXT};
+            }}
+            QPushButton#lane_dec:pressed, QPushButton#lane_inc:pressed {{
+                background-color: {COLOR_ACCENT};
+                color: {COLOR_SURFACE};
+            }}
+            QSlider::groove:horizontal {{
                 height: 4px;
-                background: #C8D8E4;
+                background: {COLOR_BORDER};
                 border-radius: 2px;
-            }
-            QSlider::handle:horizontal {
-                background: #8AB4A0;
-                border: 1px solid #6A9E88;
+            }}
+            QSlider::handle:horizontal {{
+                background: {COLOR_ACCENT};
+                border: 1px solid {COLOR_ACCENT_DARK};
                 width: 14px;
                 height: 14px;
                 margin: -5px 0;
                 border-radius: 7px;
-            }
-            QSlider::sub-page:horizontal {
-                background: #8AB4A0;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {COLOR_ACCENT};
                 border-radius: 2px;
-            }
+            }}
         """)
 
         root = QVBoxLayout(self)
@@ -172,7 +185,7 @@ class ParamPanel(QWidget):
         self._lane_section_label = QLabel("Lane Settings")
         lane_section_label = self._lane_section_label
         lane_section_label.setStyleSheet(
-            "color: #A0B4C0; font-size: 9px; font-weight: bold; letter-spacing: 0.5px;"
+            f"color: {COLOR_TEXT_HINT}; font-size: 9px; font-weight: bold; letter-spacing: 0.5px;"
         )
         manual_layout.addWidget(lane_section_label)
 
@@ -209,7 +222,7 @@ class ParamPanel(QWidget):
         self._fixed_label = QLabel("Fixed ROI")
         fixed_label = self._fixed_label
         fixed_label.setStyleSheet(
-            "color: #A0B4C0; font-size: 9px; font-weight: bold; letter-spacing: 0.5px;"
+            f"color: {COLOR_TEXT_HINT}; font-size: 9px; font-weight: bold; letter-spacing: 0.5px;"
         )
         manual_layout.addWidget(fixed_label)
 
@@ -251,7 +264,7 @@ class ParamPanel(QWidget):
             "Manual: draw lane ROI → draw band ROI → Analyze\n"
             "Hold Space + drag to pan. Scroll to zoom."
         )
-        self._help_note.setStyleSheet("color: #6E8494; font-size: 9px;")
+        self._help_note.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 9px;")
         self._help_note.setWordWrap(True)
         root.addWidget(self._help_note)
 

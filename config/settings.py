@@ -10,10 +10,8 @@ PROJECT_FOLDER_NAME = APP_FOLDER_NAME
 # folder (see config/paths.py), not the user's Documents folder. This avoids
 # an unnecessary privacy prompt on first launch.
 DEFAULT_PROJECT_DIR = app_data_dir()
-DEFAULT_CONFIG_PATH = DEFAULT_PROJECT_DIR / "config.json"
 
-SUPPORTED_IMAGE_EXTS = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
-
+# Shared by the global stylesheet (gui/theme.py) and the densitometry widgets.
 # ── Morandi color palette ──────────────────────────────────────────────────────
 COLOR_BG           = "#EAF0F4"   # app background
 COLOR_SURFACE      = "#F5F8FA"   # canvas, input fields, table rows

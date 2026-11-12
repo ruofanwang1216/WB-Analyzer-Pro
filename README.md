@@ -28,7 +28,7 @@ python3 check_env.py
 
 ## Workflow
 
-1. **Open Image** — TIFF, PNG, or JPG
+1. **Import Images** — TIFF files or Bio-Rad Image Lab documents
 2. **Set lanes** — choose the number of lanes
 3. **Draw ROIs** — draw a lane ROI, then draw a band ROI
 4. **Analyze** — app measures the selected band ROIs

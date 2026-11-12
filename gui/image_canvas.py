@@ -20,6 +20,13 @@ from PySide6.QtWidgets import (
     QGraphicsPathItem,
 )
 
+from config.settings import (
+    COLOR_ACCENT,
+    COLOR_ACCENT_LIGHT,
+    COLOR_ACCENT_TEXT,
+    COLOR_BAND_ROI,
+    COLOR_BG,
+)
 from core.image_transform import (
     GeometryTransform,
     ImageTransformParams,
@@ -33,7 +40,7 @@ from core.image_transform import (
 
 # Morandi sage-green palette — muted, distinct but harmonious across 16 lanes
 _LANE_COLORS = [
-    "#8AB4A0", "#7AAEC8", "#A0B4C8", "#94B8A4", "#8AAEC4",
+    COLOR_ACCENT, "#7AAEC8", "#A0B4C8", "#94B8A4", COLOR_BAND_ROI,
     "#7AB4A8", "#A0A8C4", "#8AB8B0", "#94A4C0", "#7ABCA8",
     "#A4B0C8", "#88B8A8", "#9AACC4", "#80B4AC", "#A8ACC0", "#8CB0B8",
 ]
@@ -427,9 +434,9 @@ class EditableBandRectItem(QGraphicsRectItem):
         painter.drawLine(QPointF(rect.left() + 2, center_y), QPointF(rect.right() - 2, center_y))
 
         if self._editing_enabled and self.isSelected():
-            handle_pen = QPen(QColor("#2A5E48"), 1, Qt.PenStyle.SolidLine)
+            handle_pen = QPen(QColor(COLOR_ACCENT_TEXT), 1, Qt.PenStyle.SolidLine)
             painter.setPen(handle_pen)
-            painter.setBrush(QBrush(QColor("#D4EDE4")))
+            painter.setBrush(QBrush(QColor(COLOR_ACCENT_LIGHT)))
             for handle in self._handle_rects():
                 painter.drawRect(handle)
 
@@ -544,7 +551,7 @@ class ImageCanvas(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
-        self.setBackgroundBrush(QColor("#EAF0F4"))
+        self.setBackgroundBrush(QColor(COLOR_BG))
         self.setMouseTracking(True)
 
     # ── Public API ─────────────────────────────────────────────────────────────
@@ -1197,7 +1204,7 @@ class ImageCanvas(QGraphicsView):
 
             # Lane number label
             label = self._scene.addText(f"L{i + 1}")
-            label.setDefaultTextColor(QColor("#2A5E48"))
+            label.setDefaultTextColor(QColor(COLOR_ACCENT_TEXT))
             font = label.font()
             font.setPointSize(8)
             font.setBold(True)
@@ -1310,7 +1317,7 @@ class ImageCanvas(QGraphicsView):
         for lane in detections:
             lane_rect = lane["lane_rect"]
 
-            pen = QPen(QColor("#8AAEC4"), 1.5, Qt.PenStyle.DashLine)
+            pen = QPen(QColor(COLOR_BAND_ROI), 1.5, Qt.PenStyle.DashLine)
             item = self._scene.addRect(
                 lane_rect,
                 pen,
@@ -1320,7 +1327,7 @@ class ImageCanvas(QGraphicsView):
             self._lane_items.append(item)
 
             label = self._scene.addText(f"L{lane['lane_index']}")
-            label.setDefaultTextColor(QColor("#2A5E48"))
+            label.setDefaultTextColor(QColor(COLOR_ACCENT_TEXT))
             font = label.font()
             font.setPointSize(8)
             font.setBold(True)
@@ -1845,7 +1852,7 @@ class ImageCanvas(QGraphicsView):
             if self._interaction_mode != "auto" and self._drawing_band_roi:
                 # Drawing band ROI
                 if self._band_roi_item is None:
-                    pen = QPen(QColor("#8AAEC4"), 2, Qt.PenStyle.SolidLine)  # Blue band ROI
+                    pen = QPen(QColor(COLOR_BAND_ROI), 2, Qt.PenStyle.SolidLine)  # Blue band ROI
                     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
                     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
                     brush = QBrush(QColor(138, 174, 196, 30))  # 12% opacity
@@ -1856,7 +1863,7 @@ class ImageCanvas(QGraphicsView):
             else:
                 # Drawing lane ROI
                 if self._roi_item is None:
-                    pen = QPen(QColor("#8AB4A0"), 2, Qt.PenStyle.SolidLine)  # Sage green lane ROI
+                    pen = QPen(QColor(COLOR_ACCENT), 2, Qt.PenStyle.SolidLine)  # Sage green lane ROI
                     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
                     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
                     fill = QBrush(QColor(138, 180, 160, 38))  # 15% opacity
@@ -2008,7 +2015,7 @@ class ImageCanvas(QGraphicsView):
         y = max(bounds.top(), min(bounds.bottom() - height, top_left.y()))
         rect = QRectF(x, y, width, height)
         if self._roi_item is None:
-            pen = QPen(QColor("#8AB4A0"), 2, Qt.PenStyle.SolidLine)
+            pen = QPen(QColor(COLOR_ACCENT), 2, Qt.PenStyle.SolidLine)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
             fill = QBrush(QColor(138, 180, 160, 38))

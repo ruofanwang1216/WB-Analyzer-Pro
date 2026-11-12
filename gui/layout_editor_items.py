@@ -30,6 +30,9 @@ from PySide6.QtWidgets import (
 # Direct reference to avoid MRO ambiguity in mousePressEvent bypass
 _QGraphicsItemBase = QGraphicsItem
 
+from config.settings import (
+    COLOR_ACCENT_TEXT,
+)
 from core.export_engine import _crop_qimage
 from gui.layout_editor_commands import ResizeItemCommand
 
@@ -58,7 +61,7 @@ class ResizeHandleItem(QGraphicsRectItem):
         self.owner = owner
         self.handle_id = handle_id
         self.setBrush(QBrush(QColor("#FFFFFF")))
-        self.setPen(QPen(QColor("#2A5E48"), 1.0))
+        self.setPen(QPen(QColor(COLOR_ACCENT_TEXT), 1.0))
         self.setZValue(1000)
         self.setVisible(False)
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
@@ -810,7 +813,7 @@ class LineEndpointHandle(QGraphicsEllipseItem):
         self.owner = owner
         self.endpoint = endpoint
         self.setBrush(QBrush(QColor("#FFFFFF")))
-        self.setPen(QPen(QColor("#2A5E48"), 1.0))
+        self.setPen(QPen(QColor(COLOR_ACCENT_TEXT), 1.0))
         self.setZValue(1000)
         self.setVisible(False)
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
@@ -853,7 +856,7 @@ class LineElementItem(GroupDragMixin, QGraphicsLineItem):
         self.start_handle = LineEndpointHandle(self, "start")
         self.end_handle = LineEndpointHandle(self, "end")
         self._angle_label = QGraphicsSimpleTextItem(self)
-        self._angle_label.setBrush(QBrush(QColor("#2A5E48")))
+        self._angle_label.setBrush(QBrush(QColor(COLOR_ACCENT_TEXT)))
         angle_font = QFont("Arial")
         angle_font.setPointSizeF(8.0)
         angle_font.setBold(True)

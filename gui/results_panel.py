@@ -11,6 +11,19 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QLabel, QFileDialog, QMessageBox, QHeaderView,
 )
+from config.settings import (
+    COLOR_ACCENT,
+    COLOR_ACCENT_LIGHT,
+    COLOR_ACCENT_TEXT,
+    COLOR_BORDER,
+    COLOR_BORDER_LIGHT,
+    COLOR_RESULTS_HD,
+    COLOR_ROW_ALT,
+    COLOR_SURFACE,
+    COLOR_TEXT,
+    COLOR_TEXT_HINT,
+    COLOR_TEXT_MUTED,
+)
 from utils.i18n import LANG_EN, tr
 
 _COLS = ["Run", "Band", "Lane", "Area", "Mean", "Min", "Max", "IntDen", "RawIntDen"]
@@ -123,7 +136,7 @@ class _BandHeaderView(QHeaderView):
         painter.drawRect(checkbox_rect)
 
         if logicalIndex in self._checked_sections:
-            painter.setPen(QPen(QColor("#2A5E48"), 1.6))
+            painter.setPen(QPen(QColor(COLOR_ACCENT_TEXT), 1.6))
             painter.drawLine(
                 checkbox_rect.left() + 2,
                 checkbox_rect.center().y(),
@@ -192,53 +205,53 @@ class ResultsPanel(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #F5F8FA;
-            }
-            QTableWidget {
-                background-color: #F5F8FA;
-                alternate-background-color: #EFF4F8;
-                gridline-color: #D8E6EE;
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLOR_SURFACE};
+            }}
+            QTableWidget {{
+                background-color: {COLOR_SURFACE};
+                alternate-background-color: {COLOR_ROW_ALT};
+                gridline-color: {COLOR_BORDER_LIGHT};
                 border: none;
                 font-size: 12px;
-                color: #35393D;
-            }
-            QTableWidget::item {
+                color: {COLOR_TEXT};
+            }}
+            QTableWidget::item {{
                 padding: 4px 12px;
-                border-bottom: 1px solid #D8E6EE;
-            }
-            QHeaderView::section {
-                background-color: #DCE9F2;
-                color: #A0B4C0;
+                border-bottom: 1px solid {COLOR_BORDER_LIGHT};
+            }}
+            QHeaderView::section {{
+                background-color: {COLOR_RESULTS_HD};
+                color: {COLOR_TEXT_HINT};
                 font-size: 10px;
                 font-weight: bold;
                 letter-spacing: 1px;
                 padding: 5px 12px;
                 border: none;
-                border-bottom: 1px solid #C8D8E4;
-                border-right: 1px solid #D8E6EE;
-            }
-            QPushButton#export_btn {
-                background-color: #D4EDE4;
-                border: 1px solid #8AB4A0;
+                border-bottom: 1px solid {COLOR_BORDER};
+                border-right: 1px solid {COLOR_BORDER_LIGHT};
+            }}
+            QPushButton#export_btn {{
+                background-color: {COLOR_ACCENT_LIGHT};
+                border: 1px solid {COLOR_ACCENT};
                 border-radius: 5px;
-                color: #2A5E48;
+                color: {COLOR_ACCENT_TEXT};
                 padding: 3px 10px;
                 font-size: 11px;
-            }
-            QPushButton#export_btn:hover {
-                background-color: #8AB4A0;
-                color: #F5F8FA;
-            }
-            QPushButton#clear_btn {
-                background-color: #F5F8FA;
-                border: 1px solid #C8D8E4;
+            }}
+            QPushButton#export_btn:hover {{
+                background-color: {COLOR_ACCENT};
+                color: {COLOR_SURFACE};
+            }}
+            QPushButton#clear_btn {{
+                background-color: {COLOR_SURFACE};
+                border: 1px solid {COLOR_BORDER};
                 border-radius: 5px;
-                color: #6E8494;
+                color: {COLOR_TEXT_MUTED};
                 padding: 3px 10px;
                 font-size: 11px;
-            }
+            }}
         """)
 
         root = QVBoxLayout(self)
@@ -247,7 +260,7 @@ class ResultsPanel(QWidget):
 
         bar = QHBoxLayout()
         self._title = QLabel("Results")
-        self._title.setStyleSheet("font-weight: bold; color: #35393D;")
+        self._title.setStyleSheet(f"font-weight: bold; color: {COLOR_TEXT};")
         bar.addWidget(self._title)
         bar.addStretch()
 
