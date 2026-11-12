@@ -8,7 +8,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from PIL import Image
 from PySide6.QtCore import Qt, QObject, QThread, Signal, QRectF, QSize, QSizeF, QPointF, QEvent
 from PySide6.QtGui import (
     QAction,
@@ -3021,10 +3020,26 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Upload Error", str(exc))
 
     def _on_upload_conversion_error(self, message: str) -> None:
+        pending = self._pending_upload
         self._pending_upload = None
         log.error("Upload conversion failed: %s", message)
         self._status_bar.showMessage("Upload failed — see error dialog.")
         QMessageBox.critical(self, "Conversion Error", message)
+        if pending is None or not pending["direct_tiffs"]:
+            return
+        # TIFFs picked in the same dialog need no conversion; a failed
+        # Image Lab document must not silently discard them.
+        try:
+            self._complete_upload(
+                results=[],
+                selected_paths=pending["direct_tiffs"],
+                direct_tiffs=pending["direct_tiffs"],
+                unsupported=pending["unsupported"],
+            )
+        except Exception as exc:
+            log.exception("Upload post-processing failed")
+            self._status_bar.showMessage("Upload post-processing failed — see error dialog.")
+            QMessageBox.critical(self, "Upload Error", str(exc))
 
     def _on_upload_thread_finished(self) -> None:
         self._act_open.setEnabled(True)
@@ -3177,14 +3192,22 @@ class MainWindow(QMainWindow):
             return
 
         destination_root = Path(dest_dir).expanduser().resolve()
-        destination_root.mkdir(parents=True, exist_ok=True)
-        self._persistence.remember_tiff_export_dir(destination_root)
-
         copied = 0
-        for tiff_path in all_tiffs:
-            target = self._ensure_unique_path(destination_root / tiff_path.name)
-            shutil.copy2(tiff_path, target)
-            copied += 1
+        try:
+            destination_root.mkdir(parents=True, exist_ok=True)
+            self._persistence.remember_tiff_export_dir(destination_root)
+            for tiff_path in all_tiffs:
+                target = self._ensure_unique_path(destination_root / tiff_path.name)
+                shutil.copy2(tiff_path, target)
+                copied += 1
+        except OSError as exc:
+            log.error("TIFF export failed after %d file(s): %s", copied, exc)
+            QMessageBox.critical(
+                self,
+                "Export Error",
+                f"Exported {copied} of {len(all_tiffs)} TIFF file(s) before an error occurred:\n\n{exc}",
+            )
+            return
         QMessageBox.information(
             self,
             "Export Complete",
@@ -3405,22 +3428,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Rotation Error", f"Failed to rotate image:\n{e}")
             log.error("Rotation failed for %s: %s", self._image_path, e)
-
-    def _clear_roi(self) -> None:
-        """Clear all ROIs and lane overlays."""
-        if self._active_slot_index is None:
-            self._status_bar.showMessage("No active image panel to clear.")
-            return
-        self.canvas.clear_roi()
-        self._lane_rects.clear()
-        self._band_roi = None
-        self._auto_detections = []
-        self.param_panel.set_auto_edit_enabled(False)
-        self.canvas.set_auto_edit_mode(False)
-        self._save_active_slot_state()
-        self._refresh_detection_actions()
-        self._act_analyze.setEnabled(False)
-        self._status_bar.showMessage("ROI cleared.")
 
     def _on_canvas_roi_cleared_for_slot(self, slot_index: int) -> None:
         """Reset state after the canvas cancels or clears a manual ROI set.
@@ -3711,10 +3718,16 @@ class MainWindow(QMainWindow):
         band_rois: list,
     ) -> None:
         """Launch MeasurementWorker in background thread."""
+        if self._worker_thread is not None:
+            # Analyze can be re-enabled (e.g. by drawing a new band ROI) while
+            # a measurement is still running. Replacing a running QThread
+            # would destroy it mid-run and abort the app.
+            self._status_bar.showMessage("A measurement is already running — please wait…")
+            return
         self._act_analyze.setEnabled(False)
         self._status_bar.showMessage("Measuring — please wait…")
 
-        self._worker_thread = QThread()
+        self._worker_thread = QThread(self)
         self._worker = MeasurementWorker(
             image_path,
             band_rois,
@@ -3727,9 +3740,16 @@ class MainWindow(QMainWindow):
         self._worker.error.connect(self._on_measurement_error)
         self._worker.finished.connect(self._worker_thread.quit)
         self._worker.error.connect(self._worker_thread.quit)
+        self._worker_thread.finished.connect(self._on_measurement_thread_finished)
         self._worker_thread.finished.connect(self._worker_thread.deleteLater)
 
         self._worker_thread.start()
+
+    def _on_measurement_thread_finished(self) -> None:
+        # Drop the references before deleteLater runs so nothing can touch a
+        # deleted QThread, and so the next analysis can start.
+        self._worker = None
+        self._worker_thread = None
 
     def _on_measurement_done(self, results: list[dict]) -> None:
         """Aggregate measurement results and display. Runs in main thread."""
@@ -3776,6 +3796,11 @@ class MainWindow(QMainWindow):
             )
             event.ignore()
             return
+        if self._worker_thread is not None:
+            # Let an in-flight measurement finish instead of destroying its
+            # thread while it is still running.
+            self._worker_thread.quit()
+            self._worker_thread.wait()
         for panel in self._image_panels:
             panel.canvas.cancel_image_load(wait=True)
         shutil.rmtree(self._conversion_cache_dir, ignore_errors=True)

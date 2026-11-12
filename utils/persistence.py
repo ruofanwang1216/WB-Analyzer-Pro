@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from config.settings import APP_NAME, DEFAULT_PROJECT_DIR, VERSION
+from config.settings import APP_NAME, DEFAULT_PROJECT_DIR, PROJECT_FOLDER_NAME, VERSION
 from utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -160,7 +160,7 @@ class AppPersistence:
         self.update_config(
             debug={
                 "last_analysis": {
-                    "timestamp_utc": datetime.now(UTC).isoformat(),
+                    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                     "image_path": image_path,
                     "mode": mode,
                     "lane_count": int(lane_count),

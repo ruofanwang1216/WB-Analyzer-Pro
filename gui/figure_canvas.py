@@ -39,14 +39,12 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
-import numpy as np
-from PIL import Image
 from PySide6.QtCore import (
     QLineF, QPoint, QPointF, QRect, QRectF, QSize, Qt, QSignalBlocker, QTimer,
 )
 from PySide6.QtGui import (
     QBrush, QColor, QFont, QImage, QPainter, QPen, QPixmap, QUndoStack,
-    QKeySequence, QTextBlockFormat, QTextCursor, QTransform, QWheelEvent,
+    QKeySequence, QTransform, QWheelEvent,
 )
 from PySide6.QtWidgets import (
     QGraphicsItem, QGraphicsPixmapItem,
@@ -61,13 +59,6 @@ from core.layout_engine import (
     DEFAULT_LANE_WIDTH_PT, LayoutItem, LayoutResult,
     pt_to_scene, scene_to_pt,
 )
-from core.image_transform import (
-    default_inverted_for_pil_image,
-    image_transform_from_dict,
-    image_array_to_uint16_luminance,
-    transform_pixels_16_to_8,
-)
-from core.lane_composition import compose_lane_crops
 from gui.layout_editor_items import (
     BlotPlaceholderItem as _OverlayBlotItem,
     EditableTextItem as _OverlayTextItem,
@@ -83,7 +74,6 @@ DEFAULT_FRAME_VIEW_FILL_RATIO = 0.95
 MAX_OFFSET_SCENE: float = 240.0
 DEFAULT_OVERLAY_TEXT_W: float = 46.0
 DEFAULT_OVERLAY_TEXT_H: float = 24.0
-DEFAULT_OVERLAY_BLOT_W: float = 180.0
 DEFAULT_OVERLAY_BLOT_H: float = 36.0
 
 
@@ -1242,24 +1232,6 @@ class FigureCanvas(QGraphicsView):
                 return key
         return None
 
-    def select_blot_refs(self, refs: list[SourceRef]) -> None:
-        keys = {
-            ref.key()
-            for ref in refs
-            if ref.panel_idx is not None and ref.slot_idx is not None
-        }
-        self._selected_blot_keys = keys
-        self._syncing_blot_selection = True
-        try:
-            for key, frame in self._blot_frames.items():
-                selected = key in keys
-                frame.setSelected(selected)
-                frame.set_frame_selected(selected)
-        finally:
-            self._syncing_blot_selection = False
-        if refs and self.on_blot_selected is not None:
-            self.on_blot_selected(refs[0])
-
     def _move_blot_frame_by_delta(self, key: tuple, delta: QPointF) -> None:
         if delta.manhattanLength() <= 0.0:
             return
@@ -1516,23 +1488,6 @@ class FigureCanvas(QGraphicsView):
                 self.on_blot_selected(ref)
         elif had_selection and self.on_blot_selection_cleared is not None:
             self.on_blot_selection_cleared()
-
-    def selected_text_style_overrides(self) -> dict[tuple, dict]:
-        styles: dict[tuple, dict] = {}
-        for key, item in self._text_items.items():
-            if not item.isSelected():
-                continue
-            font = item.font()
-            styles[key] = {
-                "font_family": font.family(),
-                "font_size_pt": font.pointSizeF(),
-                "bold": font.bold(),
-                "italic": font.italic(),
-                "underline": font.underline(),
-                "align": item.text_align(),
-                "rotation": item.rotation(),
-            }
-        return styles
 
     def _select_blot_frame(self, frame: ResizableBlotFrameItem, *, additive: bool) -> None:
         if self.on_view_interacted is not None:
@@ -2021,17 +1976,6 @@ class FigureCanvas(QGraphicsView):
             elif isinstance(item, _OverlayTextItem):
                 item.update_resize_handles()
         return built_in_styles
-
-    def apply_overlay_font(
-        self,
-        family: str | None = None,
-        size: float | None = None,
-        bold: bool | None = None,
-        italic: bool | None = None,
-        underline: bool | None = None,
-    ) -> None:
-        """Backward-compatible wrapper for older toolbar wiring."""
-        self.apply_selected_text_font(family, size, bold, italic, underline)
 
     def align_selected_text_boxes(self, action: str) -> bool:
         """Align or distribute selected text boxes and blot frames."""

@@ -32,9 +32,9 @@ from pathlib import Path
 from statistics import median
 from typing import Callable
 
-from PySide6.QtCore import Qt, QPointF, QRectF, QSize, QSizeF, QSignalBlocker, QTimer, Signal
+from PySide6.QtCore import Qt, QRectF, QSize, QSizeF, QSignalBlocker, QTimer, Signal
 from PySide6.QtGui import (
-    QAction, QColor, QFont, QIcon, QKeySequence, QPainter, QPen, QPixmap,
+    QAction, QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap,
     QShortcut,
 )
 from PySide6.QtWidgets import (
@@ -60,7 +60,6 @@ from core.figure_project import (
 )
 from core.layout_engine import (
     LayoutEngine,
-    LayoutItem,
     LayoutResult,
     pt_to_scene,
     scene_to_pt,
@@ -70,7 +69,6 @@ from gui.condition_template_dialog import (
     ConditionPreviewWidget as _ConditionPreviewWidget,
     ConditionTemplateDialogController,
     request_custom_lane_ranges,
-    request_custom_panel_lane_ranges,
 )
 from gui.figure_canvas import FigureCanvas
 from utils.i18n import LANG_EN, LANG_ZH_CN, tr, tr_display
@@ -1264,27 +1262,6 @@ class FigureModeWindow(QWidget):
         elif self._tutorial_mode:
             self.workflowEvent.emit("frame_template_dialog_cancelled")
 
-    def _current_condition_target(self) -> tuple[int, int] | None:
-        if self._project is None:
-            return None
-        refs = self._canvas.selected_blot_refs()
-        if refs:
-            ref = refs[0]
-            if ref.panel_idx is not None and ref.slot_idx is not None:
-                slot = self._get_slot(ref.panel_idx, ref.slot_idx)
-                if slot is not None:
-                    return ref.panel_idx, max(1, slot.lane_count)
-        if self._active_slot_ref is not None:
-            ref = self._active_slot_ref
-            if ref.panel_idx is not None and ref.slot_idx is not None:
-                slot = self._get_slot(ref.panel_idx, ref.slot_idx)
-                if slot is not None:
-                    return ref.panel_idx, max(1, slot.lane_count)
-        for panel_index, panel in enumerate(self._project.panels):
-            if panel.blot_slots:
-                return panel_index, max(1, panel.blot_slots[0].lane_count)
-        return None
-
     def _current_condition_targets(self) -> list[tuple[int, int]]:
         if self._project is None:
             return []
@@ -1327,7 +1304,6 @@ class FigureModeWindow(QWidget):
         self._apply_condition_templates_to_panels(result)
         self.workflowEvent.emit("condition_template_applied")
 
-
     @staticmethod
     def _even_lane_group_ranges(
         lane_count: int, group_count: int
@@ -1349,25 +1325,6 @@ class FigureModeWindow(QWidget):
             lane_count,
             group_count,
             defaults,
-        )
-
-    def _request_custom_panel_lane_ranges(
-        self,
-        lane_counts: list[int],
-        group_count: int,
-        defaults: list[tuple[int, int]],
-        *,
-        panel_number_offset: int = 0,
-    ) -> list[tuple[int, int]] | None:
-        return request_custom_panel_lane_ranges(
-            self,
-            self._language,
-            self._make_structure_spin,
-            self._retranslate_widget_tree,
-            lane_counts,
-            group_count,
-            defaults,
-            panel_number_offset=panel_number_offset,
         )
 
     @staticmethod
@@ -1701,13 +1658,19 @@ class FigureModeWindow(QWidget):
     def _load_blot_file_summaries(self) -> list[dict]:
         if not USER_BLOT_FILES_DIR.exists():
             return []
+        def modified_time(path: Path) -> float:
+            try:
+                return path.stat().st_mtime
+            except OSError:
+                return 0.0
+
         summaries: list[dict] = []
-        for path in sorted(USER_BLOT_FILES_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        for path in sorted(USER_BLOT_FILES_DIR.glob("*.json"), key=modified_time, reverse=True):
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
             except Exception:
                 continue
-            if data.get("format") != "wb_blot_file":
+            if not isinstance(data, dict) or data.get("format") != "wb_blot_file":
                 continue
             summaries.append({
                 "id": str(data.get("id") or path.stem),
@@ -3516,11 +3479,6 @@ class FigureModeWindow(QWidget):
                 slot.mw_marker = ""
 
     @staticmethod
-    def _panel_anchor_scene_y(layout: LayoutResult, panel_idx: int) -> float | None:
-        anchor = FigureModeWindow._panel_anchor_scene_point(layout, panel_idx)
-        return anchor[1] if anchor is not None else None
-
-    @staticmethod
     def _panel_anchor_scene_point(
         layout: LayoutResult,
         panel_idx: int,
@@ -3847,20 +3805,6 @@ class FigureModeWindow(QWidget):
     def reset_zoom(self) -> None:
         self._canvas.reset_zoom()
 
-    def _sync_existing_slot_lanes(self, lane_count: int) -> None:
-        if self._project is None:
-            return
-        for panel in self._project.panels:
-            panel.condition_table = TemplateEngine.make_condition_table(
-                self._active_table_style,
-                lane_count,
-            )
-            for slot in panel.blot_slots:
-                if slot.bounding_box is None:
-                    continue
-                slot.lane_count = max(1, lane_count)
-                slot.reset_equal_lanes()
-
     # ── Canvas text edit callback ─────────────────────────────────────────
 
     def _on_canvas_text_edited(self, ref: SourceRef, new_text: str) -> None:
@@ -4044,6 +3988,7 @@ class FigureModeWindow(QWidget):
         if self._project is None:
             return None
         return self._project.get_slot(pi, si)
+
 
 # ── Shared button stylesheets ─────────────────────────────────────────────────
 

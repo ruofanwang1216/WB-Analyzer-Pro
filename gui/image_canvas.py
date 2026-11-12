@@ -481,7 +481,6 @@ class ImageCanvas(QGraphicsView):
 
         self._pixmap_item: QGraphicsPixmapItem | None = None
         self._pixmap_original_size: QSizeF | None = None  # Original image size before any scaling
-        self._raw_image_pixels: np.ndarray | None = None
         self._raw_quantification_pixels: np.ndarray | None = None
         self._display_source_pixels: np.ndarray | None = None
         self._raw_image_shape: tuple[int, int] | None = None
@@ -561,7 +560,6 @@ class ImageCanvas(QGraphicsView):
         self._scene.clear()
         self._pixmap_item = None
         self._pixmap_original_size = None
-        self._raw_image_pixels = None
         self._raw_quantification_pixels = None
         self._display_source_pixels = None
         self._raw_image_shape = None
@@ -710,7 +708,6 @@ class ImageCanvas(QGraphicsView):
         # Presentation conversion is now performed only on the sampled view;
         # retaining a separate full-resolution uint16 display buffer is wasteful.
         self._display_source_pixels = quantitative
-        self._raw_image_pixels = quantitative
         height, width = payload["raw_shape"]
         self._raw_image_shape = (int(height), int(width))
         self._display_preview_stride = int(payload["stride"])
@@ -800,9 +797,6 @@ class ImageCanvas(QGraphicsView):
         self._pixmap_item.setPixmap(self._make_display_pixmap())
         self._update_pixmap_scene_geometry()
 
-    def has_modified_image_transform(self) -> bool:
-        return self._image_transform_params != self._image_default_transform_params
-
     def has_quantitative_image_transform(self) -> bool:
         """Compatibility API: display transforms are never quantitative."""
         return False
@@ -826,10 +820,6 @@ class ImageCanvas(QGraphicsView):
         if self._raw_quantification_pixels is None:
             return None
         return self._raw_quantification_pixels.copy()
-
-    def get_analysis_transform_params(self) -> ImageTransformParams:
-        """Deprecated compatibility API; quantification has no tone transform."""
-        return ImageTransformParams(inverted=False)
 
     def get_geometry_transform(self) -> GeometryTransform:
         return self._geometry_transform
@@ -1131,9 +1121,6 @@ class ImageCanvas(QGraphicsView):
         if clear_current_roi:
             self.clear_roi()
 
-    def get_fixed_roi_size(self) -> QSizeF | None:
-        return QSizeF(self._fixed_roi_size) if self._fixed_roi_size is not None else None
-
     def get_fixed_roi_viewport_size(self) -> QSizeF | None:
         """Return the fixed ROI's current visual size in viewport pixels."""
         if self._roi_item is None:
@@ -1142,15 +1129,6 @@ class ImageCanvas(QGraphicsView):
         if rect.width() <= 0 or rect.height() <= 0:
             return None
         return QSizeF(rect.width(), rect.height())
-
-    def set_fixed_roi_size(self, size: QSizeF, *, enabled: bool = True) -> None:
-        if size.width() <= 0 or size.height() <= 0:
-            return
-        self._fixed_roi_size = QSizeF(size)
-        self._fixed_roi_viewport_size = None
-        self._fixed_band_roi_relative = None
-        self._fixed_roi_enabled = enabled
-        self._moving_fixed_roi = False
 
     def set_fixed_roi_viewport_size(self, size: QSizeF, *, enabled: bool = True) -> None:
         """Lock the ROI to a visual size, independent of source image dimensions."""
@@ -1400,15 +1378,6 @@ class ImageCanvas(QGraphicsView):
         self._remove_rotation_overlay()
         self.rotation_mode_changed.emit(False)
 
-    def clear_rotation_overlay(self) -> None:
-        self._remove_rotation_overlay()
-        self._rotation_mode = False
-        self._rotation_dragging = False
-        self._rotation_angle_deg = 0.0
-        self._rotation_drag_start_mouse_angle_deg = None
-        self._rotation_drag_start_crosshair_angle_deg = 0.0
-        self.rotation_mode_changed.emit(False)
-
     def set_auto_edit_mode(self, enabled: bool, tool: str | None = None) -> None:
         self._auto_edit_enabled = enabled
         if tool is not None:
@@ -1417,9 +1386,6 @@ class ImageCanvas(QGraphicsView):
             item.set_editing_enabled(enabled)
         if not enabled:
             self._scene.clearSelection()
-
-    def set_auto_edit_tool(self, tool: str) -> None:
-        self._auto_edit_tool = tool
 
     def get_auto_detections(self) -> list[dict]:
         detections = [

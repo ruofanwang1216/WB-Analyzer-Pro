@@ -517,9 +517,6 @@ class ResultsPanel(QWidget):
     def _to_dataframe(self) -> pd.DataFrame:
         return pd.DataFrame(self._all_rows, columns=_COLS)
 
-    def to_dataframe(self) -> pd.DataFrame:
-        return self._to_dataframe().copy()
-
     def selected_mean_values(self) -> list[str]:
         if self._table.rowCount() <= 0:
             return []
