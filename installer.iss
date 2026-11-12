@@ -1,10 +1,14 @@
 ; Inno Setup script for WB Analyzer Pro
 ; Build (on Windows, after `pyinstaller pyinstaller.spec` has produced dist\WBAnalyzerPro\):
-;   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+;   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=<version> installer.iss
 ; Output: dist_installer\WBAnalyzerPro-Setup-Windows.exe
 
 #define MyAppName "WB Analyzer Pro"
-#define MyAppVersion "0.3.1"
+; The version lives in config\settings.py only. Pass it on the command line:
+;   ISCC.exe /DMyAppVersion=<version> installer.iss
+#ifndef MyAppVersion
+  #error MyAppVersion is not defined. Run: ISCC.exe /DMyAppVersion=<VERSION from config\settings.py> installer.iss
+#endif
 #define MyAppPublisher "WB-Lab"
 #define MyAppExeName "WBAnalyzerPro.exe"
 

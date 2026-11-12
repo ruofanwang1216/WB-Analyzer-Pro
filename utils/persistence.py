@@ -16,7 +16,7 @@ log = get_logger(__name__)
 class AppPersistence:
     """
     Owns lightweight app persistence:
-    - stable project folder under ~/Library/Application Support/WB Analyzer Pro
+    - stable per-user data folder (see config/paths.py)
     - minimal config.json for app/debug/UI state
     - remembered defaults for user-triggered exports
     """

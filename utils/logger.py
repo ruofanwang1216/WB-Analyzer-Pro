@@ -1,9 +1,10 @@
 import logging
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
+
+from config.paths import log_dir
 
 _FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-_LOG_DIR = Path.home() / "Library" / "Logs" / "WB-Densitometry"
+_LOG_DIR = log_dir()
 # Keep the on-disk log bounded: the app logs at DEBUG level on every analysis.
 _LOG_MAX_BYTES = 2 * 1024 * 1024
 _LOG_BACKUP_COUNT = 2

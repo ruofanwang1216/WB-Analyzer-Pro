@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
     QToolButton, QVBoxLayout, QWidget, QFontComboBox,
 )
 
+from config.paths import blot_files_dir
 from core.export_engine import (
     PPTX_AVAILABLE,
     PDFExporter,
@@ -77,7 +78,7 @@ from utils.i18n import LANG_EN, LANG_ZH_CN, tr, tr_display
 _TOOLBAR_BTN_H = 26
 
 _FIXED_ROI_NAME_ROLE = int(Qt.ItemDataRole.UserRole) + 1
-USER_BLOT_FILES_DIR: Path = Path.home() / ".wb_analyzer" / "blot_files"
+USER_BLOT_FILES_DIR: Path = blot_files_dir()
 
 
 class _TemplateNameLabel(QLabel):

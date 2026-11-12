@@ -4,6 +4,7 @@ import sys
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 
+from config.paths import migrate_legacy_data
 from config.settings import APP_NAME, VERSION
 from utils.logger import get_logger
 
@@ -11,6 +12,10 @@ log = get_logger(__name__)
 
 
 def main() -> None:
+    # Must run before anything reads settings, templates or Blot Files.
+    for note in migrate_legacy_data():
+        log.info("%s", note)
+
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
