@@ -15,6 +15,7 @@ is inserted into the presentation.  PowerPoint's crop tool is NOT used.
 """
 from __future__ import annotations
 
+import io
 import math
 import os
 import shutil
@@ -25,9 +26,9 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image
-from PySide6.QtCore import QRect, QRectF, Qt
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRect, QRectF, Qt
 from PySide6.QtGui import (
-    QColor, QFont, QImage, QPainter, QPen, QPixmap,
+    QColor, QFont, QImage, QPainter, QPen,
 )
 
 from core.image_transform import (
@@ -58,6 +59,13 @@ try:
     PPTX_AVAILABLE = True
 except ImportError:
     PPTX_AVAILABLE = False
+
+
+def _require_pptx() -> None:
+    if not PPTX_AVAILABLE:
+        raise RuntimeError(
+            "python-pptx is not installed.  Run: pip install python-pptx"
+        )
 
 
 # ── Shared image utilities ────────────────────────────────────────────────────
@@ -127,6 +135,37 @@ def _item_bounds_pt(item: LayoutItem) -> tuple[float, float, float, float]:
     )
 
 
+def _slide_fit(
+    content_width_pt: float,
+    content_height_pt: float,
+    slide_width_pt: float,
+    slide_height_pt: float,
+) -> tuple[float, float, float]:
+    """Return (left margin, top margin, scale) for content placed on a slide.
+
+    Content is never enlarged; it is reduced only when it exceeds the
+    reference-sized box or the slide's safe area, whichever is smaller.
+    """
+    left_margin = min(_PPTX_LEFT_MARGIN_PT, slide_width_pt * 0.04)
+    top_margin = min(_PPTX_TOP_MARGIN_PT, slide_height_pt * 0.10)
+    right_margin = min(_PPTX_EDGE_MARGIN_PT, slide_width_pt * 0.04)
+    bottom_margin = min(_PPTX_EDGE_MARGIN_PT, slide_height_pt * 0.07)
+    available_width = min(
+        max(1.0, slide_width_pt - left_margin - right_margin),
+        max(1.0, slide_width_pt * _PPTX_FIGURE_MAX_WIDTH_RATIO),
+    )
+    available_height = min(
+        max(1.0, slide_height_pt - top_margin - bottom_margin),
+        max(1.0, slide_height_pt * _PPTX_FIGURE_MAX_HEIGHT_RATIO),
+    )
+    scale = min(
+        1.0,
+        available_width / max(1.0, content_width_pt),
+        available_height / max(1.0, content_height_pt),
+    )
+    return left_margin, top_margin, scale
+
+
 def _fit_layout_to_slide(
     layout: LayoutResult,
     slide_width_pt: float,
@@ -150,24 +189,11 @@ def _fit_layout_to_slide(
         right = max(1.0, layout.canvas_width_pt)
         bottom = max(1.0, layout.canvas_height_pt)
 
-    content_width = max(1.0, right - left)
-    content_height = max(1.0, bottom - top)
-    left_margin = min(_PPTX_LEFT_MARGIN_PT, slide_width_pt * 0.04)
-    top_margin = min(_PPTX_TOP_MARGIN_PT, slide_height_pt * 0.10)
-    right_margin = min(_PPTX_EDGE_MARGIN_PT, slide_width_pt * 0.04)
-    bottom_margin = min(_PPTX_EDGE_MARGIN_PT, slide_height_pt * 0.07)
-    available_width = min(
-        max(1.0, slide_width_pt - left_margin - right_margin),
-        max(1.0, slide_width_pt * _PPTX_FIGURE_MAX_WIDTH_RATIO),
-    )
-    available_height = min(
-        max(1.0, slide_height_pt - top_margin - bottom_margin),
-        max(1.0, slide_height_pt * _PPTX_FIGURE_MAX_HEIGHT_RATIO),
-    )
-    scale = min(
-        1.0,
-        available_width / content_width,
-        available_height / content_height,
+    left_margin, top_margin, scale = _slide_fit(
+        right - left,
+        bottom - top,
+        slide_width_pt,
+        slide_height_pt,
     )
     return _PPTXPlacement(
         scale=scale,
@@ -183,22 +209,11 @@ def _fit_rect_to_slide(
     slide_height_pt: float,
 ) -> tuple[float, float, float, float]:
     """Return a natural-size upper-left rectangle for raster exports."""
-    left = min(_PPTX_LEFT_MARGIN_PT, slide_width_pt * 0.04)
-    top = min(_PPTX_TOP_MARGIN_PT, slide_height_pt * 0.10)
-    right_margin = min(_PPTX_EDGE_MARGIN_PT, slide_width_pt * 0.04)
-    bottom_margin = min(_PPTX_EDGE_MARGIN_PT, slide_height_pt * 0.07)
-    available_width = min(
-        max(1.0, slide_width_pt - left - right_margin),
-        max(1.0, slide_width_pt * _PPTX_FIGURE_MAX_WIDTH_RATIO),
-    )
-    available_height = min(
-        max(1.0, slide_height_pt - top - bottom_margin),
-        max(1.0, slide_height_pt * _PPTX_FIGURE_MAX_HEIGHT_RATIO),
-    )
-    scale = min(
-        1.0,
-        available_width / max(1.0, content_width_pt),
-        available_height / max(1.0, content_height_pt),
+    left, top, scale = _slide_fit(
+        content_width_pt,
+        content_height_pt,
+        slide_width_pt,
+        slide_height_pt,
     )
     width = max(1.0, content_width_pt) * scale
     height = max(1.0, content_height_pt) * scale
@@ -282,17 +297,16 @@ def _crop_qimage(
 def _qimage_to_png_bytes(image: QImage) -> bytes | None:
     if image.isNull():
         return None
-    fd, tmp = tempfile.mkstemp(suffix=".png")
-    os.close(fd)
+    # Encode in memory; no temp file is needed just to obtain PNG bytes.
+    data = QByteArray()
+    buffer = QBuffer(data)
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
     try:
-        image.save(tmp, "PNG")
-        with open(tmp, "rb") as f:
-            return f.read()
+        if not image.save(buffer, "PNG"):
+            return None
     finally:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
+        buffer.close()
+    return bytes(data.data())
 
 
 def _overwrite_file_contents(source_path: str, target_path: Path) -> None:
@@ -556,8 +570,6 @@ class TIFFExporter:
         if not png_bytes:
             raise RuntimeError("TIFF export could not encode the figure snapshot.")
 
-        import io
-
         target = Path(output_path)
         target.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(
@@ -601,10 +613,7 @@ class PPTXExporter:
     """
 
     def export(self, layout: LayoutResult, output_path: str) -> None:
-        if not PPTX_AVAILABLE:
-            raise RuntimeError(
-                "python-pptx is not installed.  Run: pip install python-pptx"
-            )
+        _require_pptx()
 
         prs = _Presentation()
         slide_w = pt_to_emu(_PPTX_SLIDE_WIDTH_PT)
@@ -626,10 +635,7 @@ class PPTXExporter:
 
     def export_append_slide(self, layout: LayoutResult, existing_path: str) -> None:
         """Append a new slide to an existing PPTX file and save in place."""
-        if not PPTX_AVAILABLE:
-            raise RuntimeError(
-                "python-pptx is not installed.  Run: pip install python-pptx"
-            )
+        _require_pptx()
 
         prs = _Presentation(existing_path)
         layout_obj = prs.slide_layouts[6]   # blank layout
@@ -652,10 +658,7 @@ class PPTXExporter:
         output_path: str,
     ) -> None:
         """Export an exact raster snapshot of the figure as a PPTX slide."""
-        if not PPTX_AVAILABLE:
-            raise RuntimeError(
-                "python-pptx is not installed.  Run: pip install python-pptx"
-            )
+        _require_pptx()
         png_bytes = _qimage_to_png_bytes(image)
         if not png_bytes:
             raise RuntimeError("PPTX export could not render the figure snapshot.")
@@ -674,34 +677,6 @@ class PPTXExporter:
         )
         _save_presentation_safely(prs, output_path)
 
-    def export_append_image(
-        self,
-        image: QImage,
-        canvas_width_pt: float,
-        canvas_height_pt: float,
-        existing_path: str,
-    ) -> None:
-        """Append an exact raster snapshot of the figure to an existing PPTX."""
-        if not PPTX_AVAILABLE:
-            raise RuntimeError(
-                "python-pptx is not installed.  Run: pip install python-pptx"
-            )
-        png_bytes = _qimage_to_png_bytes(image)
-        if not png_bytes:
-            raise RuntimeError("PPTX export could not render the figure snapshot.")
-
-        prs = _Presentation(existing_path)
-        slide = prs.slides.add_slide(prs.slide_layouts[6])
-        self._add_snapshot_picture(
-            slide,
-            png_bytes,
-            canvas_width_pt,
-            canvas_height_pt,
-            emu_to_pt(prs.slide_width),
-            emu_to_pt(prs.slide_height),
-        )
-        _save_presentation_safely(prs, existing_path)
-
     @staticmethod
     def _add_snapshot_picture(
         slide,
@@ -711,7 +686,6 @@ class PPTXExporter:
         slide_width_pt: float,
         slide_height_pt: float,
     ):
-        import io
         left, top, width, height = _fit_rect_to_slide(
             canvas_width_pt,
             canvas_height_pt,
@@ -798,7 +772,6 @@ class PPTXExporter:
             )
             png_bytes = _qimage_to_png_bytes(image)
             if png_bytes:
-                import io
                 buf = io.BytesIO(png_bytes)
                 if item.preserve_image_aspect:
                     placement = aspect_fit_placement(
@@ -823,13 +796,12 @@ class PPTXExporter:
                 self._apply_blot_border(picture, scale)
                 return picture
         # Placeholder rectangle when no image is available
-        from pptx.dml.color import RGBColor as _RGB2
         shape = slide.shapes.add_shape(
             1,  # MSO_SHAPE_TYPE.RECTANGLE
             left, top, width, height,
         )
         shape.fill.solid()
-        shape.fill.fore_color.rgb = _RGB2(0xD0, 0xD0, 0xD0)
+        shape.fill.fore_color.rgb = _RGBColor(0xD0, 0xD0, 0xD0)
         self._apply_blot_border(shape, scale)
         return shape
 
@@ -887,11 +859,10 @@ class PPTXExporter:
         item: LayoutItem,
         placement: _PPTXPlacement,
     ) -> None:
-        from pptx.util import Emu as _E2
-        x1 = _E2(pt_to_emu(placement.x(item.x_pt)))
-        y1 = _E2(pt_to_emu(placement.y(item.y_pt)))
-        x2 = _E2(pt_to_emu(placement.x(item.x_pt + item.w_pt)))
-        y2 = _E2(pt_to_emu(placement.y(item.y_pt + item.h_pt)))
+        x1 = _Emu(pt_to_emu(placement.x(item.x_pt)))
+        y1 = _Emu(pt_to_emu(placement.y(item.y_pt)))
+        x2 = _Emu(pt_to_emu(placement.x(item.x_pt + item.w_pt)))
+        y2 = _Emu(pt_to_emu(placement.y(item.y_pt + item.h_pt)))
         connector = slide.shapes.add_connector(1, x1, y1, x2, y2)
         color = QColor(item.line_color or "#AAAAAA")
         connector.line.color.rgb = _RGBColor(color.red(), color.green(), color.blue())

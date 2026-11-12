@@ -38,6 +38,12 @@ from PySide6.QtWidgets import (
 import numpy as np
 import pandas as pd
 
+from config.settings import (
+    COLOR_BORDER_LIGHT,
+    COLOR_RESULTS_HD,
+    COLOR_TEXT,
+    COLOR_TEXT_MUTED,
+)
 from utils.i18n import LANG_EN, LANG_ZH_CN, tr, tr_display
 
 
@@ -110,7 +116,7 @@ class FigureTypeDialog(QDialog):
         root.setSpacing(12)
 
         title = QLabel("Choose table type")
-        title.setStyleSheet("font-size: 13px; font-weight: 600; color: #35393D;")
+        title.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {COLOR_TEXT};")
         root.addWidget(title)
 
         row = QHBoxLayout()
@@ -189,7 +195,7 @@ class ColumnSetupDialog(QDialog):
         root.setSpacing(10)
 
         note = QLabel("Enter table dimensions")
-        note.setStyleSheet("font-size: 12px; font-weight: 600; color: #35393D;")
+        note.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {COLOR_TEXT};")
         root.addWidget(note)
 
         self._samples_spin = QSpinBox()
@@ -1800,14 +1806,14 @@ class ColumnTableWindow(QMainWindow):
         table.setStyleSheet(
             "QTableWidget#prism_table {"
             "background-color: #F7FAFC;"
-            "gridline-color: #D8E6EE;"
+            f"gridline-color: {COLOR_BORDER_LIGHT};"
             "border: 1px solid #D0DEE7;"
             "border-radius: 6px;"
             "font-size: 12px;"
             "color: #2E3B45;"
             "}"
             "QHeaderView::section {"
-            "background-color: #DCE9F2;"
+            f"background-color: {COLOR_RESULTS_HD};"
             "color: #5A6F7F;"
             "font-size: 11px;"
             "font-weight: 700;"
@@ -2438,7 +2444,7 @@ class ColumnTableWindow(QMainWindow):
 
         if self._figure_preview_host is not None:
             placeholder = QLabel("Generated figure preview will appear here.")
-            placeholder.setStyleSheet("color: #6E8494; font-size: 11px; padding: 10px;")
+            placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding: 10px;")
             placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._replace_host_widget(self._figure_preview_host, placeholder)
 

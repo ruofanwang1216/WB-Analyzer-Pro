@@ -428,7 +428,6 @@ def _build_lane_rois_from_centers(
             right = min(x_profile.size, right + deficit - deficit // 2)
         lane_bounds.append((left, right, center))
 
-    widths = [right - left for left, right, _ in lane_bounds]
     max_allowed = max(params.lane_max_width, int(round(median_spacing * (2.2 + 0.5 * params.sensitivity))))
 
     lane_rois = []

@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QLineF
+from PySide6.QtCore import QPointF, QRectF, Qt, QLineF
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -30,6 +30,9 @@ from PySide6.QtWidgets import (
 # Direct reference to avoid MRO ambiguity in mousePressEvent bypass
 _QGraphicsItemBase = QGraphicsItem
 
+from config.settings import (
+    COLOR_ACCENT_TEXT,
+)
 from core.export_engine import _crop_qimage
 from gui.layout_editor_commands import ResizeItemCommand
 
@@ -58,7 +61,7 @@ class ResizeHandleItem(QGraphicsRectItem):
         self.owner = owner
         self.handle_id = handle_id
         self.setBrush(QBrush(QColor("#FFFFFF")))
-        self.setPen(QPen(QColor("#2A5E48"), 1.0))
+        self.setPen(QPen(QColor(COLOR_ACCENT_TEXT), 1.0))
         self.setZValue(1000)
         self.setVisible(False)
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
@@ -285,7 +288,24 @@ class ResizableItemMixin:
             scene.undo_stack.push(ResizeItemCommand(self, old_geometry, new_geometry))
 
 
-class EditableTextItem(ResizableItemMixin, QGraphicsTextItem):
+class GroupDragMixin:
+    """Moves every item captured at drag start by the same scene delta."""
+
+    _drag_group_start_positions: dict
+
+    def _move_drag_group(self, delta: QPointF) -> None:
+        targets = self._drag_group_start_positions or {self: QPointF(self.pos())}
+        scene = self.scene()
+        group_mover = getattr(scene, "move_group_item", None)
+        for item, start_pos in targets.items():
+            target_pos = start_pos + delta
+            if group_mover is not None:
+                group_mover(item, target_pos)
+            else:
+                item.setPos(target_pos)
+
+
+class EditableTextItem(GroupDragMixin, ResizableItemMixin, QGraphicsTextItem):
     """Editable text box with wrapping, font settings and resize handles."""
 
     TypeName = "text"
@@ -555,17 +575,6 @@ class EditableTextItem(ResizableItemMixin, QGraphicsTextItem):
             return
         super().mouseReleaseEvent(event)
 
-    def _move_drag_group(self, delta: QPointF) -> None:
-        targets = self._drag_group_start_positions or {self: QPointF(self.pos())}
-        scene = self.scene()
-        group_mover = getattr(scene, "move_group_item", None)
-        for item, start_pos in targets.items():
-            target_pos = start_pos + delta
-            if group_mover is not None:
-                group_mover(item, target_pos)
-            else:
-                item.setPos(target_pos)
-
     def focusOutEvent(self, event) -> None:
         self.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         new_text = self.toPlainText()
@@ -804,7 +813,7 @@ class LineEndpointHandle(QGraphicsEllipseItem):
         self.owner = owner
         self.endpoint = endpoint
         self.setBrush(QBrush(QColor("#FFFFFF")))
-        self.setPen(QPen(QColor("#2A5E48"), 1.0))
+        self.setPen(QPen(QColor(COLOR_ACCENT_TEXT), 1.0))
         self.setZValue(1000)
         self.setVisible(False)
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
@@ -827,7 +836,7 @@ class LineEndpointHandle(QGraphicsEllipseItem):
         super().mouseUngrabEvent(event)
 
 
-class LineElementItem(QGraphicsLineItem):
+class LineElementItem(GroupDragMixin, QGraphicsLineItem):
     """Editable line with two draggable endpoint handles."""
 
     TypeName = "line"
@@ -847,7 +856,7 @@ class LineElementItem(QGraphicsLineItem):
         self.start_handle = LineEndpointHandle(self, "start")
         self.end_handle = LineEndpointHandle(self, "end")
         self._angle_label = QGraphicsSimpleTextItem(self)
-        self._angle_label.setBrush(QBrush(QColor("#2A5E48")))
+        self._angle_label.setBrush(QBrush(QColor(COLOR_ACCENT_TEXT)))
         angle_font = QFont("Arial")
         angle_font.setPointSizeF(8.0)
         angle_font.setBold(True)
@@ -947,17 +956,6 @@ class LineElementItem(QGraphicsLineItem):
             return
         super().mouseReleaseEvent(event)
 
-    def _move_drag_group(self, delta: QPointF) -> None:
-        targets = self._drag_group_start_positions or {self: QPointF(self.pos())}
-        scene = self.scene()
-        group_mover = getattr(scene, "move_group_item", None)
-        for item, start_pos in targets.items():
-            target_pos = start_pos + delta
-            if group_mover is not None:
-                group_mover(item, target_pos)
-            else:
-                item.setPos(target_pos)
-
     def update_endpoint(self, endpoint: str, local_pos: QPointF) -> None:
         line = QLineF(self.line())
         if endpoint == "start":
@@ -1032,7 +1030,7 @@ class LineElementItem(QGraphicsLineItem):
         return item
 
 
-class BlotPlaceholderItem(ResizableItemMixin, QGraphicsRectItem):
+class BlotPlaceholderItem(GroupDragMixin, ResizableItemMixin, QGraphicsRectItem):
     """WB blot placeholder that can paint either a grey box or an ROI crop."""
 
     TypeName = "blot"
@@ -1152,17 +1150,6 @@ class BlotPlaceholderItem(ResizableItemMixin, QGraphicsRectItem):
             event.accept()
             return
         super().mouseReleaseEvent(event)
-
-    def _move_drag_group(self, delta: QPointF) -> None:
-        targets = self._drag_group_start_positions or {self: QPointF(self.pos())}
-        scene = self.scene()
-        group_mover = getattr(scene, "move_group_item", None)
-        for item, start_pos in targets.items():
-            target_pos = start_pos + delta
-            if group_mover is not None:
-                group_mover(item, target_pos)
-            else:
-                item.setPos(target_pos)
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         preview = self._make_preview_image()

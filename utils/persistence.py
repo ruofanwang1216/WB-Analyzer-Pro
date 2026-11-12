@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from config.settings import APP_NAME, DEFAULT_PROJECT_DIR, VERSION
+from config.settings import APP_NAME, DEFAULT_PROJECT_DIR, PROJECT_FOLDER_NAME, VERSION
 from utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -16,7 +16,7 @@ log = get_logger(__name__)
 class AppPersistence:
     """
     Owns lightweight app persistence:
-    - stable project folder under ~/Library/Application Support/WB Analyzer Pro
+    - stable per-user data folder (see config/paths.py)
     - minimal config.json for app/debug/UI state
     - remembered defaults for user-triggered exports
     """
@@ -160,7 +160,7 @@ class AppPersistence:
         self.update_config(
             debug={
                 "last_analysis": {
-                    "timestamp_utc": datetime.now(UTC).isoformat(),
+                    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                     "image_path": image_path,
                     "mode": mode,
                     "lane_count": int(lane_count),

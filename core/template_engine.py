@@ -4,7 +4,7 @@ Each template provides:
   * Structural defaults (panel count, blot count, lane count, condition table)
   * A full set of GlobalLayout overrides (spacing, column widths, font sizes, …)
 
-User templates are saved to USER_TEMPLATES_DIR (~/.wb_analyzer/templates/) and
+User templates are saved to USER_TEMPLATES_DIR (the app data folder's templates/) and
 loaded at startup.  They preserve layout settings, panel/blot structure, labels,
 and overlay annotations — but NOT source image paths or ROIs.
 
@@ -22,12 +22,13 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from config.paths import templates_dir
 from core.figure_project import (
     BlotSlot, ConditionTable, FigureProject, GlobalLayout, Panel,
 )
 
 # Directory where user-created templates are stored
-USER_TEMPLATES_DIR: Path = Path.home() / ".wb_analyzer" / "templates"
+USER_TEMPLATES_DIR: Path = templates_dir()
 HIDDEN_BUILTIN_TEMPLATES_PATH: Path = USER_TEMPLATES_DIR / "_hidden_builtin_templates.json"
 
 

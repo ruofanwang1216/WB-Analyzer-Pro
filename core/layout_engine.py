@@ -19,7 +19,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
-from core.figure_project import FigureProject, GlobalLayout, SourceRef
+from core.figure_project import FigureProject, SourceRef
 
 
 # ── Coordinate-system constants ───────────────────────────────────────────────

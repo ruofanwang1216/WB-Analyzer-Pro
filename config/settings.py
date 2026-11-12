@@ -1,16 +1,17 @@
-from pathlib import Path
+from config.paths import APP_FOLDER_NAME, app_data_dir
 
 APP_NAME = "WB Analyzer Pro"
+# Single source of truth for the version: pyinstaller.spec and the Windows
+# installer build both read it from here.
 VERSION = "0.3.1"
 
-PROJECT_FOLDER_NAME = APP_NAME
-# App-managed settings belong in macOS Application Support, not the user's
-# Documents folder. This avoids an unnecessary privacy prompt on first launch.
-DEFAULT_PROJECT_DIR = Path.home() / "Library" / "Application Support" / PROJECT_FOLDER_NAME
-DEFAULT_CONFIG_PATH = DEFAULT_PROJECT_DIR / "config.json"
+PROJECT_FOLDER_NAME = APP_FOLDER_NAME
+# App-managed settings belong in the platform's per-user application-data
+# folder (see config/paths.py), not the user's Documents folder. This avoids
+# an unnecessary privacy prompt on first launch.
+DEFAULT_PROJECT_DIR = app_data_dir()
 
-SUPPORTED_IMAGE_EXTS = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
-
+# Shared by the global stylesheet (gui/theme.py) and the densitometry widgets.
 # ── Morandi color palette ──────────────────────────────────────────────────────
 COLOR_BG           = "#EAF0F4"   # app background
 COLOR_SURFACE      = "#F5F8FA"   # canvas, input fields, table rows

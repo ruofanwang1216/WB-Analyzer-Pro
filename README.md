@@ -28,7 +28,7 @@ python3 check_env.py
 
 ## Workflow
 
-1. **Open Image** — TIFF, PNG, or JPG
+1. **Import Images** — TIFF files or Bio-Rad Image Lab documents
 2. **Set lanes** — choose the number of lanes
 3. **Draw ROIs** — draw a lane ROI, then draw a band ROI
 4. **Analyze** — app measures the selected band ROIs
@@ -36,10 +36,23 @@ python3 check_env.py
 
 ## Project Folder And Persistence
 
+Everything the app saves lives in one per-user folder:
+
 ```
-~/Library/Application Support/WB Analyzer Pro/
-└── config.json            # lightweight app/debug/UI state
+<data folder>/
+├── config.json            # lightweight app/debug/UI state
+├── templates/             # your saved figure templates
+└── blot_files/            # your saved Blot Files and their images
 ```
+
+| Platform | Data folder | Logs |
+| --- | --- | --- |
+| macOS | `~/Library/Application Support/WB Analyzer Pro` | `~/Library/Logs/WB Analyzer Pro` |
+| Windows | `%APPDATA%\WB Analyzer Pro` | `<data folder>\logs` |
+
+Versions up to 0.3.1 kept templates and Blot Files in `~/.wb_analyzer`. On
+first launch the app copies them into the data folder; the old folder is left
+untouched and can be deleted once you have confirmed everything is there.
 
 Analysis results are kept in memory during a session and are only written to disk
 when you explicitly export.

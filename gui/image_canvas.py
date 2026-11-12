@@ -20,6 +20,13 @@ from PySide6.QtWidgets import (
     QGraphicsPathItem,
 )
 
+from config.settings import (
+    COLOR_ACCENT,
+    COLOR_ACCENT_LIGHT,
+    COLOR_ACCENT_TEXT,
+    COLOR_BAND_ROI,
+    COLOR_BG,
+)
 from core.image_transform import (
     GeometryTransform,
     ImageTransformParams,
@@ -33,7 +40,7 @@ from core.image_transform import (
 
 # Morandi sage-green palette — muted, distinct but harmonious across 16 lanes
 _LANE_COLORS = [
-    "#8AB4A0", "#7AAEC8", "#A0B4C8", "#94B8A4", "#8AAEC4",
+    COLOR_ACCENT, "#7AAEC8", "#A0B4C8", "#94B8A4", COLOR_BAND_ROI,
     "#7AB4A8", "#A0A8C4", "#8AB8B0", "#94A4C0", "#7ABCA8",
     "#A4B0C8", "#88B8A8", "#9AACC4", "#80B4AC", "#A8ACC0", "#8CB0B8",
 ]
@@ -427,9 +434,9 @@ class EditableBandRectItem(QGraphicsRectItem):
         painter.drawLine(QPointF(rect.left() + 2, center_y), QPointF(rect.right() - 2, center_y))
 
         if self._editing_enabled and self.isSelected():
-            handle_pen = QPen(QColor("#2A5E48"), 1, Qt.PenStyle.SolidLine)
+            handle_pen = QPen(QColor(COLOR_ACCENT_TEXT), 1, Qt.PenStyle.SolidLine)
             painter.setPen(handle_pen)
-            painter.setBrush(QBrush(QColor("#D4EDE4")))
+            painter.setBrush(QBrush(QColor(COLOR_ACCENT_LIGHT)))
             for handle in self._handle_rects():
                 painter.drawRect(handle)
 
@@ -481,7 +488,6 @@ class ImageCanvas(QGraphicsView):
 
         self._pixmap_item: QGraphicsPixmapItem | None = None
         self._pixmap_original_size: QSizeF | None = None  # Original image size before any scaling
-        self._raw_image_pixels: np.ndarray | None = None
         self._raw_quantification_pixels: np.ndarray | None = None
         self._display_source_pixels: np.ndarray | None = None
         self._raw_image_shape: tuple[int, int] | None = None
@@ -545,7 +551,7 @@ class ImageCanvas(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
-        self.setBackgroundBrush(QColor("#EAF0F4"))
+        self.setBackgroundBrush(QColor(COLOR_BG))
         self.setMouseTracking(True)
 
     # ── Public API ─────────────────────────────────────────────────────────────
@@ -561,7 +567,6 @@ class ImageCanvas(QGraphicsView):
         self._scene.clear()
         self._pixmap_item = None
         self._pixmap_original_size = None
-        self._raw_image_pixels = None
         self._raw_quantification_pixels = None
         self._display_source_pixels = None
         self._raw_image_shape = None
@@ -710,7 +715,6 @@ class ImageCanvas(QGraphicsView):
         # Presentation conversion is now performed only on the sampled view;
         # retaining a separate full-resolution uint16 display buffer is wasteful.
         self._display_source_pixels = quantitative
-        self._raw_image_pixels = quantitative
         height, width = payload["raw_shape"]
         self._raw_image_shape = (int(height), int(width))
         self._display_preview_stride = int(payload["stride"])
@@ -800,9 +804,6 @@ class ImageCanvas(QGraphicsView):
         self._pixmap_item.setPixmap(self._make_display_pixmap())
         self._update_pixmap_scene_geometry()
 
-    def has_modified_image_transform(self) -> bool:
-        return self._image_transform_params != self._image_default_transform_params
-
     def has_quantitative_image_transform(self) -> bool:
         """Compatibility API: display transforms are never quantitative."""
         return False
@@ -826,10 +827,6 @@ class ImageCanvas(QGraphicsView):
         if self._raw_quantification_pixels is None:
             return None
         return self._raw_quantification_pixels.copy()
-
-    def get_analysis_transform_params(self) -> ImageTransformParams:
-        """Deprecated compatibility API; quantification has no tone transform."""
-        return ImageTransformParams(inverted=False)
 
     def get_geometry_transform(self) -> GeometryTransform:
         return self._geometry_transform
@@ -1131,9 +1128,6 @@ class ImageCanvas(QGraphicsView):
         if clear_current_roi:
             self.clear_roi()
 
-    def get_fixed_roi_size(self) -> QSizeF | None:
-        return QSizeF(self._fixed_roi_size) if self._fixed_roi_size is not None else None
-
     def get_fixed_roi_viewport_size(self) -> QSizeF | None:
         """Return the fixed ROI's current visual size in viewport pixels."""
         if self._roi_item is None:
@@ -1142,15 +1136,6 @@ class ImageCanvas(QGraphicsView):
         if rect.width() <= 0 or rect.height() <= 0:
             return None
         return QSizeF(rect.width(), rect.height())
-
-    def set_fixed_roi_size(self, size: QSizeF, *, enabled: bool = True) -> None:
-        if size.width() <= 0 or size.height() <= 0:
-            return
-        self._fixed_roi_size = QSizeF(size)
-        self._fixed_roi_viewport_size = None
-        self._fixed_band_roi_relative = None
-        self._fixed_roi_enabled = enabled
-        self._moving_fixed_roi = False
 
     def set_fixed_roi_viewport_size(self, size: QSizeF, *, enabled: bool = True) -> None:
         """Lock the ROI to a visual size, independent of source image dimensions."""
@@ -1219,7 +1204,7 @@ class ImageCanvas(QGraphicsView):
 
             # Lane number label
             label = self._scene.addText(f"L{i + 1}")
-            label.setDefaultTextColor(QColor("#2A5E48"))
+            label.setDefaultTextColor(QColor(COLOR_ACCENT_TEXT))
             font = label.font()
             font.setPointSize(8)
             font.setBold(True)
@@ -1332,7 +1317,7 @@ class ImageCanvas(QGraphicsView):
         for lane in detections:
             lane_rect = lane["lane_rect"]
 
-            pen = QPen(QColor("#8AAEC4"), 1.5, Qt.PenStyle.DashLine)
+            pen = QPen(QColor(COLOR_BAND_ROI), 1.5, Qt.PenStyle.DashLine)
             item = self._scene.addRect(
                 lane_rect,
                 pen,
@@ -1342,7 +1327,7 @@ class ImageCanvas(QGraphicsView):
             self._lane_items.append(item)
 
             label = self._scene.addText(f"L{lane['lane_index']}")
-            label.setDefaultTextColor(QColor("#2A5E48"))
+            label.setDefaultTextColor(QColor(COLOR_ACCENT_TEXT))
             font = label.font()
             font.setPointSize(8)
             font.setBold(True)
@@ -1400,15 +1385,6 @@ class ImageCanvas(QGraphicsView):
         self._remove_rotation_overlay()
         self.rotation_mode_changed.emit(False)
 
-    def clear_rotation_overlay(self) -> None:
-        self._remove_rotation_overlay()
-        self._rotation_mode = False
-        self._rotation_dragging = False
-        self._rotation_angle_deg = 0.0
-        self._rotation_drag_start_mouse_angle_deg = None
-        self._rotation_drag_start_crosshair_angle_deg = 0.0
-        self.rotation_mode_changed.emit(False)
-
     def set_auto_edit_mode(self, enabled: bool, tool: str | None = None) -> None:
         self._auto_edit_enabled = enabled
         if tool is not None:
@@ -1417,9 +1393,6 @@ class ImageCanvas(QGraphicsView):
             item.set_editing_enabled(enabled)
         if not enabled:
             self._scene.clearSelection()
-
-    def set_auto_edit_tool(self, tool: str) -> None:
-        self._auto_edit_tool = tool
 
     def get_auto_detections(self) -> list[dict]:
         detections = [
@@ -1879,7 +1852,7 @@ class ImageCanvas(QGraphicsView):
             if self._interaction_mode != "auto" and self._drawing_band_roi:
                 # Drawing band ROI
                 if self._band_roi_item is None:
-                    pen = QPen(QColor("#8AAEC4"), 2, Qt.PenStyle.SolidLine)  # Blue band ROI
+                    pen = QPen(QColor(COLOR_BAND_ROI), 2, Qt.PenStyle.SolidLine)  # Blue band ROI
                     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
                     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
                     brush = QBrush(QColor(138, 174, 196, 30))  # 12% opacity
@@ -1890,7 +1863,7 @@ class ImageCanvas(QGraphicsView):
             else:
                 # Drawing lane ROI
                 if self._roi_item is None:
-                    pen = QPen(QColor("#8AB4A0"), 2, Qt.PenStyle.SolidLine)  # Sage green lane ROI
+                    pen = QPen(QColor(COLOR_ACCENT), 2, Qt.PenStyle.SolidLine)  # Sage green lane ROI
                     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
                     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
                     fill = QBrush(QColor(138, 180, 160, 38))  # 15% opacity
@@ -2042,7 +2015,7 @@ class ImageCanvas(QGraphicsView):
         y = max(bounds.top(), min(bounds.bottom() - height, top_left.y()))
         rect = QRectF(x, y, width, height)
         if self._roi_item is None:
-            pen = QPen(QColor("#8AB4A0"), 2, Qt.PenStyle.SolidLine)
+            pen = QPen(QColor(COLOR_ACCENT), 2, Qt.PenStyle.SolidLine)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
             fill = QBrush(QColor(138, 180, 160, 38))

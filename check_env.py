@@ -31,7 +31,7 @@ if all_ok:
     try:
         from config.settings import APP_NAME, VERSION
         print(f"✓ Config module: {APP_NAME} v{VERSION}")
-        print(f"✓ Logger module")
+        print("✓ Logger module")
         print()
         print("All imports OK — ready to run './run.sh'")
     except Exception as e:

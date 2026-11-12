@@ -11,11 +11,20 @@
 #   Windows: dist/WBAnalyzerPro/WBAnalyzerPro.exe (+ supporting files)
 #   macOS:   dist/WBAnalyzerPro.app
 
+import re
 import sys
 from pathlib import Path
 
 block_cipher = None
 project_root = Path(SPECPATH)
+
+# config/settings.py is the single source of truth for the app version.
+app_version = re.search(
+    r'^VERSION\s*=\s*"([^"]+)"',
+    (project_root / "config" / "settings.py").read_text(encoding="utf-8"),
+    re.MULTILINE,
+).group(1)
+
 # macOS wants .icns; Windows needs .ico for the .exe icon. Both are generated
 # from assets/icon/WBAnalyzerPro.svg.
 app_icon = project_root / "assets" / (
@@ -35,12 +44,18 @@ if tutorial_assets_dir.exists():
     datas.append((str(tutorial_assets_dir), "assets/tutorial"))
 
 # Saved blot files and user-created templates are private data stored outside
-# the project under ~/.wb_analyzer.  They must never be bundled into a
-# distributable installer.  The built-in 1-panel / 3-blot / 4-lane template is
-# defined in source code and remains available without copying user data.
+# the project (see config/paths.py; ~/.wb_analyzer in earlier releases).
+# They must never be bundled into a distributable installer.  The built-in
+# 1-panel / 3-blot / 4-lane template is defined in source code and remains
+# available without copying user data.
+import runpy
+
+_paths = runpy.run_path(str(project_root / "config" / "paths.py"))
 private_saved_data = {
-    (Path.home() / ".wb_analyzer" / "blot_files").resolve(),
-    (Path.home() / ".wb_analyzer" / "templates").resolve(),
+    _paths["blot_files_dir"]().resolve(),
+    _paths["templates_dir"]().resolve(),
+    (_paths["legacy_user_data_dir"]() / "blot_files").resolve(),
+    (_paths["legacy_user_data_dir"]() / "templates").resolve(),
 }
 for source, _destination in datas:
     source_path = Path(source).resolve()
@@ -129,7 +144,7 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "WB Analyzer Pro",
             "CFBundleDisplayName": "WB Analyzer Pro",
-            "CFBundleShortVersionString": "0.3.1",
+            "CFBundleShortVersionString": app_version,
             "NSHighResolutionCapable": True,
         },
     )

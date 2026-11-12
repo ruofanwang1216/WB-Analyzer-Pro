@@ -132,15 +132,6 @@ class BlotSlot:
             for i in range(self.lane_count)
         ]
 
-    def roi_complete(self) -> bool:
-        """True when both a bounding box and at least one lane ROI exist."""
-        return self.bounding_box is not None and len(self.lane_rois) > 0
-
-    def image_ready(self) -> bool:
-        """True when a source image path is set and the file exists."""
-        from pathlib import Path
-        return bool(self.source_image_path) and Path(self.source_image_path).exists()
-
 
 @dataclass
 class ConditionTable:
