@@ -62,6 +62,59 @@ class AutoLaneMixin:
         if self.canvas.is_quant_auto_review():
             self.canvas.set_quant_auto_review(False)
 
+    def _wb_plot_lane_fit_detections(
+        self, search_roi, expected_lane_count: int | None
+    ) -> tuple[list[dict], dict] | None:
+        """Lane-fitting detection for WB Plot Auto-Fit, or None to use the old detector.
+
+        Needs the lane count from the figure layout and a rough ROI.  Uses the
+        same native-depth detector as densitometry auto-detect, so figure
+        crops get the same lane and band placement.
+        """
+        from core.lane_auto_detect import detect_lanes_in_roi
+
+        if not expected_lane_count or not isinstance(search_roi, QRectF):
+            return None
+        raw = self.canvas.current_analysis_pixels()
+        if raw is None:
+            return None
+        try:
+            pixels = _presentation_pixels(raw, self.canvas.get_geometry_transform())
+            result = detect_lanes_in_roi(
+                pixels,
+                (search_roi.x(), search_roi.y(), search_roi.width(), search_roi.height()),
+                int(expected_lane_count),
+            )
+        except Exception:
+            log.exception("WB Plot lane-fit detection failed; using the guided detector")
+            return None
+        detections = [
+            {
+                "lane_index": lane["lane_index"],
+                "lane_rect": QRectF(*lane["lane_rect"]),
+                "bands": [
+                    {
+                        "band_rect": QRectF(*band["band_rect"]),
+                        "band_index": band["band_index"],
+                        "row_index": band["row_index"],
+                    }
+                    for band in lane["bands"]
+                ],
+            }
+            for lane in result["lanes"]
+        ]
+        if not detections or not any(lane["bands"] for lane in detections):
+            return None
+        metadata = {
+            "failure_stage": None,
+            "message": result.get("message", ""),
+            "mode": "lane_fit",
+            "retained_lanes": len(detections),
+            "retained_bands": sum(len(lane["bands"]) for lane in detections),
+            "detected_polarity": "light_on_dark" if result.get("light_on_dark", True) else "dark_on_light",
+        }
+        return detections, metadata
+
     def _run_quant_auto_lane_detect(self) -> None:
         """Detect lanes + bands inside the drawn lane ROI and show editable boxes."""
         from core.lane_auto_detect import detect_lanes_in_roi

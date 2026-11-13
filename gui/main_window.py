@@ -2016,13 +2016,20 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             )
             detector_height, detector_width = detector_pixels.shape
             source["image_size"] = QSizeF(detector_width, detector_height)
-            detections, metadata = _run_auto_fit_guided_with_polarity_fallback(
-                image_path,
-                sensitivity=0.5,
-                search_roi=search_roi if isinstance(search_roi, QRectF) else None,
-                expected_lane_count=expected_lane_count,
-                detector_pixels=detector_pixels,
-            )
+            # With a known lane count, use the same lane-fitting detector as
+            # densitometry auto-detect; the older guided detector remains the
+            # fallback (no lane count, or nothing found).
+            lane_fit = self._wb_plot_lane_fit_detections(search_roi, expected_lane_count)
+            if lane_fit is not None:
+                detections, metadata = lane_fit
+            else:
+                detections, metadata = _run_auto_fit_guided_with_polarity_fallback(
+                    image_path,
+                    sensitivity=0.5,
+                    search_roi=search_roi if isinstance(search_roi, QRectF) else None,
+                    expected_lane_count=expected_lane_count,
+                    detector_pixels=detector_pixels,
+                )
         except Exception as exc:
             log.exception("WB Plot Auto-Fit detection failed")
             return {"error": f"Band Auto-Fit detection failed: {exc}"}
@@ -2033,7 +2040,9 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
                 self._clone_auto_detections(self._auto_detections)
             )
         self.canvas.set_auto_edit_mode(True)
-        self.canvas.set_auto_detect_overlays(self._auto_detections)
+        self.canvas.set_auto_detect_overlays(
+            self._auto_detections, quiet_lanes=lane_fit is not None
+        )
         source["auto_detections"] = self._clone_auto_detections(self._auto_detections)
         source["metadata"] = metadata
         source["reused"] = False
