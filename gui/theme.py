@@ -49,8 +49,8 @@ QToolBar QToolButton[text="Analyze"]:hover {{
 QStatusBar {{
     background-color: {COLOR_TOOLBAR};
     color: {COLOR_TEXT_HINT};
-    border-top: 1px solid {COLOR_BORDER};
-    font-size: 11px;
+    border-top: 1px solid #D9E0DC;
+    font-size: 12px;
 }}
 QDockWidget {{
     background-color: {COLOR_SURFACE};
@@ -64,7 +64,16 @@ QDockWidget::title {{
     border-bottom: 1px solid {COLOR_BORDER};
 }}
 QSplitter::handle {{
-    background-color: {COLOR_BORDER};
-    width: 1px;
+    background-color: transparent;
+}}
+QSplitter::handle:hover {{
+    background-color: {COLOR_ACCENT_LIGHT};
+}}
+QToolTip {{
+    background-color: #1C2622;
+    color: #FFFFFF;
+    border: none;
+    padding: 4px 8px;
+    font-size: 12px;
 }}
 """

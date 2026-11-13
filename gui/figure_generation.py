@@ -39,7 +39,12 @@ import numpy as np
 import pandas as pd
 
 from config.settings import (
+    COLOR_ACCENT,
+    COLOR_ACCENT_DARK,
+    COLOR_ACCENT_LIGHT,
+    COLOR_BORDER,
     COLOR_BORDER_LIGHT,
+    COLOR_SURFACE,
     COLOR_RESULTS_HD,
     COLOR_TEXT,
     COLOR_TEXT_MUTED,
@@ -1684,6 +1689,48 @@ class _FiguresDialog(QDialog):
         self._refresh_note()
 
 
+_BTN_SECONDARY_STYLE = (
+    "QPushButton {"
+    f"background-color: {COLOR_SURFACE};"
+    f"border: 1px solid {COLOR_BORDER};"
+    "border-radius: 8px;"
+    "color: #3B4A43;"
+    "padding: 6px 12px;"
+    "font-size: 12px;"
+    "}"
+    "QPushButton:hover {"
+    f"background-color: {COLOR_ACCENT_LIGHT};"
+    f"border-color: {COLOR_ACCENT};"
+    "}"
+)
+_BTN_PRIMARY_STYLE = (
+    "QPushButton {"
+    f"background-color: {COLOR_ACCENT};"
+    f"border: 1px solid {COLOR_ACCENT};"
+    "border-radius: 8px;"
+    "color: #FFFFFF;"
+    "padding: 6px 14px;"
+    "font-size: 12px;"
+    "font-weight: 600;"
+    "}"
+    "QPushButton:hover {"
+    f"background-color: {COLOR_ACCENT_DARK};"
+    "}"
+)
+_SIZE_SPIN_STYLE = (
+    "QSpinBox {"
+    f"background-color: {COLOR_SURFACE};"
+    f"border: 1px solid {COLOR_BORDER};"
+    "border-radius: 6px;"
+    "padding: 3px 6px;"
+    "font-size: 13px;"
+    "font-weight: 600;"
+    "min-width: 34px;"
+    "max-width: 46px;"
+    "}"
+)
+
+
 class ColumnTableWindow(QMainWindow):
     """Editable Prism-style column table window."""
     panelFocusRequested = Signal(str)
@@ -1719,6 +1766,18 @@ class ColumnTableWindow(QMainWindow):
         self._figure_style_last_snapshot: FigureStyleConfig = _clone_style_config(self._figure_style_config)
         self._figure_style_before_dialog: FigureStyleConfig | None = None
         self._figure_control_dialog: FigureControlDialog | None = None
+        # Workspace conveniences, switched on by the main window: results
+        # flow into the table and the chart redraws without extra clicks.
+        self._auto_figure_enabled = False
+        self._auto_fill_checkbox: QCheckBox | None = None
+        self._auto_fill_checked = True
+        self._samples_spin: QSpinBox | None = None
+        self._replicates_spin: QSpinBox | None = None
+        self._suppress_item_changed = False
+        self._auto_figure_timer = QTimer(self)
+        self._auto_figure_timer.setSingleShot(True)
+        self._auto_figure_timer.setInterval(250)
+        self._auto_figure_timer.timeout.connect(self.auto_generate_figure)
         self.setWindowTitle("Column Table")
         self.resize(840, 520)
         self._build_ui()
@@ -1765,33 +1824,54 @@ class ColumnTableWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         central = QWidget(self)
+        central.setObjectName("column_table_root")
+        central.setStyleSheet(
+            "QWidget#column_table_root { background-color: transparent; }"
+            "QWidget#column_table_root QLabel { background: transparent; }"
+            "QWidget#column_table_root QCheckBox { background: transparent; "
+            "font-size: 12px; color: #3B4A43; }"
+        )
         root = QVBoxLayout(central)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(6)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(8)
 
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.setSpacing(6)
         title = QLabel("Column Table")
-        title.setStyleSheet("font-size: 13px; font-weight: 700; color: #2F3C45;")
+        title.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {COLOR_TEXT};")
         top_row.addWidget(title)
         top_row.addStretch(1)
+
+        # Table size is edited in place; no setup dialog needed.
+        groups_label = QLabel("Groups")
+        groups_label.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
+        top_row.addWidget(groups_label)
+        samples_spin = QSpinBox()
+        samples_spin.setObjectName("columnTableGroupsSpin")
+        samples_spin.setRange(1, 24)
+        samples_spin.setValue(self._samples)
+        samples_spin.setStyleSheet(_SIZE_SPIN_STYLE)
+        samples_spin.setToolTip("Number of sample groups (columns)")
+        samples_spin.valueChanged.connect(self._on_size_spin_changed)
+        top_row.addWidget(samples_spin)
+        self._samples_spin = samples_spin
+        replicates_label = QLabel("Replicates")
+        replicates_label.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
+        top_row.addWidget(replicates_label)
+        replicates_spin = QSpinBox()
+        replicates_spin.setObjectName("columnTableReplicatesSpin")
+        replicates_spin.setRange(1, 12)
+        replicates_spin.setValue(self._replicates)
+        replicates_spin.setStyleSheet(_SIZE_SPIN_STYLE)
+        replicates_spin.setToolTip("Number of replicates (row blocks)")
+        replicates_spin.valueChanged.connect(self._on_size_spin_changed)
+        top_row.addWidget(replicates_spin)
+        self._replicates_spin = replicates_spin
+
         self._negative_btn = QPushButton("Select Negative Control")
         self._negative_btn.setObjectName("selectNegativeControlButton")
-        self._negative_btn.setStyleSheet(
-            "QPushButton {"
-            "background-color: #E6EEF3;"
-            "border: 1px solid #BACAD5;"
-            "border-radius: 6px;"
-            "color: #385161;"
-            "padding: 5px 10px;"
-            "font-size: 11px;"
-            "font-weight: 600;"
-            "}"
-            "QPushButton:hover {"
-            "background-color: #DCE7EE;"
-            "}"
-        )
+        self._negative_btn.setStyleSheet(_BTN_SECONDARY_STYLE)
         self._negative_btn.clicked.connect(self._on_select_negative_control_clicked)
         top_row.addWidget(self._negative_btn)
         root.addLayout(top_row)
@@ -1805,20 +1885,22 @@ class ColumnTableWindow(QMainWindow):
         table.horizontalHeader().setStretchLastSection(False)
         table.setStyleSheet(
             "QTableWidget#prism_table {"
-            "background-color: #F7FAFC;"
+            f"background-color: {COLOR_SURFACE};"
             f"gridline-color: {COLOR_BORDER_LIGHT};"
-            "border: 1px solid #D0DEE7;"
-            "border-radius: 6px;"
-            "font-size: 12px;"
-            "color: #2E3B45;"
+            f"border: 1px solid {COLOR_BORDER_LIGHT};"
+            "border-radius: 8px;"
+            "font-size: 13px;"
+            f"color: {COLOR_TEXT};"
             "}"
             "QHeaderView::section {"
             f"background-color: {COLOR_RESULTS_HD};"
-            "color: #5A6F7F;"
-            "font-size: 11px;"
-            "font-weight: 700;"
+            f"color: {COLOR_TEXT};"
+            "font-size: 12px;"
+            "font-weight: 600;"
             "padding: 6px;"
-            "border: 1px solid #D0DEE7;"
+            "border: none;"
+            f"border-right: 1px solid {COLOR_BORDER_LIGHT};"
+            f"border-bottom: 1px solid {COLOR_BORDER_LIGHT};"
             "}"
             "QTableWidget::item {"
             "padding: 4px 8px;"
@@ -1895,61 +1977,35 @@ class ColumnTableWindow(QMainWindow):
         self._table = table
         self._apply_table_zoom()
 
+        table.itemChanged.connect(self._on_table_item_changed)
+
         bottom_row = QHBoxLayout()
         bottom_row.setContentsMargins(0, 0, 0, 0)
         bottom_row.setSpacing(8)
+        auto_fill = QCheckBox("Auto-fill after Analyze")
+        auto_fill.setObjectName("columnTableAutoFillCheck")
+        auto_fill.setToolTip(
+            "After each Analyze, write the lane values into the highlighted row "
+            "and move on to the next empty row."
+        )
+        auto_fill.setChecked(self._auto_fill_checked)
+        auto_fill.toggled.connect(self._on_auto_fill_toggled)
+        auto_fill.setVisible(self._auto_figure_enabled)
+        bottom_row.addWidget(auto_fill)
+        self._auto_fill_checkbox = auto_fill
         bottom_row.addStretch(1)
         reset_btn = QPushButton("Reset")
-        reset_btn.setStyleSheet(
-            "QPushButton {"
-            "background-color: #F1E6E6;"
-            "border: 1px solid #D6B8B8;"
-            "border-radius: 7px;"
-            "color: #7A4242;"
-            "padding: 5px 12px;"
-            "font-size: 11px;"
-            "font-weight: 600;"
-            "}"
-            "QPushButton:hover {"
-            "background-color: #EBDADA;"
-            "}"
-        )
+        reset_btn.setStyleSheet(_BTN_SECONDARY_STYLE)
         reset_btn.clicked.connect(self._on_reset_table_clicked)
         bottom_row.addWidget(reset_btn)
         export_table_btn = QPushButton("Export Table")
-        export_table_btn.setStyleSheet(
-            "QPushButton {"
-            "background-color: #E6EEF3;"
-            "border: 1px solid #BACAD5;"
-            "border-radius: 7px;"
-            "color: #385161;"
-            "padding: 5px 12px;"
-            "font-size: 11px;"
-            "font-weight: 600;"
-            "}"
-            "QPushButton:hover {"
-            "background-color: #DCE7EE;"
-            "}"
-        )
+        export_table_btn.setStyleSheet(_BTN_SECONDARY_STYLE)
         export_table_btn.clicked.connect(self._on_export_table_clicked)
         bottom_row.addWidget(export_table_btn)
         figures_btn = QPushButton("Figures Generation")
         figures_btn.setObjectName("figuresGenerationButton")
         self._figures_btn = figures_btn
-        figures_btn.setStyleSheet(
-            "QPushButton {"
-            "background-color: #C2D3C8;"
-            "border: 1px solid #9EB3A8;"
-            "border-radius: 7px;"
-            "color: #2C4A3D;"
-            "padding: 5px 12px;"
-            "font-size: 11px;"
-            "font-weight: 600;"
-            "}"
-            "QPushButton:hover {"
-            "background-color: #B4C8BB;"
-            "}"
-        )
+        figures_btn.setStyleSheet(_BTN_PRIMARY_STYLE)
         figures_btn.clicked.connect(self._on_figures_generation_clicked)
         bottom_row.addWidget(figures_btn)
         root.addLayout(bottom_row)
@@ -2017,15 +2073,21 @@ class ColumnTableWindow(QMainWindow):
         baseline_mean: float,
     ) -> QWidget:
         panel = QWidget()
+        panel.setObjectName("figure_preview_root")
+        panel.setStyleSheet("QWidget#figure_preview_root { background: transparent; }")
         root = QVBoxLayout(panel)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(6)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(8)
         control_name = self._group_names[self._negative_control_group_index] if self._negative_control_group_index is not None else "N/A"
         note = QLabel(
-            f"Normalization baseline: {control_name} "
-            f"(mean Target/Loading = {baseline_mean:.4g})"
+            tr(
+                "Baseline group: {name} (mean target ÷ loading = {value})",
+                self._language,
+                name=self._display_group_name(control_name),
+                value=f"{baseline_mean:.4g}",
+            )
         )
-        note.setStyleSheet("font-size: 11px; color: #4D6171;")
+        note.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED}; background: transparent;")
         root.addWidget(note)
         scroll = _PreviewScrollArea(panel)
         scroll.setWidgetResizable(False)
@@ -2034,7 +2096,7 @@ class ColumnTableWindow(QMainWindow):
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.clicked.connect(lambda: self.panelFocusRequested.emit("figure"))
         plot = _PrismBarPlotWidget(
-            group_names=list(self._group_names),
+            group_names=[self._display_group_name(name) for name in self._group_names],
             grouped_values=grouped_values,
             means=means,
             errors=errors,
@@ -2056,20 +2118,7 @@ class ColumnTableWindow(QMainWindow):
         button_row.setContentsMargins(0, 0, 0, 0)
         button_row.addStretch(1)
         export_figure_btn = QPushButton("Export Figure")
-        export_figure_btn.setStyleSheet(
-            "QPushButton {"
-            "background-color: #E6EEF3;"
-            "border: 1px solid #BACAD5;"
-            "border-radius: 7px;"
-            "color: #385161;"
-            "padding: 5px 12px;"
-            "font-size: 11px;"
-            "font-weight: 600;"
-            "}"
-            "QPushButton:hover {"
-            "background-color: #DCE7EE;"
-            "}"
-        )
+        export_figure_btn.setStyleSheet(_BTN_SECONDARY_STYLE)
         export_figure_btn.clicked.connect(self._on_export_figure_clicked)
         button_row.addWidget(export_figure_btn)
         root.addLayout(button_row)
@@ -2382,6 +2431,19 @@ class ColumnTableWindow(QMainWindow):
             QMessageBox.critical(self, "Export Table Error", str(exc))
 
     def _on_reset_table_clicked(self) -> None:
+        if self._auto_figure_enabled:
+            # In the workspace the size is edited in place, so Reset only
+            # clears the values (after asking, since it cannot be undone).
+            if self._table_has_data():
+                answer = QMessageBox.question(
+                    self,
+                    tr("Reset", self._language),
+                    tr("Clear every value in the data table?", self._language),
+                )
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+            self._reset_to_column_table(self._samples, self._replicates)
+            return
         chooser = FigureTypeDialog(self)
         chooser.set_language(self._language)
         if chooser.exec() != QDialog.DialogCode.Accepted:
@@ -2444,7 +2506,7 @@ class ColumnTableWindow(QMainWindow):
 
         if self._figure_preview_host is not None:
             placeholder = QLabel("Generated figure preview will appear here.")
-            placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding: 10px;")
+            placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px; padding: 10px;")
             placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._replace_host_widget(self._figure_preview_host, placeholder)
 
@@ -2500,6 +2562,8 @@ class ColumnTableWindow(QMainWindow):
             self._refresh_row_and_column_highlights()
             self._set_hint(f"Negative control selected: {self._group_names[group_index]}")
             self.tutorialEvent.emit("negative_control_selected")
+            if self._auto_figure_enabled:
+                self.auto_generate_figure()
 
     def _on_group_rename_requested(self, group_index: int) -> None:
         self._begin_inline_header_edit(group_index)
@@ -2565,7 +2629,7 @@ class ColumnTableWindow(QMainWindow):
             if item is None:
                 item = QTableWidgetItem("")
                 self._table.setHorizontalHeaderItem(col, item)
-            item.setText(self._group_names[group_index])
+            item.setText(self._display_group_name(self._group_names[group_index]))
             if group_index == self._negative_control_group_index:
                 item.setData(Qt.ItemDataRole.BackgroundRole, QColor(250, 222, 230))
                 item.setData(Qt.ItemDataRole.ForegroundRole, QColor("#743448"))
@@ -2678,6 +2742,18 @@ class ColumnTableWindow(QMainWindow):
         row_kind = self._active_target_row % self._ROWS_PER_REPLICATE
         band_type = ("Target band", "Loading control", "Normalized result")[row_kind]
         return f"Replicate {replicate_idx} — {band_type}"
+
+    def active_target_description_localized(self) -> str:
+        if self._active_target_row is None:
+            return ""
+        replicate_idx = (self._active_target_row // self._ROWS_PER_REPLICATE) + 1
+        row_kind = self._active_target_row % self._ROWS_PER_REPLICATE
+        band_type = ("Target band", "Loading control", "Normalized result")[row_kind]
+        return (
+            tr("Replicate {number}", self._language, number=replicate_idx)
+            + " — "
+            + tr(band_type, self._language)
+        )
 
     def autofill_active_row(self, values: list[str]) -> int:
         if self._table is None or self._active_target_row is None:
@@ -2820,39 +2896,195 @@ class ColumnTableWindow(QMainWindow):
         summary_df = pd.DataFrame(summary_rows)
         return detail_df, summary_df
 
-    def _on_figures_generation_clicked(self) -> None:
+    # ── Workspace conveniences ────────────────────────────────────────────────
+
+    def set_auto_figure_enabled(self, enabled: bool) -> None:
+        """Let results flow into the table and redraw the chart automatically."""
+        self._auto_figure_enabled = bool(enabled)
+        if self._auto_fill_checkbox is not None:
+            self._auto_fill_checkbox.setVisible(self._auto_figure_enabled)
+
+    def auto_fill_enabled(self) -> bool:
+        return self._auto_figure_enabled and self._auto_fill_checked
+
+    def _on_auto_fill_toggled(self, checked: bool) -> None:
+        self._auto_fill_checked = bool(checked)
+
+    def table_dimensions(self) -> tuple[int, int]:
+        return self._samples, self._replicates
+
+    def _data_rows(self) -> list[int]:
+        if self._table is None:
+            return []
+        return [
+            row
+            for row in range(self._table.rowCount())
+            if row % self._ROWS_PER_REPLICATE != 2
+        ]
+
+    def _row_is_empty(self, row: int) -> bool:
+        if self._table is None:
+            return True
+        for col in range(2, self._table.columnCount()):
+            item = self._table.item(row, col)
+            if item is not None and item.text().strip():
+                return False
+        return True
+
+    def _table_has_data(self) -> bool:
+        return any(not self._row_is_empty(row) for row in self._data_rows())
+
+    def _next_empty_data_row(self, after: int = -1) -> int | None:
+        rows = self._data_rows()
+        ordered = [r for r in rows if r > after] + [r for r in rows if r <= after]
+        for row in ordered:
+            if self._row_is_empty(row):
+                return row
+        return None
+
+    def autofill_next(self, values: list[str]) -> tuple[str, int] | None:
+        """Write one analysis run into the table and advance to the next row.
+
+        The highlighted row is used when there is one (the user clicked it,
+        or the previous run advanced to it); otherwise the first empty row.
+        Returns (row description, values written), or None when nothing fit.
+        """
+        if self._table is None or not values:
+            return None
+        if not self._table_has_data() and len(values) != self._samples:
+            # First run decides the number of groups: one column per lane.
+            self.resize_table(min(max(len(values), 1), 24), self._replicates)
+        row = self._active_target_row
+        if row is None:
+            row = self._next_empty_data_row()
+        if row is None or self._table is None:
+            return None
+        self.set_active_target_row(row)
+        description = self.active_target_description_localized()
+        written = self.autofill_active_row(values)
+        if written <= 0:
+            return None
+        next_row = self._next_empty_data_row(after=row)
+        if next_row is not None and next_row != row:
+            self.set_active_target_row(next_row)
+        else:
+            self._active_target_row = None
+            self._refresh_row_and_column_highlights()
+        self.auto_generate_figure()
+        return description, written
+
+    def resize_table(self, samples: int, replicates: int) -> None:
+        """Change the table size in place, keeping every value that still fits."""
+        samples = max(1, int(samples))
+        replicates = max(1, int(replicates))
+        if self._table is None or (samples == self._samples and replicates == self._replicates):
+            return
+        kept: dict[tuple[int, int, int], str] = {}
+        for rep_index in range(self._replicates):
+            for kind in (0, 1):
+                row = rep_index * self._ROWS_PER_REPLICATE + kind
+                for group in range(self._samples):
+                    item = self._table.item(row, 2 + group)
+                    text = item.text().strip() if item is not None else ""
+                    if text:
+                        kept[(rep_index, kind, group)] = text
+        names = list(self._group_names)
+        negative = self._negative_control_group_index
+        had_figure = self.has_generated_figure()
+        style = _clone_style_config(self._figure_style_config)
+
+        self._reset_to_column_table(samples, replicates)
+        _copy_style_config_into(self._figure_style_config, style)
+        self._figure_style_last_snapshot = _clone_style_config(self._figure_style_config)
+
+        for index, name in enumerate(names[: self._samples]):
+            self._group_names[index] = name
+        if negative is not None and negative < self._samples:
+            self._negative_control_group_index = negative
+        self._suppress_item_changed = True
+        try:
+            for (rep_index, kind, group), text in kept.items():
+                if rep_index >= self._replicates or group >= self._samples:
+                    continue
+                row = rep_index * self._ROWS_PER_REPLICATE + kind
+                item = self._table.item(row, 2 + group)
+                if item is not None:
+                    item.setText(text)
+        finally:
+            self._suppress_item_changed = False
+        self._refresh_table_language()
+        self._refresh_header_visuals()
+        self._refresh_row_and_column_highlights()
+        if had_figure or self._auto_figure_enabled:
+            self.auto_generate_figure()
+
+    def _on_size_spin_changed(self, _value: int) -> None:
+        if self._samples_spin is None or self._replicates_spin is None:
+            return
+        samples = self._samples_spin.value()
+        replicates = self._replicates_spin.value()
+        # Rebuilding destroys the spin box that is emitting; do it afterwards.
+        QTimer.singleShot(0, lambda: self.resize_table(samples, replicates))
+
+    def _on_table_item_changed(self, item: QTableWidgetItem) -> None:
+        if self._suppress_item_changed or not self._auto_figure_enabled:
+            return
+        if item.column() < 2 or item.row() % self._ROWS_PER_REPLICATE == 2:
+            return
+        self._auto_figure_timer.start()
+
+    def auto_generate_figure(self) -> bool:
+        """Redraw the chart from the table without any message boxes."""
+        if self._table is None:
+            return False
+        return bool(self._on_figures_generation_clicked(silent=True))
+
+    def _on_figures_generation_clicked(self, _checked: bool = False, *, silent: bool = False) -> bool:
+        if silent and self._negative_control_group_index is None:
+            # Until the user chooses otherwise the first group is the baseline.
+            ratios = self._collect_target_loading_ratios()
+            if not ratios or not ratios[0]:
+                return False
+            self._negative_control_group_index = 0
+            self._refresh_header_visuals()
+            self._refresh_row_and_column_highlights()
+        def _warn(title: str, message: str) -> None:
+            if not silent:
+                QMessageBox.warning(self, title, message)
+
         if self._negative_control_group_index is None:
-            QMessageBox.warning(
-                self,
+            _warn(
                 "Negative Control Required",
                 "Please click 'Select Negative Control' and choose one group header first.",
             )
-            return
+            return False
 
         ratios_by_group = self._collect_target_loading_ratios()
         if not ratios_by_group:
-            QMessageBox.warning(self, "No Data", "No valid Target/Loading values were found.")
-            return
+            _warn("No Data", "No valid Target/Loading values were found.")
+            return False
 
         control_ratios = ratios_by_group[self._negative_control_group_index]
         if not control_ratios:
-            QMessageBox.warning(
-                self,
+            _warn(
                 "Invalid Negative Control",
                 "The selected negative control group has no valid Target/Loading values.",
             )
-            return
+            return False
 
         baseline_mean = float(np.mean(control_ratios))
         if baseline_mean == 0:
-            QMessageBox.warning(
-                self,
+            _warn(
                 "Invalid Baseline",
                 "Negative control baseline mean is zero and cannot be used for normalization.",
             )
-            return
+            return False
 
-        self._populate_normalized_result_rows(baseline_mean)
+        self._suppress_item_changed = True
+        try:
+            self._populate_normalized_result_rows(baseline_mean)
+        finally:
+            self._suppress_item_changed = False
 
         normalized_by_group: list[list[float]] = []
         for group_vals in ratios_by_group:
@@ -2873,8 +3105,8 @@ class ColumnTableWindow(QMainWindow):
                 errors.append(0.0)
 
         if not any(len(vals) > 0 for vals in normalized_by_group):
-            QMessageBox.warning(self, "No Data", "No groups contain valid data for plotting.")
-            return
+            _warn("No Data", "No groups contain valid data for plotting.")
+            return False
 
         if self._figure_preview_host is not None:
             preview = self._build_figure_preview_widget(
@@ -2884,12 +3116,15 @@ class ColumnTableWindow(QMainWindow):
                 baseline_mean=baseline_mean,
             )
             self._replace_host_widget(self._figure_preview_host, preview)
+            _translate_widget_tree(preview, self._language)
             # Geometry is only reliable after the new preview has entered the
             # layout, so fit on the next event-loop turn.
             QTimer.singleShot(0, self.fit_figure_preview)
             self.tutorialEvent.emit("figure_generated")
-            return
+            return True
 
+        if silent:
+            return False
         dialog = _FiguresDialog(
             group_names=list(self._group_names),
             grouped_values=normalized_by_group,
@@ -2911,3 +3146,4 @@ class ColumnTableWindow(QMainWindow):
         dialog.raise_()
         dialog.activateWindow()
         self.tutorialEvent.emit("figure_generated")
+        return True

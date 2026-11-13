@@ -33,6 +33,8 @@ def main() -> None:
 
     log.info("Starting %s v%s", APP_NAME, VERSION)
     window = MainWindow()
+    # Remember dragged panel dividers between launches (off in tests).
+    window._persist_layout_on_close = True
     window.show()
 
     sys.exit(app.exec())

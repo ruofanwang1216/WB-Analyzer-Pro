@@ -258,14 +258,10 @@ class UploadMixin:
         if self._tutorial_controller.handle_import_request():
             return
         if self._upload_thread is not None and self._upload_thread.isRunning():
-            self._status_bar.showMessage("An upload is already in progress — please wait.")
+            self._status_bar.showMessage(
+                tr("An upload is already in progress — please wait.", self._language)
+            )
             return
-
-        converter_error: Exception | None = None
-        try:
-            self._ensure_direct_exporter()
-        except Exception as e:
-            converter_error = e
 
         doc_exts = set(self._supported_upload_exts)
         tiff_exts = set(self._direct_tiff_exts)
@@ -278,7 +274,26 @@ class UploadMixin:
         )
         if not paths:
             return
+        self._import_paths(paths)
 
+    def _import_paths(self, paths: list[str]) -> None:
+        """Import files chosen in the dialog or dropped onto the window."""
+        if self._upload_thread is not None and self._upload_thread.isRunning():
+            self._status_bar.showMessage(
+                tr("An upload is already in progress — please wait.", self._language)
+            )
+            return
+        if not paths:
+            return
+
+        converter_error: Exception | None = None
+        try:
+            self._ensure_direct_exporter()
+        except Exception as e:
+            converter_error = e
+
+        doc_exts = set(self._supported_upload_exts)
+        tiff_exts = set(self._direct_tiff_exts)
         selected_paths = [Path(p).expanduser().resolve() for p in paths]
         if selected_paths:
             self._persistence.remember_open_dir(selected_paths[0].parent)
@@ -471,6 +486,15 @@ class UploadMixin:
                 if key not in seen_display_tiffs:
                     seen_display_tiffs.add(key)
                     selected_display_tiffs.append(candidate)
+
+        if (
+            selected_display_tiffs
+            and self._home_mode_active
+            and not self._tutorial_controller.active
+        ):
+            # Importing from Home goes straight to the Quantify workspace so
+            # the lane settings and Analyze are on screen without a detour.
+            self._on_figure_generation_clicked()
 
         if selected_display_tiffs:
             existing_loaded = {

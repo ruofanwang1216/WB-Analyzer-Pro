@@ -50,8 +50,8 @@ class _ImagePanelWidget(QFrame):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setStyleSheet(f"""
             QFrame#image_panel {{
-                background-color: #EDF3F7;
-                border: 1px solid #C6D6DF;
+                background-color: #FFFFFF;
+                border: none;
                 border-radius: 8px;
             }}
             QCheckBox#panel_select_checkbox {{
@@ -71,64 +71,64 @@ class _ImagePanelWidget(QFrame):
                 background: #FFFFFF;
             }}
             QCheckBox#panel_select_checkbox::indicator:checked {{
-                border: 1px solid #7DA897;
+                border: 1px solid #1F6B4A;
                 background: {COLOR_ACCENT_LIGHT};
             }}
             QLabel#panel_filename_label {{
                 background: transparent;
-                color: #4A6070;
-                font-size: 10px;
+                color: #4A5A53;
+                font-size: 12px;
             }}
             QPushButton#panel_remove_btn {{
-                background-color: rgba(245, 248, 250, 225);
-                border: 1px solid #A7B7C1;
+                background-color: #FFFFFF;
+                border: 1px solid #C9D3CE;
                 border-radius: 7px;
                 color: #738694;
-                min-width: 16px;
-                max-width: 16px;
-                min-height: 16px;
-                max-height: 16px;
+                min-width: 22px;
+                max-width: 22px;
+                min-height: 22px;
+                max-height: 22px;
                 padding: 0px;
-                font-size: 10px;
+                font-size: 12px;
             }}
             QPushButton#panel_remove_btn:hover {{
                 color: #C0504A;
                 border-color: #B8908C;
             }}
             QPushButton#panel_transform_btn {{
-                background-color: rgba(245, 248, 250, 225);
-                border: 1px solid #9FB3BE;
+                background-color: #FFFFFF;
+                border: 1px solid #C9D3CE;
                 border-radius: 7px;
-                color: #405967;
-                min-width: 22px;
-                max-width: 22px;
-                min-height: 18px;
-                max-height: 18px;
+                color: #3B4A43;
+                min-width: 30px;
+                max-width: 30px;
+                min-height: 26px;
+                max-height: 26px;
                 padding: 0px;
-                font-size: 13px;
+                font-size: 15px;
                 font-weight: 700;
             }}
             QPushButton#panel_transform_btn:hover {{
                 background-color: {COLOR_ACCENT_LIGHT};
-                border-color: #7DA897;
+                border-color: #1F6B4A;
                 color: {COLOR_ACCENT_TEXT};
             }}
             QToolButton#panel_rotate_btn {{
-                background-color: rgba(245, 248, 250, 225);
-                border: 1px solid #9FB3BE;
+                background-color: #FFFFFF;
+                border: 1px solid #C9D3CE;
                 border-radius: 7px;
-                color: #405967;
-                min-width: 22px;
-                max-width: 22px;
-                min-height: 18px;
-                max-height: 18px;
+                color: #3B4A43;
+                min-width: 30px;
+                max-width: 30px;
+                min-height: 26px;
+                max-height: 26px;
                 padding: 0px;
-                font-size: 13px;
+                font-size: 15px;
                 font-weight: 700;
             }}
             QToolButton#panel_rotate_btn:hover {{
                 background-color: {COLOR_ACCENT_LIGHT};
-                border-color: #7DA897;
+                border-color: #1F6B4A;
                 color: {COLOR_ACCENT_TEXT};
             }}
             QToolButton#panel_rotate_btn::menu-indicator {{
@@ -136,18 +136,18 @@ class _ImagePanelWidget(QFrame):
                 width: 0px;
             }}
             QToolButton#panel_zoom_btn {{
-                background-color: rgba(245, 248, 250, 225);
-                border: 1px solid #9FB3BE;
+                background-color: #FFFFFF;
+                border: 1px solid #C9D3CE;
                 border-radius: 7px;
-                min-width: 22px;
-                max-width: 22px;
-                min-height: 18px;
-                max-height: 18px;
+                min-width: 30px;
+                max-width: 30px;
+                min-height: 26px;
+                max-height: 26px;
                 padding: 0px;
             }}
             QToolButton#panel_zoom_btn:hover {{
                 background-color: {COLOR_ACCENT_LIGHT};
-                border-color: #7DA897;
+                border-color: #1F6B4A;
             }}
             QToolButton#panel_zoom_btn:pressed {{
                 background-color: #C5E2D7;
@@ -155,12 +155,12 @@ class _ImagePanelWidget(QFrame):
         """)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(6, 6, 6, 6)
-        root.setSpacing(4)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(6)
 
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
-        top_row.setSpacing(4)
+        top_row.setSpacing(6)
         self.transform_btn = QPushButton("◐")
         self.transform_btn.setObjectName("panel_transform_btn")
         self.transform_btn.setToolTip("Image Transform: Low / High / Gamma")
@@ -196,13 +196,13 @@ class _ImagePanelWidget(QFrame):
         self.zoom_out_btn = QToolButton()
         self.zoom_out_btn.setObjectName("panel_zoom_btn")
         self.zoom_out_btn.setIcon(_zoom_icon(zoom_in=False))
-        self.zoom_out_btn.setIconSize(QSize(18, 18))
+        self.zoom_out_btn.setIconSize(QSize(20, 20))
         self.zoom_out_btn.setToolTip("Zoom out image")
         top_row.addWidget(self.zoom_out_btn)
         self.zoom_in_btn = QToolButton()
         self.zoom_in_btn.setObjectName("panel_zoom_btn")
         self.zoom_in_btn.setIcon(_zoom_icon(zoom_in=True))
-        self.zoom_in_btn.setIconSize(QSize(18, 18))
+        self.zoom_in_btn.setIconSize(QSize(20, 20))
         self.zoom_in_btn.setToolTip("Zoom in image")
         top_row.addWidget(self.zoom_in_btn)
         self.filename_label = QLabel("")
@@ -243,12 +243,12 @@ class _UploadedFileListRow(QWidget):
                 border: 1px solid #AFC1CC;
                 border-radius: 7px;
                 color: #6D7F8B;
-                min-width: 14px;
-                max-width: 14px;
-                min-height: 14px;
-                max-height: 14px;
+                min-width: 18px;
+                max-width: 18px;
+                min-height: 18px;
+                max-height: 18px;
                 padding: 0px;
-                font-size: 10px;
+                font-size: 11px;
                 font-weight: 700;
             }
             QPushButton#uploaded_file_remove_btn:hover {
@@ -257,8 +257,8 @@ class _UploadedFileListRow(QWidget):
                 color: #9D3F3F;
             }
             QLabel#uploaded_file_name_lbl {
-                color: #385161;
-                font-size: 10px;
+                color: #1C2622;
+                font-size: 13px;
                 background: transparent;
             }
         """)

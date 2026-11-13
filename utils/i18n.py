@@ -358,6 +358,11 @@ _ZH_CN = {
     "Reset. Upload files to begin.": "已重置。请上传文件开始分析。",
 }
 
+# Strings added by the 2026 interface redesign live in their own module.
+from utils.i18n_redesign import ZH_CN_REDESIGN  # noqa: E402
+
+_ZH_CN.update(ZH_CN_REDESIGN)
+
 
 def tr(text: str, language: str = LANG_EN, **values: object) -> str:
     """Translate a UI string and substitute named values when supplied."""

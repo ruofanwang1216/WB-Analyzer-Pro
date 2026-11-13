@@ -214,7 +214,7 @@ class ResultsPanel(QWidget):
                 alternate-background-color: {COLOR_ROW_ALT};
                 gridline-color: {COLOR_BORDER_LIGHT};
                 border: none;
-                font-size: 12px;
+                font-size: 13px;
                 color: {COLOR_TEXT};
             }}
             QTableWidget::item {{
@@ -223,10 +223,9 @@ class ResultsPanel(QWidget):
             }}
             QHeaderView::section {{
                 background-color: {COLOR_RESULTS_HD};
-                color: {COLOR_TEXT_HINT};
-                font-size: 10px;
-                font-weight: bold;
-                letter-spacing: 1px;
+                color: {COLOR_TEXT_MUTED};
+                font-size: 12px;
+                font-weight: 600;
                 padding: 5px 12px;
                 border: none;
                 border-bottom: 1px solid {COLOR_BORDER};
@@ -235,10 +234,10 @@ class ResultsPanel(QWidget):
             QPushButton#export_btn {{
                 background-color: {COLOR_ACCENT_LIGHT};
                 border: 1px solid {COLOR_ACCENT};
-                border-radius: 5px;
+                border-radius: 8px;
                 color: {COLOR_ACCENT_TEXT};
-                padding: 3px 10px;
-                font-size: 11px;
+                padding: 6px 12px;
+                font-size: 12px;
             }}
             QPushButton#export_btn:hover {{
                 background-color: {COLOR_ACCENT};
@@ -247,20 +246,20 @@ class ResultsPanel(QWidget):
             QPushButton#clear_btn {{
                 background-color: {COLOR_SURFACE};
                 border: 1px solid {COLOR_BORDER};
-                border-radius: 5px;
-                color: {COLOR_TEXT_MUTED};
-                padding: 3px 10px;
-                font-size: 11px;
+                border-radius: 8px;
+                color: #3B4A43;
+                padding: 6px 12px;
+                font-size: 12px;
             }}
         """)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(6, 4, 6, 4)
-        root.setSpacing(6)
+        root.setContentsMargins(12, 10, 12, 10)
+        root.setSpacing(8)
 
         bar = QHBoxLayout()
         self._title = QLabel("Results")
-        self._title.setStyleSheet(f"font-weight: bold; color: {COLOR_TEXT};")
+        self._title.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {COLOR_TEXT};")
         bar.addWidget(self._title)
         bar.addStretch()
 
@@ -309,6 +308,7 @@ class ResultsPanel(QWidget):
         self._clear_btn.setText(tr("Clear", language))
         if self._all_rows:
             self._refresh_table()
+        self._update_panel_state()
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -523,9 +523,16 @@ class ResultsPanel(QWidget):
         self._clear_btn.setEnabled(has_rows)
         self._delete_btn.setEnabled(has_rows and has_checked)
         if has_rows:
-            self._title.setText(f"Results — {total} row(s) across {self._run_counter} run(s)")
+            self._title.setText(
+                tr(
+                    "Results — {total} row(s) across {runs} run(s)",
+                    self._language,
+                    total=total,
+                    runs=self._run_counter,
+                )
+            )
         else:
-            self._title.setText("Results")
+            self._title.setText(tr("Results", self._language))
 
     def _to_dataframe(self) -> pd.DataFrame:
         return pd.DataFrame(self._all_rows, columns=_COLS)

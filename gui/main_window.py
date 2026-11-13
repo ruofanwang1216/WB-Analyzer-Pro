@@ -24,10 +24,16 @@ from PySide6.QtWidgets import (
 
 from config.settings import (
     APP_NAME,
+    COLOR_ACCENT,
+    COLOR_ACCENT_DARK,
     COLOR_ACCENT_LIGHT,
     COLOR_ACCENT_TEXT,
+    COLOR_BORDER,
+    COLOR_BORDER_LIGHT,
     COLOR_ROW_ALT,
     COLOR_SURFACE,
+    COLOR_TEXT,
+    COLOR_TEXT_HINT,
     COLOR_TEXT_MUTED,
 )
 from core.band_detector import group_auto_detected_rows
@@ -59,6 +65,7 @@ from gui.image_panel_widgets import (
 from gui.main_window_upload import UploadMixin
 from gui.main_window_image_ops import ImageOperationsMixin
 from gui.main_window_fixed_roi import FixedRoiMixin
+from gui.redesign_styles import restyle_param_panel
 
 log = get_logger(__name__)
 
@@ -241,7 +248,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         self._main_splitter: QSplitter | None = None
         self._viewer_splitters: list[QSplitter] = []
         self._files_panel_collapsed = False
-        self._files_panel_last_width = 260
+        self._files_panel_last_width = 236
         self._files_panel_min_width = 190
         self._files_panel_max_width = 460
         self._files_panel_collapsed_width = 40
@@ -253,6 +260,14 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         self._analyze_return_shortcuts: list[QShortcut] = []
         self._image_transform_dialog: ImageTransformDialog | None = None
 
+        self._persist_layout_on_close = False
+        self._layout_memory: dict[str, list[int]] = self._load_layout_memory()
+        saved_files_width = self._layout_memory.get("files_width")
+        if saved_files_width:
+            self._files_panel_last_width = max(
+                self._files_panel_min_width,
+                min(saved_files_width[0], self._files_panel_max_width),
+            )
         self._build_ui()
         self._tutorial_controller = TutorialController(self)
         self._apply_persisted_ui_preferences()
@@ -264,108 +279,76 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
     # ── UI construction ────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
-        # Toolbar (UI layout only; actions/logic stay unchanged)
+        # ── Top bar: Import · workspace tabs · tutorial · language ────────────
         tb = QToolBar("Main", self)
         tb.setMovable(False)
         tb.setFloatable(False)
         tb.setStyleSheet(f"""
             QToolBar {{
-                background-color: #ECF2F0;
+                background-color: {COLOR_SURFACE};
                 border: none;
-                spacing: 8px;
-                padding: 6px 8px;
+                border-bottom: 1px solid #D9E0DC;
+                spacing: 10px;
+                padding: 8px 12px;
             }}
             QToolButton#tb_open_btn {{
-                background-color: #DCE9E2;
-                border: 1px solid #B8CCC1;
+                background-color: {COLOR_ACCENT};
+                border: 1px solid {COLOR_ACCENT};
                 border-radius: 8px;
-                color: #2F4B3F;
-                padding: 7px 13px;
+                color: #FFFFFF;
+                padding: 8px 16px;
+                font-size: 14px;
                 font-weight: 600;
             }}
             QToolButton#tb_open_btn:hover {{
-                background-color: #D1E2D9;
+                background-color: {COLOR_ACCENT_DARK};
             }}
-            QFrame#section1_group {{
-                background-color: #D3E2DA;
-                border: 1px solid #B3C8BC;
-                border-radius: 10px;
+            QToolButton#tb_open_btn:disabled {{
+                background-color: #9DBBAD;
+                border-color: #9DBBAD;
             }}
             QFrame#section2_group {{
-                background-color: #C7D8CE;
-                border: 1px solid #AEBFB5;
+                background-color: #E9EEEB;
+                border: none;
                 border-radius: 10px;
             }}
-            QToolButton#section_btn {{
+            QPushButton#figure_generation_btn, QPushButton#wb_plot_generation_btn {{
                 background-color: transparent;
                 border: 1px solid transparent;
                 border-radius: 7px;
-                color: #314A3F;
-                padding: 5px 10px;
+                color: #3B4A43;
+                padding: 7px 16px;
+                font-size: 14px;
             }}
-            QToolButton#section_btn:hover {{
-                background-color: rgba(255, 255, 255, 0.35);
-                border-color: #AFC3B7;
+            QPushButton#figure_generation_btn:hover, QPushButton#wb_plot_generation_btn:hover {{
+                background-color: rgba(255, 255, 255, 0.6);
             }}
-            QToolButton#section_btn:disabled {{
-                color: #7F9588;
-            }}
-            QToolButton#analyze_btn {{
-                background-color: #B9D5C5;
-                border: 1px solid #90B3A0;
-                border-radius: 7px;
-                color: #274E3B;
+            QPushButton#figure_generation_btn:checked, QPushButton#wb_plot_generation_btn:checked {{
+                background-color: {COLOR_SURFACE};
+                border-color: {COLOR_BORDER};
+                color: {COLOR_ACCENT_TEXT};
                 font-weight: 600;
-                padding: 5px 12px;
-            }}
-            QToolButton#analyze_btn:hover {{
-                background-color: #A9C9B7;
-            }}
-            QToolButton#analyze_btn:disabled {{
-                background-color: #D8E4DE;
-                color: #81988D;
-                border-color: #C1D0C8;
-            }}
-            QPushButton#figure_generation_btn {{
-                background-color: #C2D3C8;
-                border: 1px solid #9EB3A8;
-                border-radius: 7px;
-                color: #2C4A3D;
-                padding: 5px 12px;
-            }}
-            QPushButton#figure_generation_btn:hover {{
-                background-color: #B4C8BB;
-            }}
-            QPushButton#wb_plot_generation_btn {{
-                background-color: #C8C2D3;
-                border: 1px solid #A89EB3;
-                border-radius: 7px;
-                color: #3A2C4A;
-                padding: 5px 12px;
-            }}
-            QPushButton#wb_plot_generation_btn:hover {{
-                background-color: #BBB4C8;
             }}
             QComboBox#language_selector {{
                 background-color: {COLOR_SURFACE};
-                border: 1px solid #B6C8D5;
+                border: 1px solid {COLOR_BORDER};
                 border-radius: 8px;
-                color: #345060;
-                padding: 5px 8px;
+                color: #3B4A43;
+                padding: 7px 10px;
                 min-width: 92px;
-                font-weight: 600;
+                font-size: 13px;
             }}
             QPushButton#tutorial_btn {{
-                background-color: #FFF7E3;
-                border: 1px solid #D7B86A;
+                background-color: {COLOR_SURFACE};
+                border: 1px solid {COLOR_BORDER};
                 border-radius: 8px;
-                color: #655020;
-                padding: 6px 11px;
-                font-weight: 600;
+                color: #3B4A43;
+                padding: 7px 14px;
+                font-size: 13px;
             }}
             QPushButton#tutorial_btn:hover {{
-                background-color: #F8EBC8;
-                border-color: #C99E39;
+                background-color: {COLOR_ACCENT_LIGHT};
+                border-color: {COLOR_ACCENT};
             }}
         """)
         self.addToolBar(tb)
@@ -390,62 +373,40 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
 
         open_btn = _make_action_button(self._act_open, "tb_open_btn")
         self._open_toolbar_btn = open_btn
-        open_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        open_btn.setIconSize(QSize(22, 22))
+        open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._open_toolbar_action = tb.addWidget(open_btn)
 
-        gap1 = QWidget()
-        gap1.setFixedWidth(8)
-        tb.addWidget(gap1)
-
-        # Analyze belongs to the densitometry workspace.  Keep its toolbar
-        # group hidden until that workspace is selected.
-        self._analyze_toolbar_group = QFrame()
-        self._analyze_toolbar_group.setObjectName("section1_group")
-        analyze_layout = QHBoxLayout(self._analyze_toolbar_group)
-        analyze_layout.setContentsMargins(8, 4, 8, 4)
-        analyze_layout.setSpacing(6)
-        self._analyze_toolbar_btn = _make_action_button(
-            self._act_analyze,
-            "analyze_btn",
-        )
-        analyze_layout.addWidget(self._analyze_toolbar_btn)
-        self._analyze_toolbar_group.setVisible(False)
-        self._analyze_toolbar_action = tb.addWidget(self._analyze_toolbar_group)
-        self._analyze_toolbar_action.setVisible(False)
-
-        gap2 = QWidget()
-        gap2.setFixedWidth(8)
-        gap2.setVisible(False)
-        self._analyze_toolbar_gap = gap2
-        self._analyze_toolbar_gap_action = tb.addWidget(gap2)
-        self._analyze_toolbar_gap_action.setVisible(False)
-
-        # Preserve the existing workspace controls.  They are hidden only on Home.
+        # The two workspaces as a segmented control.  The attribute names are
+        # kept from the earlier toolbar so the tutorial keeps finding them.
         self._workspace_toolbar_group = QFrame()
         self._workspace_toolbar_group.setObjectName("section2_group")
         workspace_layout = QHBoxLayout(self._workspace_toolbar_group)
-        workspace_layout.setContentsMargins(8, 4, 8, 4)
-        workspace_layout.setSpacing(6)
-        self._figure_generation_btn = QPushButton("Densitometry Figure Generation")
+        workspace_layout.setContentsMargins(4, 4, 4, 4)
+        workspace_layout.setSpacing(4)
+        self._figure_generation_btn = QPushButton("① Quantify & Plot")
         self._figure_generation_btn.setObjectName("figure_generation_btn")
+        self._figure_generation_btn.setCheckable(True)
+        self._figure_generation_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._figure_generation_btn.clicked.connect(self._on_figure_generation_clicked)
         workspace_layout.addWidget(self._figure_generation_btn)
-        self._wb_plot_generation_btn = QPushButton("WB Plot Figure Generation")
+        self._wb_plot_generation_btn = QPushButton("② Figure Layout")
         self._wb_plot_generation_btn.setObjectName("wb_plot_generation_btn")
+        self._wb_plot_generation_btn.setCheckable(True)
+        self._wb_plot_generation_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._wb_plot_generation_btn.clicked.connect(self._on_wb_plot_mode)
         workspace_layout.addWidget(self._wb_plot_generation_btn)
         self._workspace_toolbar_action = tb.addWidget(self._workspace_toolbar_group)
         self._workspace_toolbar_action.setVisible(True)
 
+        # Keep tutorial and language anchored at the far right.
+        stretch = QWidget()
+        stretch.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        stretch.setStyleSheet("background: transparent;")
+        tb.addWidget(stretch)
+
         self._tutorial_btn = QPushButton("New User Tutorial")
         self._tutorial_btn.setObjectName("tutorial_btn")
         self._tutorial_toolbar_action = tb.addWidget(self._tutorial_btn)
-
-        # Keep language selection anchored at the far right.
-        stretch = QWidget()
-        stretch.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        tb.addWidget(stretch)
 
         self._language_combo = QComboBox()
         self._language_combo.setObjectName("language_selector")
@@ -454,68 +415,86 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         self._language_combo.setToolTip("Language")
         self._language_toolbar_action = tb.addWidget(self._language_combo)
 
-        # Central splitter: files rail + ROI settings + image/figure workspace.
-        # The first two panels share the left-side interaction area: expanding
-        # Uploaded Files hides ROI Settings; collapsing it reveals ROI Settings.
+        # ── Left sidebar: files on top, lane settings below (both visible) ────
         self._main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self._main_splitter.setChildrenCollapsible(False)
+        self._main_splitter.setHandleWidth(7)
 
         self._files_panel = QFrame()
         self._files_panel.setObjectName("uploaded_files_panel")
         self._files_panel.setStyleSheet(f"""
             QFrame#uploaded_files_panel {{
-                background-color: {COLOR_ROW_ALT};
-                border-right: 1px solid #D4E0E8;
+                background-color: {COLOR_SURFACE};
+                border: none;
+                border-right: 1px solid #D9E0DC;
             }}
             QLabel#files_panel_title {{
-                color: #5D7180;
-                font-size: 11px;
+                background: transparent;
+                color: {COLOR_TEXT_MUTED};
+                font-size: 12px;
                 font-weight: 600;
             }}
             QPushButton#files_panel_toggle {{
-                background-color: #E2ECF3;
-                border: 1px solid #C2D1DC;
+                background-color: {COLOR_SURFACE};
+                border: 1px solid {COLOR_BORDER};
                 border-radius: 6px;
-                color: #5A7080;
-                min-width: 18px;
-                max-width: 18px;
-                min-height: 18px;
-                max-height: 18px;
+                color: #3B4A43;
+                min-width: 22px;
+                max-width: 22px;
+                min-height: 22px;
+                max-height: 22px;
                 padding: 0px;
                 font-size: 11px;
                 font-weight: 700;
             }}
             QPushButton#files_panel_toggle:hover {{
-                background-color: #D6E3ED;
+                background-color: {COLOR_ACCENT_LIGHT};
+                border-color: {COLOR_ACCENT};
             }}
             QListWidget#uploaded_files_list {{
-                background-color: #F7FAFC;
-                border: 1px solid #D0DEE7;
-                border-radius: 6px;
-                color: #385161;
-                padding: 2px;
+                background-color: {COLOR_SURFACE};
+                border: none;
+                color: {COLOR_TEXT};
+                font-size: 13px;
+                padding: 0px;
+                outline: none;
             }}
             QListWidget#uploaded_files_list::item {{
-                padding: 4px 6px;
+                padding: 6px 6px;
+                border-radius: 6px;
             }}
             QListWidget#uploaded_files_list::item:selected {{
                 background-color: {COLOR_ACCENT_LIGHT};
                 color: {COLOR_ACCENT_TEXT};
             }}
-            QPushButton#export_all_tiffs_btn {{
-                background-color: #E6EEF3;
-                border: 1px solid #BACAD5;
+            QLabel#files_drop_hint {{
+                background: transparent;
+                border: 1px dashed #B5C2BC;
                 border-radius: 6px;
-                color: #4B6473;
-                padding: 5px 8px;
+                color: {COLOR_TEXT_HINT};
+                font-size: 12px;
+                padding: 8px;
+            }}
+            QPushButton#export_all_tiffs_btn {{
+                background-color: {COLOR_SURFACE};
+                border: 1px solid {COLOR_BORDER};
+                border-radius: 8px;
+                color: #3B4A43;
+                padding: 7px 10px;
+                font-size: 12px;
             }}
             QPushButton#export_all_tiffs_btn:hover {{
-                background-color: #DCE7EE;
+                background-color: {COLOR_ACCENT_LIGHT};
+                border-color: {COLOR_ACCENT};
+            }}
+            QPushButton#export_all_tiffs_btn:disabled {{
+                color: #9AA8A1;
+                border-color: {COLOR_BORDER_LIGHT};
             }}
         """)
         files_layout = QVBoxLayout(self._files_panel)
-        files_layout.setContentsMargins(8, 8, 8, 8)
-        files_layout.setSpacing(6)
+        files_layout.setContentsMargins(10, 10, 10, 10)
+        files_layout.setSpacing(8)
         files_header = QHBoxLayout()
         files_header.setContentsMargins(0, 0, 0, 0)
         files_header.setSpacing(6)
@@ -530,17 +509,95 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         files_layout.addLayout(files_header)
         self._files_list = QListWidget()
         self._files_list.setObjectName("uploaded_files_list")
+        self._files_list.setMinimumHeight(72)
         files_layout.addWidget(self._files_list, 1)
+        self._files_drop_hint = QLabel("Drop .scn / .tif files here")
+        self._files_drop_hint.setObjectName("files_drop_hint")
+        self._files_drop_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._files_drop_hint.setWordWrap(True)
+        files_layout.addWidget(self._files_drop_hint)
         self._export_all_tiffs_btn = QPushButton("Export All TIFFs")
         self._export_all_tiffs_btn.setObjectName("export_all_tiffs_btn")
         self._export_all_tiffs_btn.setEnabled(False)
         files_layout.addWidget(self._export_all_tiffs_btn)
+
+        # Lane settings live under the file list so both stay on screen.
+        self.param_panel = ParamPanel()
+        restyle_param_panel(self.param_panel)
+        self._param_panel_host = QWidget()
+        self._param_panel_host.setObjectName("param_panel_host")
+        self._param_panel_host.setStyleSheet(
+            "QWidget#param_panel_host { background: transparent; "
+            "border-top: 1px solid #E4E9E6; }"
+        )
+        self._param_panel_layout = QVBoxLayout(self._param_panel_host)
+        self._param_panel_layout.setContentsMargins(0, 6, 0, 0)
+        self._param_panel_layout.setSpacing(0)
+        self._param_panel_layout.addWidget(self.param_panel)
+        files_layout.addWidget(self._param_panel_host)
         self._main_splitter.addWidget(self._files_panel)
 
+        # ── Workspace: [image over results] | [data table over bar chart] ─────
         self._workspace_splitter = QSplitter(Qt.Orientation.Horizontal)
         self._workspace_splitter.setChildrenCollapsible(False)
         self._workspace_splitter.setHandleWidth(7)
         self._workspace_splitter.setOpaqueResize(True)
+
+        self._center_splitter = QSplitter(Qt.Orientation.Vertical)
+        self._center_splitter.setChildrenCollapsible(False)
+        self._center_splitter.setHandleWidth(7)
+        self._center_splitter.setOpaqueResize(True)
+
+        self._viewer_column = QWidget()
+        self._viewer_column.setObjectName("viewer_column")
+        viewer_column_layout = QVBoxLayout(self._viewer_column)
+        viewer_column_layout.setContentsMargins(8, 8, 4, 4)
+        viewer_column_layout.setSpacing(6)
+
+        # Analyze sits right above the image it measures.
+        self._analyze_toolbar_group = QFrame()
+        self._analyze_toolbar_group.setObjectName("analyze_bar")
+        self._analyze_toolbar_group.setStyleSheet(f"""
+            QFrame#analyze_bar {{ background: transparent; border: none; }}
+            QLabel#analyze_hint {{
+                background: transparent;
+                color: {COLOR_TEXT_MUTED};
+                font-size: 12px;
+            }}
+            QToolButton#analyze_btn {{
+                background-color: {COLOR_ACCENT};
+                border: 1px solid {COLOR_ACCENT};
+                border-radius: 8px;
+                color: #FFFFFF;
+                font-size: 14px;
+                font-weight: 600;
+                padding: 7px 20px;
+            }}
+            QToolButton#analyze_btn:hover {{
+                background-color: {COLOR_ACCENT_DARK};
+            }}
+            QToolButton#analyze_btn:disabled {{
+                background-color: #E9EEEB;
+                color: #8A9891;
+                border-color: #D9E0DC;
+            }}
+        """)
+        analyze_layout = QHBoxLayout(self._analyze_toolbar_group)
+        analyze_layout.setContentsMargins(0, 0, 0, 0)
+        analyze_layout.setSpacing(8)
+        self._analyze_hint = QLabel(
+            "Draw the lane ROI, then the band ROI, then press Enter."
+        )
+        self._analyze_hint.setObjectName("analyze_hint")
+        analyze_layout.addWidget(self._analyze_hint, 1)
+        self._analyze_toolbar_btn = _make_action_button(
+            self._act_analyze,
+            "analyze_btn",
+        )
+        self._analyze_toolbar_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        analyze_layout.addWidget(self._analyze_toolbar_btn)
+        self._analyze_toolbar_group.setVisible(False)
+        viewer_column_layout.addWidget(self._analyze_toolbar_group)
 
         self._viewer_container = QWidget()
         self._viewer_container.setObjectName("workspace_viewer_panel")
@@ -550,21 +607,59 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         self._image_panels = [_ImagePanelWidget() for _ in range(_MAX_IMAGE_PANELS)]
         for panel in self._image_panels:
             panel.setVisible(False)
-        self._workspace_splitter.addWidget(self._viewer_container)
+        viewer_column_layout.addWidget(self._viewer_container, 1)
         # Keep `self.canvas` alias for backward compatibility with existing methods.
         self.canvas = self._image_panels[0].canvas
+
+        # Empty state shown until the first image is loaded.
+        self._empty_state = QLabel()
+        self._empty_state.setObjectName("viewer_empty_state")
+        self._empty_state.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_state.setWordWrap(True)
+        self._empty_state.setTextFormat(Qt.TextFormat.RichText)
+        self._empty_state.setStyleSheet(
+            "QLabel#viewer_empty_state {"
+            f"background-color: {COLOR_SURFACE};"
+            "border: 1px dashed #B5C2BC;"
+            "border-radius: 10px;"
+            f"color: {COLOR_TEXT_MUTED};"
+            "font-size: 14px;"
+            "padding: 32px;"
+            "}"
+        )
+        viewer_column_layout.addWidget(self._empty_state, 1)
+        self._center_splitter.addWidget(self._viewer_column)
+
+        # Results sit under the image.  The attribute keeps its old name.
+        self.results_panel = ResultsPanel(
+            default_export_dir_provider=self._persistence.default_results_export_dir,
+            export_dir_changed=self._persistence.remember_results_export_dir,
+        )
+        self._results_dock = QFrame()
+        self._results_dock.setObjectName("results_host")
+        self._results_dock.setStyleSheet(
+            "QFrame#results_host { background: transparent; border: none; }"
+        )
+        results_host_layout = QVBoxLayout(self._results_dock)
+        results_host_layout.setContentsMargins(8, 4, 4, 8)
+        results_host_layout.setSpacing(0)
+        results_host_layout.addWidget(self.results_panel)
+        self._results_dock.setMinimumHeight(120)
+        self._results_dock.setVisible(False)
+        self._center_splitter.addWidget(self._results_dock)
+        self._center_splitter.setStretchFactor(0, 4)
+        self._center_splitter.setStretchFactor(1, 1)
+        self._center_splitter.setSizes([560, 190])
+        self._workspace_splitter.addWidget(self._center_splitter)
 
         self._figure_workspace = QWidget()
         self._figure_workspace.setMinimumWidth(360)
         self._figure_workspace.setStyleSheet(
-            "QWidget#figure_workspace {"
-            "background-color: #F3F7FA;"
-            "border-left: 1px solid #D0DEE7;"
-            "}"
+            "QWidget#figure_workspace { background-color: transparent; border: none; }"
         )
         self._figure_workspace.setObjectName("figure_workspace")
         figure_workspace_layout = QVBoxLayout(self._figure_workspace)
-        figure_workspace_layout.setContentsMargins(6, 6, 6, 6)
+        figure_workspace_layout.setContentsMargins(4, 8, 8, 8)
         figure_workspace_layout.setSpacing(6)
 
         self._figure_right_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -578,7 +673,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         self._figure_table_host_layout.setContentsMargins(0, 0, 0, 0)
         self._figure_table_host_layout.setSpacing(0)
         self._figure_table_placeholder = QLabel("Figure Generation table will appear here.")
-        self._figure_table_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding: 10px;")
+        self._figure_table_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px; padding: 10px;")
         self._figure_table_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._figure_table_host_layout.addWidget(self._figure_table_placeholder)
 
@@ -588,7 +683,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         self._figure_preview_host_layout.setContentsMargins(0, 0, 0, 0)
         self._figure_preview_host_layout.setSpacing(0)
         self._figure_preview_placeholder = QLabel("Generated figure preview will appear here.")
-        self._figure_preview_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding: 10px;")
+        self._figure_preview_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px; padding: 10px;")
         self._figure_preview_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._figure_preview_host_layout.addWidget(self._figure_preview_placeholder)
 
@@ -610,7 +705,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         self._wb_plot_workspace_layout.setContentsMargins(0, 0, 0, 0)
         self._wb_plot_workspace_layout.setSpacing(0)
         self._wb_plot_placeholder = QLabel("WB Plot Figure Generation will appear here.")
-        self._wb_plot_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding: 10px;")
+        self._wb_plot_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px; padding: 10px;")
         self._wb_plot_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._wb_plot_workspace_layout.addWidget(self._wb_plot_placeholder)
 
@@ -629,50 +724,28 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         self._apply_workspace_focus_styles()
         self._main_splitter.addWidget(self._workspace_splitter)
 
-        self.param_panel = ParamPanel()
-        self._param_panel_host = QWidget()
-        self._param_panel_layout = QVBoxLayout(self._param_panel_host)
-        self._param_panel_layout.setContentsMargins(0, 0, 0, 0)
-        self._param_panel_layout.setSpacing(0)
-        self._param_panel_layout.addWidget(self.param_panel)
-        self._main_splitter.insertWidget(1, self._param_panel_host)
         self._main_splitter.setStretchFactor(0, 0)
-        self._main_splitter.setStretchFactor(1, 0)
-        self._main_splitter.setStretchFactor(2, 1)
+        self._main_splitter.setStretchFactor(1, 1)
         self._files_panel.setMinimumWidth(self._files_panel_min_width)
         self._files_panel.setMaximumWidth(self._files_panel_max_width)
-        self._main_splitter.setSizes([self._files_panel_last_width, 150, 990])
+        self._main_splitter.setSizes([self._files_panel_last_width, 1140])
 
-        # ── App shell: Home is the existing blank interactive image canvas.
+        # ── App shell ─────────────────────────────────────────────────────────
         self._mode_container = QStackedWidget()
         self._mode_container.addWidget(self._main_splitter)
         self._mode_container.setCurrentWidget(self._main_splitter)
         self.setCentralWidget(self._mode_container)
+        self.setAcceptDrops(True)
 
-        # Match the Home reference: collapsed file rail, full blank canvas, and
-        # no analysis/figure side panels until a tool is chosen.
-        self._set_files_panel_collapsed(True, persist=False)
+        # Home: sidebar with the file list, empty-state canvas, no analysis
+        # or figure panels until images are imported or a workspace is chosen.
         self._param_panel_host.setVisible(False)
-
-        # Results dock (bottom)
-        self.results_panel = ResultsPanel(
-            default_export_dir_provider=self._persistence.default_results_export_dir,
-            export_dir_changed=self._persistence.remember_results_export_dir,
-        )
-        dock = QDockWidget("Results", self)
-        self._results_dock = dock
-        dock.setWidget(self.results_panel)
-        dock.setAllowedAreas(
-            Qt.DockWidgetArea.BottomDockWidgetArea | Qt.DockWidgetArea.TopDockWidgetArea
-        )
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
-        dock.setMinimumHeight(180)
-        dock.setVisible(False)
 
         # Status bar
         self._status_bar = QStatusBar()
         self.setStatusBar(self._status_bar)
         self._refresh_image_panel_layout()
+        self._sync_workspace_tabs()
         self._status_bar.showMessage("Choose a tool or import images.")
 
     def _set_files_panel_collapsed(
@@ -700,6 +773,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
                 )
             self._files_title.setVisible(False)
             self._files_list.setVisible(False)
+            self._files_drop_hint.setVisible(False)
             self._export_all_tiffs_btn.setVisible(False)
             self._files_panel.setMinimumWidth(self._files_panel_collapsed_width)
             self._files_panel.setMaximumWidth(self._files_panel_collapsed_width)
@@ -710,6 +784,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
             self._files_panel.setMaximumWidth(self._files_panel_max_width)
             self._files_title.setVisible(True)
             self._files_list.setVisible(True)
+            self._files_drop_hint.setVisible(True)
             self._export_all_tiffs_btn.setVisible(True)
             restored_width = max(
                 self._files_panel_min_width,
@@ -723,20 +798,31 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         files_width = (
             self._files_panel_collapsed_width if collapsed else restored_width
         )
-        roi_width = self.param_panel.width() if self._param_panel_host.isVisible() else 0
-        workspace_width = max(200, total - files_width - roi_width)
-        self._main_splitter.setSizes([files_width, roi_width, workspace_width])
+        workspace_width = max(200, total - files_width)
+        self._main_splitter.setSizes([files_width, workspace_width])
         if persist:
             self._persistence.remember_ui_state(files_panel_collapsed=collapsed)
 
     def _sync_param_panel_visibility(self) -> None:
-        """Show ROI Settings only in the collapsed-files densitometry layout."""
+        """Show lane settings under the file list in the Quantify workspace."""
         show_roi = (
-            self._files_panel_collapsed
+            not self._files_panel_collapsed
             and not self._home_mode_active
             and not self._is_wb_plot_workspace_active()
         )
         self._param_panel_host.setVisible(show_roi)
+
+    def _sync_workspace_tabs(self) -> None:
+        """Highlight the top tab of the workspace that is on screen."""
+        quant = not self._home_mode_active and not self._is_wb_plot_workspace_active()
+        layout = not self._home_mode_active and self._is_wb_plot_workspace_active()
+        self._figure_generation_btn.setChecked(quant)
+        self._wb_plot_generation_btn.setChecked(layout)
+
+    def _sync_empty_state(self, has_images: bool) -> None:
+        """Swap the image grid for the import hint while nothing is loaded."""
+        self._empty_state.setVisible(not has_images)
+        self._viewer_container.setVisible(has_images)
 
     def _apply_persisted_ui_preferences(self) -> None:
         config = self._persistence.read_config()
@@ -745,7 +831,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         if isinstance(saved_mode, str):
             self.param_panel.set_mode(saved_mode)
             self._current_mode = self.param_panel.get_mode()
-        collapsed = ui.get("files_panel_collapsed")
+        collapsed = ui.get("sidebar_collapsed")
         if isinstance(collapsed, bool):
             self._set_files_panel_collapsed(collapsed, persist=False)
 
@@ -764,11 +850,19 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         self._act_open.setText(tr("Import Images", language))
         self._act_image_transform.setText(tr("Image Transform", language))
         self._act_analyze.setText(tr("Analyze", language))
-        self._figure_generation_btn.setText(
-            tr("Densitometry Figure Generation", language)
+        self._figure_generation_btn.setText(tr("① Quantify & Plot", language))
+        self._wb_plot_generation_btn.setText(tr("② Figure Layout", language))
+        self._files_drop_hint.setText(tr("Drop .scn / .tif files here", language))
+        self._analyze_hint.setText(
+            tr("Draw the lane ROI, then the band ROI, then press Enter.", language)
         )
-        self._wb_plot_generation_btn.setText(
-            tr("WB Plot Figure Generation", language)
+        self._empty_state.setText(
+            "<div style='font-size:16px; font-weight:600; color:#1C2622;'>"
+            + tr("Drop .scn or .tif files here, or click Import Images", language)
+            + "</div><br>"
+            + tr("1. Import images", language) + "<br>"
+            + tr("2. Draw the lanes and the band", language) + "<br>"
+            + tr("3. Analyze — the table and bar chart fill in automatically", language)
         )
         self._tutorial_btn.setText(tr("New User Tutorial", language))
         self._files_title.setText(tr("Uploaded Files", language))
@@ -1015,10 +1109,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
 
     def _set_analyze_toolbar_visible(self, visible: bool) -> None:
         """Show Analyze only while the densitometry workspace is selected."""
-        self._analyze_toolbar_action.setVisible(visible)
-        self._analyze_toolbar_gap_action.setVisible(visible)
         self._analyze_toolbar_group.setVisible(visible)
-        self._analyze_toolbar_gap.setVisible(visible)
 
     def _set_import_toolbar_visible(self, visible: bool) -> None:
         """Expose image import only inside a selected workspace."""
@@ -1038,6 +1129,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         self._set_analyze_toolbar_visible(False)
         self._workspace_toolbar_action.setVisible(True)
         self._set_workspace_focus_target("image")
+        self._sync_workspace_tabs()
         self._status_bar.showMessage(
             tr("Choose a tool or import images.", self._language)
         )
@@ -1077,7 +1169,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
             tr("Figure Generation table will appear here.", self._language)
         )
         self._figure_table_placeholder.setStyleSheet(
-            f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding: 10px;"
+            f"color: {COLOR_TEXT_MUTED}; font-size: 12px; padding: 10px;"
         )
         self._figure_table_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._figure_table_host_layout.addWidget(self._figure_table_placeholder)
@@ -1085,7 +1177,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
             tr("Generated figure preview will appear here.", self._language)
         )
         self._figure_preview_placeholder.setStyleSheet(
-            f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding: 10px;"
+            f"color: {COLOR_TEXT_MUTED}; font-size: 12px; padding: 10px;"
         )
         self._figure_preview_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._figure_preview_host_layout.addWidget(self._figure_preview_placeholder)
@@ -1100,13 +1192,12 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
             tr("WB Plot Figure Generation will appear here.", self._language)
         )
         self._wb_plot_placeholder.setStyleSheet(
-            f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding: 10px;"
+            f"color: {COLOR_TEXT_MUTED}; font-size: 12px; padding: 10px;"
         )
         self._wb_plot_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._wb_plot_workspace_layout.addWidget(self._wb_plot_placeholder)
 
         self._show_home_page()
-        self._set_files_panel_collapsed(True, persist=False)
         self._status_bar.showMessage(
             tr("Choose a tool or import images.", self._language)
         )
@@ -1125,6 +1216,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         self._act_analyze.setEnabled(self._band_roi is not None)
         self._workspace_toolbar_action.setVisible(True)
         self._set_workspace_focus_target("image")
+        self._sync_workspace_tabs()
         self._status_bar.showMessage(
             tr("Opened Densitometry workspace.", self._language),
             3000,
@@ -1161,15 +1253,22 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         self._apply_workspace_focus_styles()
 
     def _apply_workspace_focus_styles(self) -> None:
-        def _style(active: bool, bg: str) -> str:
-            border = "#8CB4A2" if active else "#D0DEE7"
+        def _style(name: str, active: bool) -> str:
+            border = COLOR_ACCENT if active else "#D9E0DC"
             return (
-                f"QWidget {{ background-color: {bg}; border: 2px solid {border}; border-radius: 6px; }}"
+                f"QWidget#{name} {{ background-color: {COLOR_SURFACE}; "
+                f"border: 1px solid {border}; border-radius: 10px; }}"
             )
 
-        self._viewer_container.setStyleSheet(_style(self._workspace_focus_target == "image", "#FFFFFF"))
-        self._figure_table_host.setStyleSheet(_style(self._workspace_focus_target == "table", "#F7FAFC"))
-        self._figure_preview_host.setStyleSheet(_style(self._workspace_focus_target == "figure", "#FFFFFF"))
+        self._viewer_container.setStyleSheet(
+            _style("workspace_viewer_panel", self._workspace_focus_target == "image")
+        )
+        self._figure_table_host.setStyleSheet(
+            _style("workspace_table_panel", self._workspace_focus_target == "table")
+        )
+        self._figure_preview_host.setStyleSheet(
+            _style("workspace_figure_panel", self._workspace_focus_target == "figure")
+        )
 
     def eventFilter(self, watched: QObject, event) -> bool:
         if event.type() == QEvent.Type.MouseButtonPress:
@@ -1197,7 +1296,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         self._embedded_preview_placeholder = QLabel(
             tr("Generated figure preview will appear here.", self._language)
         )
-        self._embedded_preview_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding: 10px;")
+        self._embedded_preview_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px; padding: 10px;")
         self._embedded_preview_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._figure_preview_host_layout.addWidget(self._embedded_preview_placeholder)
 
@@ -1211,84 +1310,83 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
             self._tutorial_controller.notify_column_table_event
         )
         self._embedded_column_table = table_window
+        # Results flow straight into the table and chart, except during the
+        # tutorial, which teaches the manual transfer step by step.
+        table_window.set_auto_figure_enabled(not self._tutorial_controller.active)
         table_window.set_language(self._language)
         self._figure_windows = [table_window]
+        self._remember_layout_sizes()
         self._show_figure_workspace("densitometry")
+        self._apply_layout_sizes()
         self._set_workspace_focus_target("table")
 
     def _on_figure_generation_clicked(self) -> None:
+        """Open the Quantify & Plot workspace: image, results, table, chart."""
         self._home_mode_active = False
         self._set_import_toolbar_visible(True)
         self._set_analyze_toolbar_visible(True)
         self._workspace_toolbar_action.setVisible(True)
         self._mode_container.setCurrentWidget(self._main_splitter)
+        self._remember_layout_sizes()
         self._show_figure_workspace("densitometry")
-        if self._embedded_column_table is not None:
-            self._set_workspace_focus_target("table")
-            self._status_bar.showMessage(
-                tr("Returned to Data Graphs workspace.", self._language),
-                3000,
-            )
-            return
+        self._apply_layout_sizes()
+        self._sync_workspace_tabs()
 
         tutorial_direct_column = (
             self._tutorial_controller.active
             and self._tutorial_controller.mode == "densitometry"
             and self._tutorial_controller.current_step_key == "create_column_table"
         )
-        if tutorial_direct_column:
-            selection = "column"
-        else:
-            chooser = FigureTypeDialog(self)
-            chooser.set_language(self._language)
-            if chooser.exec() != QDialog.DialogCode.Accepted:
-                return
-            selection = chooser.selection
-        if selection == "grouped":
-            QMessageBox.information(
-                self,
-                "Figure Generation",
-                "Grouped workflow is not implemented yet.",
+        if tutorial_direct_column and self._embedded_column_table is not None:
+            # The lesson starts from its own 3 × 2 table, not the user's.
+            self._embedded_column_table.set_figure_preview_host(None)
+            self._embedded_column_table.deleteLater()
+            self._embedded_column_table = None
+            self._figure_windows.clear()
+
+        if self._embedded_column_table is not None:
+            self._set_workspace_focus_target("image")
+            self._status_bar.showMessage(
+                tr("Returned to Data Graphs workspace.", self._language),
+                3000,
             )
             return
-        if selection != "column":
-            return
 
-        tutorial_column_defaults = (
-            self._tutorial_controller.active
-            and self._tutorial_controller.mode == "densitometry"
-        )
-        setup = ColumnSetupDialog(
-            self,
-            default_samples=3,
-            default_replicates=2 if tutorial_column_defaults else 3,
-        )
-        setup.set_language(self._language)
+        samples, replicates = 3, 3
         if tutorial_direct_column:
+            # The tutorial still walks through the setup dialog step by step.
+            setup = ColumnSetupDialog(self, default_samples=3, default_replicates=2)
+            setup.set_language(self._language)
             self._tutorial_controller.notify_column_setup_opened()
-        if setup.exec() != QDialog.DialogCode.Accepted:
-            if tutorial_direct_column:
+            if setup.exec() != QDialog.DialogCode.Accepted:
                 self._tutorial_controller.notify_column_setup_cancelled()
-            return
+                return
+            setup_values = setup.get_input()
+            if setup_values.samples <= 0 or setup_values.replicates <= 0:
+                QMessageBox.warning(
+                    self,
+                    tr("Invalid Input", self._language),
+                    tr(
+                        "Number of samples and replicates must be positive integers.",
+                        self._language,
+                    ),
+                )
+                return
+            samples, replicates = setup_values.samples, setup_values.replicates
 
-        setup_values = setup.get_input()
-        if setup_values.samples <= 0 or setup_values.replicates <= 0:
-            QMessageBox.warning(
-                self,
-                "Invalid Input",
-                "Number of samples and replicates must be positive integers.",
-            )
-            return
-
+        # Outside the tutorial the table simply appears with a sensible
+        # default; its size is edited in place above the table.
         table_window = ColumnTableWindow(
-            samples=setup_values.samples,
-            replicates=setup_values.replicates,
+            samples=samples,
+            replicates=replicates,
             parent=self,
         )
         table_window.set_language(self._language)
         self._mount_column_table_in_workspace(table_window)
+        self._set_workspace_focus_target("image")
+        self._sync_workspace_tabs()
         self._status_bar.showMessage(
-            f"Opened integrated Column table workspace: {setup_values.samples} sample(s) × {setup_values.replicates} replicate(s).",
+            tr("Opened Densitometry workspace.", self._language),
             4000,
         )
         self._tutorial_controller.notify_column_table_ready()
@@ -1448,6 +1546,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
 
     def _refresh_image_panel_layout(self) -> None:
         loaded = self._loaded_slot_indices()
+        self._sync_empty_state(bool(loaded))
         self._relayout_image_panels(loaded)
 
         if len(loaded) == 1:
@@ -1838,8 +1937,11 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         # Always resynchronise on entry. This covers both a workspace created
         # after the language changed and an existing workspace shown again.
         self._figure_mode_window.set_language(self._language)
+        self._remember_layout_sizes()
         self._show_figure_workspace("wb_plot")
+        self._apply_layout_sizes()
         self._set_workspace_focus_target("figure")
+        self._sync_workspace_tabs()
         self._status_bar.showMessage(
             tr("Opened WB Figure Layout workspace.", self._language),
             3000,
@@ -2415,8 +2517,13 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
 
             self.results_panel.show_results(df)
             self._status_bar.showMessage(
-                f"Done — {len(df)} band ROI(s) measured. Results are in memory; use Export Results to save."
+                tr(
+                    "Done — {count} band ROI(s) measured. Results are in memory; use Export Results to save.",
+                    self._language,
+                    count=len(df),
+                )
             )
+            self._auto_fill_table_from_results(df)
             log.info("Analysis complete: %s rows measured in-memory", len(df))
             self._tutorial_controller.notify_analysis_started()
 
@@ -2436,6 +2543,155 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
             "(TIFF, PNG, JPG — 8-bit or 16-bit grayscale, RGB)."
         )
 
+    # ── Results → data table → chart ───────────────────────────────────────────
+
+    def _auto_fill_table_from_results(self, df: pd.DataFrame) -> None:
+        """Send one finished analysis run into the data table and chart."""
+        table = self._embedded_column_table
+        if (
+            table is None
+            or self._tutorial_controller.active
+            or not table.auto_fill_enabled()
+            or "Mean" not in df.columns
+        ):
+            return
+        values = [
+            self.results_panel._format_cell(value)
+            for value in df["Mean"].tolist()
+        ]
+        values = [value for value in values if value]
+        if not values:
+            return
+        filled = table.autofill_next(values)
+        if filled is None:
+            self._status_bar.showMessage(
+                tr(
+                    "Analysis done. The data table is full — click a row to overwrite it, or add replicates.",
+                    self._language,
+                ),
+                6000,
+            )
+            return
+        description, written = filled
+        groups, _replicates = table.table_dimensions()
+        message = tr(
+            "Analysis done — {count} value(s) filled into {row}.",
+            self._language,
+            count=written,
+            row=description,
+        )
+        if len(values) > groups:
+            message += " " + tr(
+                "{extra} extra lane(s) did not fit; raise Groups to include them.",
+                self._language,
+                extra=len(values) - groups,
+            )
+        self._status_bar.showMessage(message, 6000)
+
+    # ── Drag & drop import ─────────────────────────────────────────────────────
+
+    def _droppable_paths(self, event) -> list[str]:
+        mime = event.mimeData()
+        if mime is None or not mime.hasUrls():
+            return []
+        allowed = set(self._supported_upload_exts) | set(self._direct_tiff_exts)
+        return [
+            url.toLocalFile()
+            for url in mime.urls()
+            if url.isLocalFile() and Path(url.toLocalFile()).suffix.lower() in allowed
+        ]
+
+    def dragEnterEvent(self, event) -> None:  # type: ignore[override]
+        if self._droppable_paths(event) and not self._tutorial_controller.active:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:  # type: ignore[override]
+        if self._droppable_paths(event) and not self._tutorial_controller.active:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event) -> None:  # type: ignore[override]
+        paths = self._droppable_paths(event)
+        if not paths or self._tutorial_controller.active:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        self._import_paths(paths)
+
+    # ── Remembered layout ──────────────────────────────────────────────────────
+
+    def _current_workspace_key(self) -> str | None:
+        if self._home_mode_active or self._figure_workspace.isHidden():
+            return None
+        return "workspace_layout" if self._is_wb_plot_workspace_active() else "workspace_quant"
+
+    def _remember_layout_sizes(self) -> None:
+        """Note where the dividers are before the workspace changes."""
+        memory = self._layout_memory
+        key = self._current_workspace_key()
+        if key is not None:
+            sizes = [int(v) for v in self._workspace_splitter.sizes()]
+            if len(sizes) == 2 and all(v > 0 for v in sizes):
+                memory[key] = sizes
+        if key == "workspace_quant":
+            for name, splitter in (
+                ("center", self._center_splitter),
+                ("figure", self._figure_right_splitter),
+            ):
+                sizes = [int(v) for v in splitter.sizes()]
+                if len(sizes) == 2 and all(v > 0 for v in sizes):
+                    memory[name] = sizes
+        if not self._files_panel_collapsed:
+            memory["files_width"] = [int(self._files_panel_last_width)]
+
+    def _apply_layout_sizes(self) -> None:
+        """Put the dividers back where the user last left them."""
+        memory = self._layout_memory
+        key = self._current_workspace_key()
+        if key is None:
+            return
+        sizes = memory.get(key)
+        if sizes and len(sizes) == 2:
+            total = max(sum(self._workspace_splitter.sizes()), 1)
+            scale = total / max(sum(sizes), 1)
+            self._workspace_splitter.setSizes([max(1, int(v * scale)) for v in sizes])
+        if key == "workspace_quant":
+            for name, splitter in (
+                ("center", self._center_splitter),
+                ("figure", self._figure_right_splitter),
+            ):
+                sizes = memory.get(name)
+                if sizes and len(sizes) == 2:
+                    splitter.setSizes(sizes)
+
+    def _load_layout_memory(self) -> dict[str, list[int]]:
+        try:
+            saved = self._persistence.read_config().get("ui", {}).get("splitters", {})
+        except Exception:
+            return {}
+        if not isinstance(saved, dict):
+            return {}
+        return {
+            str(name): [int(v) for v in sizes]
+            for name, sizes in saved.items()
+            if isinstance(sizes, list)
+            and sizes
+            and all(isinstance(v, int) and v > 0 for v in sizes)
+        }
+
+    def _save_layout_state(self) -> None:
+        """Persist the divider positions for the next launch."""
+        self._remember_layout_sizes()
+        if not self._persist_layout_on_close or not self._layout_memory:
+            return
+        try:
+            self._persistence.update_config(ui={"splitters": dict(self._layout_memory)})
+        except Exception:
+            log.exception("Could not save the panel layout")
+
     def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
         if self._upload_thread is not None and self._upload_thread.isRunning():
             self._status_bar.showMessage("Upload is still finishing — close the app after it completes.")
@@ -2454,4 +2710,5 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         for panel in self._image_panels:
             panel.canvas.cancel_image_load(wait=True)
         shutil.rmtree(self._conversion_cache_dir, ignore_errors=True)
+        self._save_layout_state()
         super().closeEvent(event)

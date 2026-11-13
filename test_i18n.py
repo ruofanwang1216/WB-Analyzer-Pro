@@ -114,7 +114,7 @@ class ChineseLocalizationTests(unittest.TestCase):
 
         self.assertEqual(chooser.windowTitle(), "灰度定量图生成")
         self.assertEqual(setup.windowTitle(), "列式表设置")
-        self.assertEqual(table.windowTitle(), "列式数据表")
+        self.assertEqual(table.windowTitle(), "数据表")
         self.assertEqual(table._table.horizontalHeaderItem(0).text(), "重复")
         self.assertEqual(table._table.item(0, 1).text(), "目的蛋白条带")
 
