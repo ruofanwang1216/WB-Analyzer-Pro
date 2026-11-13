@@ -95,4 +95,8 @@ ZH_CN_REDESIGN: dict[str, str] = {
     "Click Add Conditions. Tutorial defaults are one condition row and one evenly divided Group Level 1.": "点击“添加条件”。教程默认设置为 1 个条件行，并创建 1 个采用均分方式的 Group Level 1。",
     "Fit": "适应",
     "Fit the whole image to this panel": "让整张图像刚好铺满这个窗口",
+    "Rows": "条件行数",
+    "Level {number}": "层级 {number}",
+    "Number of condition rows above the lanes": "泳道上方条件标注的行数",
+    "Number of lane groups": "把泳道分成几组",
 }
