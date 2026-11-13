@@ -110,3 +110,16 @@ _PANEL_TOOL_BTN_STYLE = (
 _PANEL_HEADING_STYLE = (
     "font-size:12px; font-weight:600; color:#4A5A53; background:transparent;"
 )
+
+_SMALL_ACCENT_BTN_STYLE = (
+    "QPushButton {"
+    "  background-color: #FFFFFF;"
+    "  border: 1px solid #1F6B4A;"
+    "  border-radius: 8px;"
+    "  color: #1F6B4A;"
+    "  padding: 4px 12px;"
+    "  font-size: 12px;"
+    "  font-weight: 600;"
+    "}"
+    "QPushButton:hover { background-color: #E3EFE8; }"
+)

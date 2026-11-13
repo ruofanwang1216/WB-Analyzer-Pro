@@ -24,8 +24,9 @@ from PySide6.QtWidgets import (
 )
 
 from core.layout_engine import LayoutResult
+from gui.figure_mode_widgets import _FlowLayout
 from gui.figure_mode_styles import (
-    _PANEL_ACCENT_BTN_STYLE,
+    _SMALL_ACCENT_BTN_STYLE,
     _PANEL_BTN_H,
     _PANEL_BTN_STYLE,
     _PANEL_HEADING_STYLE,
@@ -42,11 +43,11 @@ class CanvasToolbarMixin:
     def _build_canvas_toolbar(self) -> QWidget:
         """Build the canvas controls.
 
-        Returns the slim bar that stays above the canvas (Undo, Fit, Reset).
-        The annotation tools and the save buttons are built here too, as
-        ``self._annotation_panel`` and ``self._save_panel``; the workspace
-        places them on the "Annotate" and "Save & Export" steps so they are
-        only on screen when they are needed.
+        Returns the bar above the figure preview: a title row with Undo, Fit
+        and Reset, and under it the annotation tools (text, lines, fonts,
+        alignment), which are available at any time.  The save buttons are
+        built here too, as ``self._save_panel``; the workspace places them
+        on the "Save & Export" step.
         """
         outer = QWidget()
         outer.setObjectName("canvasMiniToolbar")
@@ -54,9 +55,13 @@ class CanvasToolbarMixin:
             "QWidget#canvasMiniToolbar { background: #FFFFFF; "
             "border-bottom: 1px solid #E4E9E6; }"
         )
-        row1 = QHBoxLayout(outer)
+        outer_box = QVBoxLayout(outer)
+        outer_box.setContentsMargins(0, 0, 0, 0)
+        outer_box.setSpacing(0)
+        row1 = QHBoxLayout()
         row1.setContentsMargins(12, 8, 12, 8)
         row1.setSpacing(8)
+        outer_box.addLayout(row1)
 
         canvas_title = QLabel("Figure Preview")
         canvas_title.setStyleSheet(
@@ -119,42 +124,34 @@ class CanvasToolbarMixin:
         save_tmpl_btn.clicked.connect(self._on_save_template)
         save_box.addWidget(save_tmpl_btn)
 
-        # ── Annotation tools (shown on the "Annotate" step) ───────────────
+        # ── Annotation tools: always on hand above the preview ────────────
+        # They wrap onto extra lines when the preview is narrow, the way a
+        # word-processor toolbar does.
         self._annotation_panel = QWidget()
-        self._annotation_panel.setStyleSheet("background: transparent;")
-        vbox = QVBoxLayout(self._annotation_panel)
-        vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.setSpacing(8)
+        self._annotation_panel.setObjectName("annotationToolbar")
+        self._annotation_panel.setStyleSheet(
+            "QWidget#annotationToolbar { background: #F7F9F8; "
+            "border-bottom: 1px solid #E4E9E6; }"
+        )
+        flow = _FlowLayout(self._annotation_panel, margin=8, h_spacing=6, v_spacing=6)
 
-        add_row = QHBoxLayout()
-        add_row.setContentsMargins(0, 0, 0, 0)
-        add_row.setSpacing(8)
         add_text_btn = QPushButton("+ Text")
-        add_text_btn.setStyleSheet(_PANEL_ACCENT_BTN_STYLE)
+        add_text_btn.setStyleSheet(_SMALL_ACCENT_BTN_STYLE)
         add_text_btn.setToolTip("Click then click on canvas to place a text box (Esc to cancel)")
-        add_text_btn.setFixedHeight(_PANEL_BTN_H)
+        add_text_btn.setFixedHeight(_TOOLBAR_BTN_H)
         add_text_btn.clicked.connect(self._on_add_overlay_text)
-        add_row.addWidget(add_text_btn, 1)
+        flow.addWidget(add_text_btn)
 
         add_line_btn = QPushButton("+ Line")
-        add_line_btn.setStyleSheet(_PANEL_ACCENT_BTN_STYLE)
+        add_line_btn.setStyleSheet(_SMALL_ACCENT_BTN_STYLE)
         add_line_btn.setToolTip("Click then click on canvas to place a line (Esc to cancel)")
-        add_line_btn.setFixedHeight(_PANEL_BTN_H)
+        add_line_btn.setFixedHeight(_TOOLBAR_BTN_H)
         add_line_btn.clicked.connect(self._on_add_overlay_line)
-        add_row.addWidget(add_line_btn, 1)
-        vbox.addLayout(add_row)
+        flow.addWidget(add_line_btn)
 
-        format_heading = QLabel("Format the selection")
-        format_heading.setStyleSheet(_PANEL_HEADING_STYLE)
-        vbox.addWidget(format_heading)
-
-        # Font family + size
-        row2 = QHBoxLayout()
-        row2.setContentsMargins(0, 0, 0, 0)
-        row2.setSpacing(6)
 
         self._toolbar_font_family_combo = QFontComboBox()
-        self._toolbar_font_family_combo.setMinimumWidth(90)
+        self._toolbar_font_family_combo.setFixedWidth(128)
         self._toolbar_font_family_combo.setFixedHeight(_TOOLBAR_BTN_H)
         self._toolbar_font_family_combo.setToolTip("Font")
         self._toolbar_font_family_combo.setStyleSheet(
@@ -166,7 +163,7 @@ class CanvasToolbarMixin:
         self._toolbar_font_family_combo.currentFontChanged.connect(
             lambda f: self._apply_toolbar_font(family=f.family())
         )
-        row2.addWidget(self._toolbar_font_family_combo, 1)
+        flow.addWidget(self._toolbar_font_family_combo)
 
         self._toolbar_font_menu_btn = QToolButton()
         self._toolbar_font_menu_btn.setText("▾")
@@ -175,7 +172,7 @@ class CanvasToolbarMixin:
         self._toolbar_font_menu_btn.setStyleSheet(_PANEL_TOOL_BTN_STYLE)
         self._toolbar_font_menu_btn.setEnabled(False)
         self._toolbar_font_menu_btn.clicked.connect(self._toolbar_font_family_combo.showPopup)
-        row2.addWidget(self._toolbar_font_menu_btn)
+        flow.addWidget(self._toolbar_font_menu_btn)
 
         self._toolbar_font_size_combo = QComboBox()
         self._toolbar_font_size_combo.setEditable(True)
@@ -196,13 +193,8 @@ class CanvasToolbarMixin:
         self._toolbar_font_size_combo.currentTextChanged.connect(
             self._on_toolbar_font_size_changed
         )
-        row2.addWidget(self._toolbar_font_size_combo)
-        vbox.addLayout(row2)
+        flow.addWidget(self._toolbar_font_size_combo)
 
-        # Bold / italic / underline + text alignment inside the box
-        row3 = QHBoxLayout()
-        row3.setContentsMargins(0, 0, 0, 0)
-        row3.setSpacing(6)
 
         def _fmt_btn(text: str, tip: str) -> QToolButton:
             btn = QToolButton()
@@ -219,18 +211,17 @@ class CanvasToolbarMixin:
         self._bold_btn.setFont(_bfont)
         self._bold_btn.toggled.connect(lambda v: self._apply_toolbar_font(bold=v))
         self._bold_btn.setEnabled(False)
-        row3.addWidget(self._bold_btn)
+        flow.addWidget(self._bold_btn)
 
         self._italic_btn = _fmt_btn("I", "Italic")
         self._italic_btn.toggled.connect(lambda v: self._apply_toolbar_font(italic=v))
         self._italic_btn.setEnabled(False)
-        row3.addWidget(self._italic_btn)
+        flow.addWidget(self._italic_btn)
 
         self._underline_btn = _fmt_btn("U", "Underline")
         self._underline_btn.toggled.connect(lambda v: self._apply_toolbar_font(underline=v))
         self._underline_btn.setEnabled(False)
-        row3.addWidget(self._underline_btn)
-        row3.addStretch(1)
+        flow.addWidget(self._underline_btn)
 
         def _content_align_btn(align: str, tip: str) -> QToolButton:
             btn = QToolButton()
@@ -244,21 +235,20 @@ class CanvasToolbarMixin:
 
         self._text_inside_left_btn = _content_align_btn("left", "Text inside box: left")
         self._text_inside_left_btn.setEnabled(False)
-        row3.addWidget(self._text_inside_left_btn)
+        flow.addWidget(self._text_inside_left_btn)
 
         self._text_inside_center_btn = _content_align_btn("center", "Text inside box: center")
         self._text_inside_center_btn.setEnabled(False)
-        row3.addWidget(self._text_inside_center_btn)
+        flow.addWidget(self._text_inside_center_btn)
 
         self._text_inside_right_btn = _content_align_btn("right", "Text inside box: right")
         self._text_inside_right_btn.setEnabled(False)
-        row3.addWidget(self._text_inside_right_btn)
-        vbox.addLayout(row3)
+        flow.addWidget(self._text_inside_right_btn)
 
-        # Align several boxes / make them the same size
         self._align_text_boxes_combo = QComboBox()
         self._align_text_boxes_combo.setToolTip("Align selected text boxes")
         self._align_text_boxes_combo.setFixedHeight(_TOOLBAR_BTN_H)
+        self._align_text_boxes_combo.setFixedWidth(138)
         self._align_text_boxes_combo.setStyleSheet(
             "QComboBox { font-size:12px; padding:0 16px 0 6px; "
             "background:#FFFFFF; border:1px solid #C9D3CE; border-radius:6px; }"
@@ -278,15 +268,12 @@ class CanvasToolbarMixin:
             self._align_text_boxes_combo.addItem(label, action)
         self._align_text_boxes_combo.currentIndexChanged.connect(self._on_align_text_boxes_combo_changed)
         self._align_text_boxes_combo.setEnabled(False)
-        vbox.addWidget(self._align_text_boxes_combo)
+        flow.addWidget(self._align_text_boxes_combo)
 
         self._match_size_btn = QToolButton()
         self._match_size_btn.setText("Same Size")
         self._match_size_btn.setToolTip("Make selected text boxes or Blot Frames the same size")
         self._match_size_btn.setFixedHeight(_TOOLBAR_BTN_H)
-        self._match_size_btn.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
         self._match_size_btn.setEnabled(False)
         self._match_size_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._match_size_btn.setStyleSheet(
@@ -299,7 +286,7 @@ class CanvasToolbarMixin:
         smallest_action = match_menu.addAction("Match Smallest")
         smallest_action.triggered.connect(lambda: self._match_selected_item_sizes("smallest"))
         self._match_size_btn.setMenu(match_menu)
-        vbox.addWidget(self._match_size_btn)
+        flow.addWidget(self._match_size_btn)
 
         # Line width appears only while a line is selected.
         self._selection_detail_toolbar = QWidget()
@@ -325,13 +312,15 @@ class CanvasToolbarMixin:
         self._line_width_spin.valueChanged.connect(self._apply_selected_line_width)
         row4.addWidget(self._line_width_spin)
         row4.addStretch()
-        # Reserve this row permanently so selecting a line does not make the
-        # panel jump.
-        self._selection_detail_toolbar.setFixedHeight(_TOOLBAR_BTN_H)
+        # Reserve this slot permanently so selecting a line does not make the
+        # toolbar re-wrap and push the canvas.
+        self._selection_detail_toolbar.setFixedSize(124, _TOOLBAR_BTN_H)
         self._line_width_label.setVisible(False)
         self._line_width_spin.setVisible(False)
         self._selection_detail_toolbar.setVisible(True)
-        vbox.addWidget(self._selection_detail_toolbar)
+        flow.addWidget(self._selection_detail_toolbar)
+
+        outer_box.addWidget(self._annotation_panel)
         return outer
 
     # ── Annotation / format handlers ──────────────────────────────────────
@@ -508,15 +497,6 @@ class CanvasToolbarMixin:
             (i for i in sel if isinstance(i, _OL)),
             None,
         )
-
-        if (
-            (sel_text is not None or sel_line is not None)
-            and not self._tutorial_mode
-            and self._current_step != 3
-        ):
-            # The formatting tools live on the Annotate step; bring them up
-            # when the user selects something they apply to.
-            self.go_to_step(3)
 
         # Font controls
         has_text = sel_text is not None

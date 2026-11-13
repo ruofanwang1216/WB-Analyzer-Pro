@@ -1501,14 +1501,19 @@ class FigureModeStructureTests(unittest.TestCase):
 
         # Each section is a page of the four-step panel on the right.
         pages = window._step_pages
-        self.assertEqual(len(pages), 4)
-        self.assertEqual(len(window._step_buttons), 4)
+        self.assertEqual(len(pages), 3)
+        self.assertEqual(len(window._step_buttons), 3)
         self.assertTrue(pages[0].isAncestorOf(window._grp1))
         self.assertTrue(pages[0].isAncestorOf(window._grp5))
         self.assertTrue(pages[1].isAncestorOf(window._grp4))
-        self.assertTrue(pages[2].isAncestorOf(window._annotation_panel))
-        self.assertTrue(pages[3].isAncestorOf(window._grp6))
-        self.assertTrue(pages[3].isAncestorOf(window._save_panel))
+        self.assertTrue(pages[2].isAncestorOf(window._grp6))
+        self.assertTrue(pages[2].isAncestorOf(window._save_panel))
+        # Annotation tools are not a step: they sit above the preview.
+        self.assertFalse(
+            any(page.isAncestorOf(window._annotation_panel) for page in pages)
+        )
+        self.assertFalse(window._step_panel.isAncestorOf(window._bold_btn))
+        self.assertTrue(window._annotation_panel.isAncestorOf(window._bold_btn))
         self.assertEqual(window.current_step(), 1)
         self.assertTrue(window._step_buttons[0].isChecked())
         self.assertFalse(window._step_prev_btn.isEnabled())
@@ -3114,6 +3119,7 @@ class FigureModeStructureTests(unittest.TestCase):
         self.assertEqual(window._step_stack.currentIndex(), 2)
         self.assertTrue(window._step_buttons[2].isChecked())
         self.assertFalse(window._step_buttons[0].isChecked())
+        self.assertFalse(window._step_next_btn.isEnabled())
 
         window._step_buttons[0].click()
         self.assertEqual(window.current_step(), 1)
@@ -3123,10 +3129,23 @@ class FigureModeStructureTests(unittest.TestCase):
         window._step_prev_btn.click()
         self.assertEqual(window.current_step(), 1)
 
-        window.go_to_step(4)
-        self.assertFalse(window._step_next_btn.isEnabled())
         window.go_to_step(99)
-        self.assertEqual(window.current_step(), 4)
+        self.assertEqual(window.current_step(), 3)
+
+    def test_annotation_tools_work_from_any_step(self) -> None:
+        window = FigureModeWindow()
+        window._on_apply_structure()
+        for step in (1, 2, 3):
+            window.go_to_step(step)
+            self.assertFalse(window._annotation_panel.isHidden())
+        window.go_to_step(2)
+
+        window._canvas.add_overlay_text_box()
+        self._app.processEvents()
+
+        # Selecting text enables formatting and leaves the step alone.
+        self.assertTrue(window._bold_btn.isEnabled())
+        self.assertEqual(window.current_step(), 2)
 
     def test_selecting_a_frame_on_step_one_moves_to_fill_step(self) -> None:
         window = FigureModeWindow()
@@ -3145,10 +3164,10 @@ class FigureModeStructureTests(unittest.TestCase):
         window = FigureModeWindow()
 
         window.reveal_widget(window._export_pdf_btn)
-        self.assertEqual(window.current_step(), 4)
-        window.reveal_widget(window._bold_btn)
         self.assertEqual(window.current_step(), 3)
         window.reveal_widget(window._blot_file_list)
+        self.assertEqual(window.current_step(), 1)
+        window.reveal_widget(window._bold_btn)
         self.assertEqual(window.current_step(), 1)
         # Controls outside the panel leave the step alone.
         window.reveal_widget(window._fit_center_btn)

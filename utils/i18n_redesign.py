@@ -40,7 +40,6 @@ ZH_CN_REDESIGN: dict[str, str] = {
     "Next": "下一步",
     "Decide how many blot frames and lanes the figure has, reuse a saved template, or reopen a saved Blot File.": "先决定图里有几条印迹、几条泳道；也可以套用已保存的模板，或打开之前保存的印迹图文件。",
     "Click a frame in the preview, draw the band region on the source image, then press Enter to place it.": "先在预览里点一个图框，再到左边的原始图像上框选条带区域，按回车把它填进去。",
-    "Add text or lines. Select an item in the preview to format it. This step is optional.": "给图加文字或线条。在预览里选中某一项就可以调整它的格式。这一步可以跳过。",
     "Export the figure, or save it to keep editing later.": "把图导出，或保存下来以后继续编辑。",
     "Figure Preview": "排版预览",
     "Save to continue later": "保存以便下次继续",
