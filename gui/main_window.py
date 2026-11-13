@@ -48,6 +48,8 @@ from gui.image_canvas import ImageCanvas
 from gui.image_transform_dialog import ImageTransformDialog
 from gui.param_panel import ParamPanel
 from gui.results_panel import ResultsPanel
+from gui.redesign_styles import restyle_param_panel
+from gui.status_messages import LocalizedStatusBar
 from gui.tutorial import TutorialController, TutorialModeDialog
 from utils.logger import get_logger
 from utils.persistence import AppPersistence
@@ -65,8 +67,6 @@ from gui.image_panel_widgets import (
 from gui.main_window_upload import UploadMixin
 from gui.main_window_image_ops import ImageOperationsMixin
 from gui.main_window_fixed_roi import FixedRoiMixin
-from gui.redesign_styles import restyle_param_panel
-from gui.status_messages import LocalizedStatusBar
 
 log = get_logger(__name__)
 
