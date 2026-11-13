@@ -508,11 +508,16 @@ class AutoDetectPerLaneBandRoiTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_densitometry_param_panel_is_manual_only(self) -> None:
+    def test_densitometry_param_panel_keeps_manual_mode_and_offers_auto_lanes(self) -> None:
+        # The manual ROI workflow stays the mode of record; auto lane
+        # detection is an optional button on top of it, not a separate mode.
         panel = ParamPanel()
+        requested: list[bool] = []
         try:
             panel.set_mode("auto")
             params = panel.get_params()
+            panel.auto_lane_detect_requested.connect(lambda: requested.append(True))
+            panel._auto_lane_btn.click()
         finally:
             panel.close()
 
@@ -523,7 +528,7 @@ class AutoDetectPerLaneBandRoiTests(unittest.TestCase):
         self.assertNotIn("auto_lane_count", params)
         self.assertNotIn("expected_rows_per_lane", params)
         self.assertNotIn("target_band_row", params)
-        self.assertFalse(hasattr(panel, "_auto_detect_btn"))
+        self.assertEqual(requested, [True])
 
     def test_densitometry_large_roi_keeps_manual_lane_workflow(self) -> None:
         roi = QRectF(5, 5, 90, 60)

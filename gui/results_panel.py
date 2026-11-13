@@ -28,6 +28,9 @@ from utils.i18n import LANG_EN, tr
 
 _COLS = ["Run", "Band", "Lane", "Area", "Mean", "Min", "Max", "IntDen", "RawIntDen"]
 _METRICS = ["Area", "Mean", "Min", "Max", "IntDen", "RawIntDen"]
+# Extra rows shown only when a run carries local-background values
+# (auto-detected band boxes).  "Net" = raw value minus local background.
+_BACKGROUND_METRICS = ["Background", "Net Mean", "Net IntDen"]
 _ODD_RUN_BG = QColor(239, 244, 248, 235)      # neutral blue
 _EVEN_RUN_BG = QColor(212, 237, 228, 220)     # soft green, clearly visible
 _ODD_RUN_HEADER_TINT = QColor(220, 233, 243)
@@ -325,7 +328,10 @@ class ResultsPanel(QWidget):
                 "Run": run_label,
             }
             self._next_entry_id += 1
-            for col in ("Band", "Lane", "Area", "Mean", "Min", "Max", "IntDen", "RawIntDen"):
+            for col in (
+                "Band", "Lane", "Area", "Mean", "Min", "Max", "IntDen", "RawIntDen",
+                *_BACKGROUND_METRICS,
+            ):
                 entry[col] = row[col] if col in df.columns else None
             self._all_rows.append(entry)
 
@@ -393,7 +399,8 @@ class ResultsPanel(QWidget):
         self._run_column_ranges = self._compute_run_column_ranges(visible_entries)
         self._checked_entry_ids.intersection_update(self._visible_entry_ids)
 
-        self._table.setRowCount(len(_METRICS))
+        metrics = self._visible_metrics()
+        self._table.setRowCount(len(metrics))
         self._table.setColumnCount(1 + len(visible_entries))
 
         metric_header = QTableWidgetItem(tr("Metric", self._language))
@@ -414,7 +421,7 @@ class ResultsPanel(QWidget):
             if int(entry["_id"]) in self._checked_entry_ids:
                 checked_sections.add(col_idx)
 
-        for row_idx, metric in enumerate(_METRICS):
+        for row_idx, metric in enumerate(metrics):
             metric_item = QTableWidgetItem(tr(metric, self._language))
             metric_item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
             self._table.setItem(row_idx, 0, metric_item)
@@ -534,20 +541,45 @@ class ResultsPanel(QWidget):
         else:
             self._title.setText(tr("Results", self._language))
 
+    def _has_background_values(self) -> bool:
+        return any(
+            entry.get(metric) is not None and not pd.isna(entry.get(metric))
+            for entry in self._all_rows
+            for metric in _BACKGROUND_METRICS
+        )
+
+    def _visible_metrics(self) -> list[str]:
+        if self._has_background_values():
+            return [*_METRICS, *_BACKGROUND_METRICS]
+        return list(_METRICS)
+
     def _to_dataframe(self) -> pd.DataFrame:
-        return pd.DataFrame(self._all_rows, columns=_COLS)
+        columns = list(_COLS)
+        if self._has_background_values():
+            columns += _BACKGROUND_METRICS
+        return pd.DataFrame(self._all_rows, columns=columns)
 
     def selected_mean_values(self) -> list[str]:
         if self._table.rowCount() <= 0:
             return []
+        metrics = self._visible_metrics()
         try:
-            mean_row = _METRICS.index("Mean")
+            mean_row = metrics.index("Mean")
         except ValueError:
             return []
+        selected = self._table.selectedIndexes()
+        # Selecting cells in the background-subtracted "Net Mean" row autofills
+        # those values instead of the raw Mean.
+        if "Net Mean" in metrics:
+            net_row = metrics.index("Net Mean")
+            if any(idx.row() == net_row and idx.column() > 0 for idx in selected) and not any(
+                idx.row() == mean_row and idx.column() > 0 for idx in selected
+            ):
+                mean_row = net_row
         selected_cols = sorted(
             {
                 idx.column()
-                for idx in self._table.selectedIndexes()
+                for idx in selected
                 if idx.row() == mean_row and idx.column() > 0
             }
         )

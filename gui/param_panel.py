@@ -54,6 +54,7 @@ class ParamPanel(QWidget):
     params_changed = Signal()           # emitted when parameters change
     status_message = Signal(str)       # emitted for status bar warnings
     detect_requested = Signal()        # kept for toolbar compatibility
+    auto_lane_detect_requested = Signal()  # find lanes + bands inside the drawn ROI
     custom_rotate_requested = Signal()
     rotate_requested = Signal()
     cancel_rotate_requested = Signal()
@@ -219,6 +220,15 @@ class ParamPanel(QWidget):
 
         manual_layout.addLayout(lane_form)
 
+        self._auto_lane_btn = QPushButton("Auto-detect lanes")
+        self._auto_lane_btn.setToolTip(
+            "Draw one large ROI around the bands, set the lane count, then click to "
+            "find every lane and band automatically. Drag boxes to adjust, Delete to "
+            "remove, drag on empty space to add."
+        )
+        self._auto_lane_btn.clicked.connect(self.auto_lane_detect_requested)
+        manual_layout.addWidget(self._auto_lane_btn)
+
         self._fixed_label = QLabel("Fixed ROI")
         fixed_label = self._fixed_label
         fixed_label.setStyleSheet(
@@ -262,6 +272,7 @@ class ParamPanel(QWidget):
         # ── Help note ──────────────────────────────────────────────────────────
         self._help_note = QLabel(
             "Manual: draw lane ROI → draw band ROI → Analyze\n"
+            "Auto: draw one large ROI → set Lanes → Auto-detect lanes → adjust → Analyze\n"
             "Hold Space + drag to pan. Scroll to zoom."
         )
         self._help_note.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 9px;")
@@ -278,11 +289,20 @@ class ParamPanel(QWidget):
         self._lanes_label.setText(tr("Lanes:", language))
         self._fixed_label.setText(tr("Fixed ROI", language))
         self._fix_btn.setText(tr("Fix ROI", language))
+        self._auto_lane_btn.setText(tr("Auto-detect lanes", language))
+        self._auto_lane_btn.setToolTip(tr(
+            "Draw one large ROI around the bands, set the lane count, then click to "
+            "find every lane and band automatically. Drag boxes to adjust, Delete to "
+            "remove, drag on empty space to add.",
+            language,
+        ))
         self._cancel_fixed_btn.setText(tr("Cancel fixed ROI", language))
         self._fix_btn.setToolTip(tr("Capture the current lane ROI size, or arm the next drawn ROI as the fixed size.", language))
         self._cancel_fixed_btn.setToolTip(tr("Return Manual mode to freehand ROI drawing.", language))
         self._help_note.setText(tr(
-            "Manual: draw lane ROI → draw band ROI → Analyze\nHold Space + drag to pan. Scroll to zoom.",
+            "Manual: draw lane ROI → draw band ROI → Analyze\n"
+            "Auto: draw one large ROI → set Lanes → Auto-detect lanes → adjust → Analyze\n"
+            "Hold Space + drag to pan. Scroll to zoom.",
             language,
         ))
 
