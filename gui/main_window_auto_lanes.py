@@ -137,7 +137,7 @@ class AutoLaneMixin:
         self._band_roi = None
         self._lane_rects = [QRectF(lane["lane_rect"]) for lane in detections]
         self._auto_detections = self._clone_auto_detections(detections)
-        self.canvas.set_auto_detect_overlays(self._auto_detections)
+        self.canvas.set_auto_detect_overlays(self._auto_detections, quiet_lanes=True)
         self.canvas.set_quant_auto_review(True)
         self.canvas.setFocus()
         self._save_active_slot_state()
