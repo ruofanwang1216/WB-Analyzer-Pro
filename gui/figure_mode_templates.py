@@ -51,7 +51,7 @@ class TemplateLibraryMixin:
         self._template_list.setMinimumWidth(180)
         self._template_list.setStyleSheet(
             "QListWidget { background:#FFFFFF; border:1px solid #D1DDD7; "
-            "border-radius:7px; font-size:11px; outline:none; }"
+            "border-radius:7px; font-size:13px; outline:none; }"
             "QListWidget::item { padding:4px 5px; border-bottom:1px solid #EEF3F0; }"
             "QListWidget::item:selected { background:#E5F1EB; color:#183B2B; }"
         )
@@ -71,7 +71,7 @@ class TemplateLibraryMixin:
             badge.setStyleSheet(
                 "QLabel#step1TaskBadge { background:#FFFFFF; color:#176B50; "
                 "border:1px solid #238160; border-radius:12px; "
-                "font-size:10px; font-weight:700; }"
+                "font-size:12px; font-weight:700; }"
             )
             return badge
 
@@ -93,7 +93,7 @@ class TemplateLibraryMixin:
             heading = QLabel(title)
             heading.setObjectName("step1TaskTitle")
             heading.setStyleSheet(
-                "QLabel#step1TaskTitle { color:#23483A; font-size:11px; "
+                "QLabel#step1TaskTitle { color:#23483A; font-size:13px; "
                 "font-weight:700; background:transparent; border:none; }"
             )
             layout.addWidget(heading)
@@ -133,13 +133,13 @@ class TemplateLibraryMixin:
         create_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         create_btn.setStyleSheet(
             "QPushButton#step1PrimaryButton { background:#176D4E; color:#FFFFFF; "
-            "border:1px solid #176D4E; border-radius:6px; font-size:9px; "
+            "border:1px solid #176D4E; border-radius:6px; font-size:13px; "
             "font-weight:600; padding:3px 5px; }"
             "QPushButton#step1PrimaryButton:hover { background:#125D42; "
             "border-color:#125D42; }"
             "QPushButton#step1PrimaryButton:pressed { background:#0E4F38; }"
         )
-        create_btn.setFixedHeight(28)
+        create_btn.setFixedHeight(36)
         create_btn.setSizePolicy(
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Fixed,
@@ -152,12 +152,12 @@ class TemplateLibraryMixin:
         add_blot_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         add_blot_btn.setStyleSheet(
             "QPushButton#step1TextButton { background:transparent; color:#176D4E; "
-            "border:none; border-radius:5px; font-size:9px; font-weight:600; "
+            "border:none; border-radius:5px; font-size:13px; font-weight:600; "
             "padding:2px 3px; }"
             "QPushButton#step1TextButton:hover { background:#EAF4EF; }"
             "QPushButton#step1TextButton:pressed { background:#DDECE5; }"
         )
-        add_blot_btn.setFixedHeight(24)
+        add_blot_btn.setFixedHeight(30)
         add_blot_btn.setSizePolicy(
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Fixed,
@@ -196,13 +196,13 @@ class TemplateLibraryMixin:
         create_condition_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         create_condition_btn.setStyleSheet(
             "QPushButton#step1SecondaryButton { background:#FFFFFF; color:#176D4E; "
-            "border:1px solid #3C9A75; border-radius:6px; font-size:8px; "
+            "border:1px solid #3C9A75; border-radius:6px; font-size:12px; "
             "font-weight:600; padding:2px; }"
             "QPushButton#step1SecondaryButton:hover { background:#F0F7F3; "
             "border-color:#247B5C; }"
             "QPushButton#step1SecondaryButton:pressed { background:#E3F0E9; }"
         )
-        create_condition_btn.setFixedHeight(28)
+        create_condition_btn.setFixedHeight(36)
         create_condition_btn.setSizePolicy(
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Fixed,
@@ -215,11 +215,11 @@ class TemplateLibraryMixin:
 
         self._saved_templates_btn = QPushButton("Saved Templates   ›")
         self._saved_templates_btn.setObjectName("step1SavedTemplatesButton")
-        self._saved_templates_btn.setFixedHeight(25)
+        self._saved_templates_btn.setFixedHeight(30)
         self._saved_templates_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._saved_templates_btn.setStyleSheet(
             "QPushButton#step1SavedTemplatesButton { background:transparent; "
-            "border:none; color:#29483B; font-size:10px; font-weight:600; "
+            "border:none; color:#29483B; font-size:12px; font-weight:600; "
             "padding:1px 6px; text-align:left; }"
             "QPushButton#step1SavedTemplatesButton:hover { background:#F0F6F3; }"
         )
@@ -238,7 +238,7 @@ class TemplateLibraryMixin:
         saved_templates_helper = QLabel("Reuse a previous layout")
         saved_templates_helper.setObjectName("step1SavedTemplatesHelper")
         saved_templates_helper.setStyleSheet(
-            "QLabel#step1SavedTemplatesHelper { color:#6A7B73; font-size:8px; "
+            "QLabel#step1SavedTemplatesHelper { color:#6A7B73; font-size:12px; "
             "padding:0 8px 2px 8px; background:transparent; border:none; }"
         )
         saved_templates_layout.addWidget(saved_templates_helper)
@@ -275,7 +275,7 @@ class TemplateLibraryMixin:
         lbl = _TemplateNameLabel(
             self._localized_template_name(tmpl.display_name, tmpl.is_user_template), tmpl.id
         )
-        lbl.setStyleSheet("font-size:10px; color:#1E2D3F;")
+        lbl.setStyleSheet("font-size:12px; color:#1E2D3F;")
         if tmpl.is_user_template:
             lbl.setCursor(Qt.CursorShape.IBeamCursor)
             lbl.setToolTip("Double-click to rename this Figure Template")
@@ -283,10 +283,10 @@ class TemplateLibraryMixin:
         row_layout.addWidget(lbl, 1)
         del_btn = QToolButton()
         del_btn.setText("×")
-        del_btn.setFixedSize(16, 16)
+        del_btn.setFixedSize(20, 20)
         del_btn.setStyleSheet(
             "QToolButton { border:1px solid #9EB3A8; border-radius:8px; "
-            "background:#F7FAF8; color:#6A7A72; font-size:10px; }"
+            "background:#F7FAF8; color:#6A7A72; font-size:12px; }"
             "QToolButton:hover { background:#F0D7D7; color:#8A3B3B; border-color:#C99595; }"
         )
         del_btn.setToolTip(f'Delete template "{tmpl.display_name}"')

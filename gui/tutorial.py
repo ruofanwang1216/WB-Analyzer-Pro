@@ -754,8 +754,22 @@ class TutorialController(QObject):
         self._sync_roi_hint(step.key)
         self._sync_table_drag_hint(step.key)
         self._sync_roi_enter_prompt(step.key)
+        self._reveal_step_target(step)
         self._position_overlays()
         self._panel.raise_()
+
+    def _reveal_step_target(self, step: _Step) -> None:
+        """Open the Figure Layout step page that holds this step's control."""
+        figure = getattr(self._host, "_figure_mode_window", None)
+        if figure is None or self._mode != "wb_figure":
+            return
+        try:
+            target = step.target()
+        except Exception:
+            return
+        widget = target[0] if isinstance(target, tuple) else target
+        if isinstance(widget, QWidget):
+            figure.reveal_widget(widget)
 
     def _clear_roi_hints(self) -> None:
         for image_panel in self._host._image_panels:

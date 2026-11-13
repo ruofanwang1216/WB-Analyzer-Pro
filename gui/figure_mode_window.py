@@ -40,7 +40,8 @@ from PySide6.QtWidgets import (
     QCheckBox, QHBoxLayout, QLabel, QMessageBox, QPushButton,
     QFileDialog,  # noqa: F401 - used by the mixins; kept importable from here
     QInputDialog, QListWidget, QListWidgetItem,
-    QComboBox, QRadioButton, QScrollArea, QSpinBox, QDoubleSpinBox, QToolButton, QVBoxLayout, QWidget,
+    QComboBox, QRadioButton, QScrollArea, QSizePolicy, QSpinBox, QDoubleSpinBox, QStackedWidget,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from config.paths import blot_files_dir
@@ -99,7 +100,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
     # The workflow panel needs enough room for the two-column detection and
     # template controls without clipping.  It remains substantially narrower
     # than the source-image and figure-canvas workspaces around it.
-    _SIDEBAR_WIDTH = 210
+    _SIDEBAR_WIDTH = 304
 
     def __init__(self, parent=None, *, language: str = LANG_EN) -> None:
         super().__init__(parent)
@@ -132,6 +133,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         self._tutorial_mode = False
         self._tutorial_saved_roi_fill_mode: str | None = None
         self._language = language if language in {LANG_EN, LANG_ZH_CN} else LANG_EN
+        self._current_step = 1
 
         # Dynamic sidebar sub-widgets rebuilt when project structure changes
         self._step4_slot_widgets: list[QWidget] = []
@@ -222,6 +224,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         # The selected target is regenerated as the user interacts with the
         # canvas, so refresh it through its source-aware helper as well.
         self._refresh_selected_slot_label()
+        self._refresh_step_panel_texts()
 
     def _retranslate_widget_tree(self, root: QWidget) -> None:
         """Translate an existing WB Figure widget tree in either direction."""
@@ -266,53 +269,9 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
     def _build_ui(self) -> None:
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setSpacing(8)
 
-        # ── Left: scrollable sidebar ──────────────────────────────────────
-        sidebar_scroll = QScrollArea()
-        sidebar_scroll.setFixedWidth(self._SIDEBAR_WIDTH)
-        sidebar_scroll.setWidgetResizable(True)
-        sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        sidebar_scroll.setStyleSheet(
-            "QScrollArea { border: none; background: #EAF2EE; }"
-        )
-
-        sidebar_widget = QWidget()
-        sidebar_widget.setStyleSheet("background: #EAF2EE;")
-        sidebar_layout = QVBoxLayout(sidebar_widget)
-        sidebar_layout.setContentsMargins(2, 8, 2, 8)
-        sidebar_layout.setSpacing(4)
-        self._sidebar_layout = sidebar_layout
-
-        # Title
-        title_lbl = QLabel("Workflow")
-        title_lbl.setStyleSheet(
-            "font-weight:700; font-size:14px; color:#24352E; padding:3px 6px 7px 6px;"
-        )
-        sidebar_layout.addWidget(title_lbl)
-
-        # Step groups
-        self._grp1 = self._build_step1()
-        self._grp4 = self._build_apply_roi_step()
-        self._grp5 = self._build_saved_blot_files_step()
-        self._grp6 = self._build_step6()
-        self._grp4.set_expanded(False)
-
-        for grp in (self._grp1, self._grp4, self._grp5, self._grp6):
-            sidebar_layout.addWidget(grp)
-        sidebar_layout.addStretch()
-
-        sidebar_scroll.setWidget(sidebar_widget)
-        root.addWidget(sidebar_scroll)
-
-        # ── Separator ─────────────────────────────────────────────────────
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setFrameShadow(QFrame.Shadow.Sunken)
-        sep.setStyleSheet("color: #BDD0C6;")
-        root.addWidget(sep)
-
-        # ── Right: annotation toolbar + canvas ────────────────────────────
+        # ── Centre: slim canvas bar + figure canvas ───────────────────────
         self._canvas = FigureCanvas(self)
         self._canvas.on_text_edited = self._on_canvas_text_edited
         self._canvas.on_text_rotation_changed = self._on_canvas_text_rotation_changed
@@ -330,17 +289,203 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         )
         canvas_scroll.setWidget(self._canvas)
 
-        right_widget = QWidget()
-        right_widget.setStyleSheet("background: #FFFFFF;")
-        right_vbox = QVBoxLayout(right_widget)
-        right_vbox.setContentsMargins(0, 0, 0, 0)
-        right_vbox.setSpacing(0)
-        right_vbox.addWidget(self._build_canvas_toolbar())
-        right_vbox.addWidget(canvas_scroll, 1)
-        root.addWidget(right_widget, 1)
+        canvas_card = QFrame()
+        canvas_card.setObjectName("figureCanvasCard")
+        canvas_card.setStyleSheet(
+            "QFrame#figureCanvasCard { background: #FFFFFF; "
+            "border: 1px solid #D9E0DC; border-radius: 10px; }"
+        )
+        canvas_vbox = QVBoxLayout(canvas_card)
+        canvas_vbox.setContentsMargins(1, 1, 1, 1)
+        canvas_vbox.setSpacing(0)
+        # Building the bar also creates the annotation and save panels that
+        # are placed on the step pages below.
+        canvas_vbox.addWidget(self._build_canvas_toolbar())
+        canvas_vbox.addWidget(canvas_scroll, 1)
+        root.addWidget(canvas_card, 1)
+
+        # ── Right: fixed-width step panel ─────────────────────────────────
+        panel = QFrame()
+        panel.setObjectName("workflowStepPanel")
+        panel.setFixedWidth(self._SIDEBAR_WIDTH)
+        panel.setStyleSheet(
+            "QFrame#workflowStepPanel { background: #FFFFFF; "
+            "border: 1px solid #D9E0DC; border-radius: 10px; }"
+        )
+        self._step_panel = panel
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(12, 12, 12, 12)
+        panel_layout.setSpacing(10)
+        self._sidebar_layout = panel_layout
+
+        # Step buttons 1–4 across the top, as wide as the panel.
+        steps_row = QHBoxLayout()
+        steps_row.setContentsMargins(0, 0, 0, 0)
+        steps_row.setSpacing(6)
+        self._step_buttons: list[QPushButton] = []
+        for number in range(1, len(self._STEP_TITLES) + 1):
+            button = QPushButton(str(number))
+            button.setObjectName("workflowStepButton")
+            button.setCheckable(True)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setMinimumHeight(52)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            button.setStyleSheet(
+                "QPushButton#workflowStepButton { background:#FFFFFF; "
+                "border:1px solid #D9E0DC; border-radius:8px; color:#3B4A43; "
+                "font-size:12px; padding:4px 2px; }"
+                "QPushButton#workflowStepButton:hover { background:#F3F5F4; "
+                "border-color:#1F6B4A; }"
+                "QPushButton#workflowStepButton:checked { background:#E3EFE8; "
+                "border-color:#1F6B4A; color:#134A32; font-weight:600; }"
+            )
+            button.clicked.connect(lambda _checked=False, n=number: self.go_to_step(n))
+            steps_row.addWidget(button, 1)
+            self._step_buttons.append(button)
+        panel_layout.addLayout(steps_row)
+
+        divider = QFrame()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet("background: #E4E9E6; border: none;")
+        panel_layout.addWidget(divider)
+
+        self._step_title_lbl = QLabel("")
+        self._step_title_lbl.setStyleSheet(
+            "font-size:15px; font-weight:600; color:#1C2622; background:transparent;"
+        )
+        panel_layout.addWidget(self._step_title_lbl)
+        self._step_desc_lbl = QLabel("")
+        self._step_desc_lbl.setWordWrap(True)
+        self._step_desc_lbl.setStyleSheet(
+            "font-size:12px; color:#4A5A53; background:transparent;"
+        )
+        panel_layout.addWidget(self._step_desc_lbl)
+
+        # One page per step; only the current step's controls are on screen.
+        self._grp1 = self._build_step1()
+        self._grp4 = self._build_apply_roi_step()
+        self._grp5 = self._build_saved_blot_files_step()
+        self._grp6 = self._build_step6()
+        for grp in (self._grp1, self._grp4, self._grp5, self._grp6):
+            grp.set_flat(True)
+
+        self._step_stack = QStackedWidget()
+        self._step_pages: list[QWidget] = []
+        def _page_heading(text: str) -> QLabel:
+            heading = QLabel(text)
+            heading.setStyleSheet(
+                "font-size:12px; font-weight:600; color:#4A5A53; background:transparent;"
+            )
+            return heading
+
+        page_contents: list[list[QWidget]] = [
+            [self._grp1, _page_heading("Saved Blot Files"), self._grp5],
+            [self._grp4],
+            [self._annotation_panel],
+            [_page_heading("Export Figure"), self._grp6, self._save_panel],
+        ]
+        for widgets in page_contents:
+            page = QWidget()
+            page.setObjectName("workflowStepPage")
+            page.setStyleSheet("QWidget#workflowStepPage { background: #FFFFFF; }")
+            page_layout = QVBoxLayout(page)
+            page_layout.setContentsMargins(0, 0, 0, 0)
+            page_layout.setSpacing(8)
+            for widget in widgets:
+                page_layout.addWidget(widget)
+            page_layout.addStretch(1)
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            scroll.setStyleSheet("QScrollArea { border: none; background: #FFFFFF; }")
+            scroll.viewport().setObjectName("workflowStepViewport")
+            scroll.viewport().setStyleSheet(
+                "QWidget#workflowStepViewport { background: #FFFFFF; }"
+            )
+            scroll.setWidget(page)
+            self._step_stack.addWidget(scroll)
+            self._step_pages.append(page)
+        panel_layout.addWidget(self._step_stack, 1)
+
+        nav_row = QHBoxLayout()
+        nav_row.setContentsMargins(0, 0, 0, 0)
+        nav_row.setSpacing(8)
+        self._step_prev_btn = QPushButton("Previous")
+        self._step_prev_btn.setObjectName("workflowStepPrevButton")
+        self._step_prev_btn.setFixedHeight(36)
+        self._step_prev_btn.setStyleSheet(_SMALL_BTN_STYLE)
+        self._step_prev_btn.clicked.connect(lambda: self.go_to_step(self._current_step - 1))
+        nav_row.addWidget(self._step_prev_btn, 1)
+        self._step_next_btn = QPushButton("Next")
+        self._step_next_btn.setObjectName("workflowStepNextButton")
+        self._step_next_btn.setFixedHeight(36)
+        self._step_next_btn.setStyleSheet(
+            "QPushButton { background:#FFFFFF; border:1px solid #1F6B4A; "
+            "border-radius:8px; color:#1F6B4A; font-size:12px; font-weight:600; "
+            "padding:4px 12px; }"
+            "QPushButton:hover { background:#E3EFE8; }"
+            "QPushButton:disabled { color:#9AA8A1; border-color:#E4E9E6; }"
+        )
+        self._step_next_btn.clicked.connect(lambda: self.go_to_step(self._current_step + 1))
+        nav_row.addWidget(self._step_next_btn, 1)
+        panel_layout.addLayout(nav_row)
+        root.addWidget(panel)
 
         # Wire scene selection → font/line controls
         self._canvas._scene.selectionChanged.connect(self._on_canvas_selection_changed)
+        self.go_to_step(1)
+
+    # ── Step panel ────────────────────────────────────────────────────────
+
+    _STEP_TITLES = ("Choose Layout", "Fill Frames", "Annotate", "Save & Export")
+    _STEP_DESCRIPTIONS = (
+        "Decide how many blot frames and lanes the figure has, reuse a saved "
+        "template, or reopen a saved Blot File.",
+        "Click a frame in the preview, draw the band region on the source "
+        "image, then press Enter to place it.",
+        "Add text or lines. Select an item in the preview to format it. "
+        "This step is optional.",
+        "Export the figure, or save it to keep editing later.",
+    )
+
+    def current_step(self) -> int:
+        return self._current_step
+
+    def go_to_step(self, number: int) -> None:
+        """Show one step's controls; steps can be visited in any order."""
+        number = max(1, min(int(number), len(self._STEP_TITLES)))
+        self._current_step = number
+        self._step_stack.setCurrentIndex(number - 1)
+        for index, button in enumerate(self._step_buttons, start=1):
+            button.setChecked(index == number)
+        self._step_prev_btn.setEnabled(number > 1)
+        self._step_next_btn.setEnabled(number < len(self._STEP_TITLES))
+        self._refresh_step_panel_texts()
+
+    def reveal_widget(self, widget: QWidget | None) -> None:
+        """Switch to the step that holds a control (used by the tutorial)."""
+        if widget is None:
+            return
+        for index, page in enumerate(self._step_pages, start=1):
+            if page is widget or page.isAncestorOf(widget):
+                if index != self._current_step:
+                    self.go_to_step(index)
+                return
+
+    def _refresh_step_panel_texts(self) -> None:
+        for index, button in enumerate(self._step_buttons, start=1):
+            button.setText(f"{index}\n{tr(self._STEP_TITLES[index - 1], self._language)}")
+        current = self._current_step
+        self._step_title_lbl.setText(
+            tr("Step {number}", self._language, number=current)
+            + "  "
+            + tr(self._STEP_TITLES[current - 1], self._language)
+        )
+        self._step_desc_lbl.setText(
+            tr(self._STEP_DESCRIPTIONS[current - 1], self._language)
+        )
+        self._step_prev_btn.setText(tr("Previous", self._language))
+        self._step_next_btn.setText(tr("Next", self._language))
 
     # ── Saved template library ────────────────────────────────────────────
 
@@ -387,7 +532,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         preview_label = QLabel("Frame Preview")
         preview_label.setStyleSheet(
-            "font-size:10px; font-weight:600; color:#5C7167;"
+            "font-size:12px; font-weight:600; color:#5C7167;"
         )
         outer.addWidget(preview_label)
 
@@ -571,7 +716,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         detection_lbl = QLabel("Detection")
         detection_lbl.setStyleSheet(
-            "font-size:10px; font-weight:600; color:#3A4B43; padding:1px;"
+            "font-size:12px; font-weight:600; color:#3A4B43; padding:1px;"
         )
         grp.body_layout().addWidget(detection_lbl)
 
@@ -585,7 +730,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         self._auto_detect_radio.setChecked(True)
         for button in (self._auto_detect_radio, self._manual_detect_radio):
             button.setStyleSheet(
-                "QRadioButton { font-size:9px; color:#2F3D36; spacing:4px; }"
+                "QRadioButton { font-size:12px; color:#2F3D36; spacing:4px; }"
                 "QRadioButton::indicator { width:13px; height:13px; }"
             )
             self._roi_mode_group.addButton(button)
@@ -596,7 +741,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         enter_hint = QLabel("select then hit Enter/Return")
         enter_hint.setStyleSheet(
-            "font-size:8px; color:#73867D; padding:0 1px 2px 1px;"
+            "font-size:11px; color:#73867D; padding:0 1px 2px 1px;"
         )
         grp.body_layout().addWidget(enter_hint)
 
@@ -614,10 +759,10 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         self._auto_fit_h_margin.setSingleStep(4)
         self._auto_fit_h_margin.setAccelerated(True)
         self._auto_fit_h_margin.setSuffix(" px")
-        self._auto_fit_h_margin.setFixedHeight(22)
+        self._auto_fit_h_margin.setFixedHeight(28)
         self._auto_fit_h_margin.setStyleSheet(
             "QSpinBox { background:#FFFFFF; border:1px solid #C7D6CE; "
-            "border-radius:4px; padding:1px 3px; font-size:9px; }"
+            "border-radius:4px; padding:1px 3px; font-size:12px; }"
         )
         self._auto_fit_h_margin.setToolTip(
             "Original-image background retained to the left and right of each "
@@ -630,7 +775,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         self._auto_fit_v_margin.setSingleStep(4)
         self._auto_fit_v_margin.setAccelerated(True)
         self._auto_fit_v_margin.setSuffix(" px")
-        self._auto_fit_v_margin.setFixedHeight(22)
+        self._auto_fit_v_margin.setFixedHeight(28)
         self._auto_fit_v_margin.setStyleSheet(self._auto_fit_h_margin.styleSheet())
         self._auto_fit_v_margin.setToolTip(
             "Original-image background retained above and below each aligned "
@@ -649,7 +794,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             "Auto uses the more stable band edge when one-sided trailing is detected. "
             "No band pixels are redrawn, stretched, or erased."
         )
-        margin_label_style = "font-size:9px; color:#3A4B43; background:transparent;"
+        margin_label_style = "font-size:12px; color:#3A4B43; background:transparent;"
         h_margin_lbl = QLabel("H margin")
         h_margin_lbl.setStyleSheet(margin_label_style)
         v_margin_lbl = QLabel("V margin")
@@ -668,14 +813,14 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         fix_btn = QPushButton("Fix ROI")
         fix_btn.setStyleSheet(_SMALL_BTN_STYLE)
-        fix_btn.setFixedHeight(24)
+        fix_btn.setFixedHeight(30)
         fix_btn.setToolTip("Capture the current ROI size, or arm the next drawn ROI as the fixed size.")
         fix_btn.clicked.connect(self._on_add_fixed_roi_clicked)
         fixed_row.addWidget(fix_btn)
 
         cancel_btn = QPushButton("Cancel Fixed ROI")
         cancel_btn.setStyleSheet(_SMALL_BTN_STYLE)
-        cancel_btn.setFixedHeight(24)
+        cancel_btn.setFixedHeight(30)
         cancel_btn.setToolTip("Return all WB image windows to freehand ROI drawing.")
         cancel_btn.clicked.connect(self._on_cancel_fixed_roi_clicked)
         fixed_row.addWidget(cancel_btn)
@@ -685,7 +830,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         self._fixed_roi_list.setMinimumHeight(54)
         self._fixed_roi_list.setMaximumHeight(82)
         self._fixed_roi_list.setStyleSheet(
-            "QListWidget { background:#FFFFFF; border:1px solid #CBD9D1; border-radius:6px; font-size:10px; }"
+            "QListWidget { background:#FFFFFF; border:1px solid #CBD9D1; border-radius:6px; font-size:12px; }"
             "QListWidget::item { padding:1px 3px; }"
             "QListWidget::item:selected { background:#C9DED2; color:#1E3D2F; }"
         )
@@ -768,14 +913,14 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         layout.setContentsMargins(5, 0, 2, 0)
         layout.setSpacing(3)
         label = QLabel(str(item.data(_FIXED_ROI_NAME_ROLE) or item.text()))
-        label.setStyleSheet("font-size:10px; color:#2C4A3D;")
+        label.setStyleSheet("font-size:12px; color:#2C4A3D;")
         layout.addWidget(label, 1)
         delete_btn = QToolButton()
         delete_btn.setText("×")
         delete_btn.setToolTip("Delete this fixed ROI size")
-        delete_btn.setFixedSize(16, 16)
+        delete_btn.setFixedSize(20, 20)
         delete_btn.setStyleSheet(
-            "QToolButton { border:1px solid #9EB3A8; border-radius:8px; background:#F7FAF8; color:#6A7A72; font-size:10px; }"
+            "QToolButton { border:1px solid #9EB3A8; border-radius:8px; background:#F7FAF8; color:#6A7A72; font-size:12px; }"
             "QToolButton:hover { background:#F0D7D7; color:#8A3B3B; border-color:#C99595; }"
         )
         delete_btn.clicked.connect(lambda _checked=False, it=item: self._delete_fixed_roi_item(it))
@@ -805,7 +950,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         self._blot_file_list = QListWidget()
         self._blot_file_list.setMaximumHeight(86)
         self._blot_file_list.setStyleSheet(
-            "QListWidget { background:#FFFFFF; border:1px solid #C9B6B6; border-radius:6px; font-size:10px; }"
+            "QListWidget { background:#FFFFFF; border:1px solid #C9B6B6; border-radius:6px; font-size:12px; }"
             "QListWidget::item { padding:2px 4px; }"
             "QListWidget::item:selected { background:#E6CACA; color:#4A2428; }"
         )
@@ -866,18 +1011,18 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         row_layout.setContentsMargins(6, 0, 4, 0)
         row_layout.setSpacing(4)
         lbl = _TemplateNameLabel(str(summary["name"]), str(summary["id"]))
-        lbl.setStyleSheet("font-size:10px; color:#4A2428;")
+        lbl.setStyleSheet("font-size:12px; color:#4A2428;")
         lbl.setCursor(Qt.CursorShape.IBeamCursor)
         lbl.setToolTip("Double-click to rename this saved Blot File")
         lbl.doubleClicked.connect(self._on_rename_blot_file)
         row_layout.addWidget(lbl, 1)
         del_btn = QToolButton()
         del_btn.setText("×")
-        del_btn.setFixedSize(16, 16)
+        del_btn.setFixedSize(20, 20)
         del_btn.setToolTip(f'Delete Blot File "{summary["name"]}"')
         del_btn.setStyleSheet(
             "QToolButton { border:1px solid #BCA0A0; border-radius:8px; "
-            "background:#FDF8F8; color:#7A5B5B; font-size:10px; }"
+            "background:#FDF8F8; color:#7A5B5B; font-size:12px; }"
             "QToolButton:hover { background:#F0D7D7; color:#8A3B3B; border-color:#C99595; }"
         )
         del_btn.clicked.connect(lambda _=False, bid=summary["id"]: self._on_delete_blot_file(bid))
@@ -1117,6 +1262,9 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         self._active_slot_ref = ref
         self._refresh_selected_slot_label()
         self._on_canvas_selection_changed()
+        if self._current_step == 1:
+            # Picking a frame is the start of filling it.
+            self.go_to_step(2)
         if self._tutorial_mode:
             self.workflowEvent.emit("blot_frame_selected")
 
@@ -1496,7 +1644,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         self._export_pdf_btn = QPushButton("PDF")
         self._export_pdf_btn.setObjectName("exportFormatButton")
-        self._export_pdf_btn.setFixedHeight(25)
+        self._export_pdf_btn.setFixedHeight(36)
         self._export_pdf_btn.setStyleSheet(_SECONDARY_EXPORT_BTN_STYLE)
         self._export_pdf_btn.setToolTip("Export Figure as PDF")
         self._export_pdf_btn.clicked.connect(self._on_export_pdf)
@@ -1504,7 +1652,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         self._export_tiff_btn = QPushButton("TIFF")
         self._export_tiff_btn.setObjectName("exportFormatButton")
-        self._export_tiff_btn.setFixedHeight(25)
+        self._export_tiff_btn.setFixedHeight(36)
         self._export_tiff_btn.setStyleSheet(_SECONDARY_EXPORT_BTN_STYLE)
         self._export_tiff_btn.setToolTip("Export Figure as TIFF")
         self._export_tiff_btn.clicked.connect(self._on_export_tiff)
@@ -1512,7 +1660,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         self._export_pptx_btn = QPushButton("PPTX")
         self._export_pptx_btn.setObjectName("exportFormatButton")
-        self._export_pptx_btn.setFixedHeight(25)
+        self._export_pptx_btn.setFixedHeight(36)
         self._export_pptx_btn.setStyleSheet(_SECONDARY_EXPORT_BTN_STYLE)
         self._export_pptx_btn.setToolTip("Export Figure as PPTX")
         if not PPTX_AVAILABLE:
@@ -1530,7 +1678,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
                 "PPTX export requires python-pptx.\n"
                 "pip install python-pptx"
             )
-            note.setStyleSheet("color:#A66; font-size:9px;")
+            note.setStyleSheet("color:#A66; font-size:12px;")
             bl.addWidget(note)
 
         return grp

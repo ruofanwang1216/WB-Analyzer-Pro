@@ -2654,10 +2654,14 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         if key is None:
             return
         sizes = memory.get(key)
+        total = max(sum(self._workspace_splitter.sizes()), 1)
         if sizes and len(sizes) == 2:
-            total = max(sum(self._workspace_splitter.sizes()), 1)
             scale = total / max(sum(sizes), 1)
             self._workspace_splitter.setSizes([max(1, int(v * scale)) for v in sizes])
+        elif key == "workspace_layout":
+            # The preview plus the fixed step panel need a little over half.
+            left = max(360, int(total * 0.42))
+            self._workspace_splitter.setSizes([left, max(360, total - left)])
         if key == "workspace_quant":
             for name, splitter in (
                 ("center", self._center_splitter),

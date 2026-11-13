@@ -1,62 +1,112 @@
 """Shared button stylesheets for the WB figure workspace."""
 from __future__ import annotations
 
-# Toolbar button height cap — keeps the annotation bar compact
-_TOOLBAR_BTN_H = 26
+# Control heights shared by the canvas bar and the step panel
+_TOOLBAR_BTN_H = 30
+_PANEL_BTN_H = 36
 
 
 _APPLY_BTN_STYLE = (
     "QPushButton {"
-    "  background-color: #B8D4C2;"
-    "  border: 1px solid #8FB5A0;"
-    "  border-radius: 6px;"
-    "  color: #1E3D2F;"
-    "  padding: 4px 10px;"
-    "  font-size: 11px;"
+    "  background-color: #1F6B4A;"
+    "  border: 1px solid #1F6B4A;"
+    "  border-radius: 8px;"
+    "  color: #FFFFFF;"
+    "  padding: 6px 12px;"
+    "  font-size: 13px;"
     "  font-weight: 600;"
     "}"
-    "QPushButton:hover { background-color: #A8C8B4; }"
+    "QPushButton:hover { background-color: #134A32; }"
+    "QPushButton:disabled { background-color: #9DBBAD; border-color: #9DBBAD; }"
 )
 
 
 _SMALL_BTN_STYLE = (
     "QPushButton {"
-    "  background-color: #DCE9E2;"
-    "  border: 1px solid #B0C8BB;"
-    "  border-radius: 5px;"
-    "  color: #2C4A3D;"
-    "  padding: 2px 8px;"
-    "  font-size: 10px;"
+    "  background-color: #FFFFFF;"
+    "  border: 1px solid #C9D3CE;"
+    "  border-radius: 8px;"
+    "  color: #3B4A43;"
+    "  padding: 4px 12px;"
+    "  font-size: 12px;"
     "}"
-    "QPushButton:hover { background-color: #CCDFD5; }"
+    "QPushButton:hover { background-color: #E3EFE8; border-color: #1F6B4A; }"
+    "QPushButton:disabled { color: #9AA8A1; border-color: #E4E9E6; }"
 )
 
 
 _HIGHLIGHT_BTN_STYLE = (
     "QPushButton {"
-    "  background-color: #91BFA5;"
-    "  border: 1px solid #6F9E82;"
-    "  border-radius: 5px;"
-    "  color: #173C2C;"
-    "  padding: 2px 9px;"
-    "  font-size: 10px;"
+    "  background-color: #FFFFFF;"
+    "  border: 1px solid #1F6B4A;"
+    "  border-radius: 8px;"
+    "  color: #1F6B4A;"
+    "  padding: 4px 12px;"
+    "  font-size: 12px;"
     "  font-weight: 600;"
     "}"
-    "QPushButton:hover { background-color: #82B497; }"
-    "QPushButton:pressed { background-color: #73A689; }"
+    "QPushButton:hover { background-color: #E3EFE8; }"
+    "QPushButton:pressed { background-color: #CFE3D8; }"
 )
 
 
 _SECONDARY_EXPORT_BTN_STYLE = (
     "QPushButton {"
     "  background-color: #FFFFFF;"
-    "  border: 1px solid #B8C9C0;"
-    "  border-radius: 5px;"
-    "  color: #385248;"
-    "  padding: 2px 7px;"
-    "  font-size: 9px;"
-    "  font-weight: 500;"
+    "  border: 1px solid #1F6B4A;"
+    "  border-radius: 8px;"
+    "  color: #1F6B4A;"
+    "  padding: 6px 8px;"
+    "  font-size: 13px;"
+    "  font-weight: 600;"
     "}"
-    "QPushButton:hover { background-color: #EEF5F1; border-color: #91AE9F; }"
-    "QPushButton:disabled { background-color: #E0E8E4; color: #8BA098; }"
+    "QPushButton:hover { background-color: #E3EFE8; }"
+    "QPushButton:disabled { background-color: #F3F5F4; color: #9AA8A1; border-color: #E4E9E6; }"
+)
+
+
+# ── Step panel (right-hand side of the Figure Layout workspace) ───────────────
+
+_PANEL_BTN_STYLE = (
+    "QPushButton {"
+    "  background-color: #FFFFFF;"
+    "  border: 1px solid #C9D3CE;"
+    "  border-radius: 8px;"
+    "  color: #1C2622;"
+    "  padding: 6px 12px;"
+    "  font-size: 13px;"
+    "  text-align: left;"
+    "}"
+    "QPushButton:hover { background-color: #E3EFE8; border-color: #1F6B4A; }"
+)
+
+_PANEL_ACCENT_BTN_STYLE = (
+    "QPushButton {"
+    "  background-color: #FFFFFF;"
+    "  border: 1px solid #1F6B4A;"
+    "  border-radius: 8px;"
+    "  color: #1F6B4A;"
+    "  padding: 6px 12px;"
+    "  font-size: 13px;"
+    "  font-weight: 600;"
+    "}"
+    "QPushButton:hover { background-color: #E3EFE8; }"
+)
+
+_PANEL_TOOL_BTN_STYLE = (
+    "QToolButton {"
+    "  background-color: #FFFFFF;"
+    "  border: 1px solid #C9D3CE;"
+    "  border-radius: 6px;"
+    "  color: #1C2622;"
+    "  font-size: 13px;"
+    "  padding: 2px 6px;"
+    "}"
+    "QToolButton:checked { background-color: #E3EFE8; border-color: #1F6B4A; color: #134A32; }"
+    "QToolButton:hover { background-color: #E3EFE8; }"
+    "QToolButton:disabled { color: #9AA8A1; border-color: #E4E9E6; }"
+)
+
+_PANEL_HEADING_STYLE = (
+    "font-size:12px; font-weight:600; color:#4A5A53; background:transparent;"
 )

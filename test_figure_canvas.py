@@ -1488,7 +1488,8 @@ class FigureModeStructureTests(unittest.TestCase):
 
         self.assertEqual(window._grp1.title_text(), "Step 1: Choose Layout")
         self.assertEqual(window._grp4.title_text(), "Step 2: Fill Blot Frames")
-        self.assertEqual(window._SIDEBAR_WIDTH, 210)
+        self.assertEqual(window._SIDEBAR_WIDTH, 304)
+        self.assertEqual(window._step_panel.width(), 304)
         self.assertTrue(window._auto_detect_radio.isChecked())
         self.assertEqual(window._auto_fit_h_margin.value(), 4)
         self.assertEqual(window._auto_fit_v_margin.value(), 4)
@@ -1498,10 +1499,19 @@ class FigureModeStructureTests(unittest.TestCase):
         self.assertEqual(window._grp5._step_badge.text(), "3")
         self.assertEqual(window._grp6._step_badge.text(), "4")
 
-        self.assertIs(window._sidebar_layout.itemAt(1).widget(), window._grp1)
-        self.assertIs(window._sidebar_layout.itemAt(2).widget(), window._grp4)
-        self.assertIs(window._sidebar_layout.itemAt(3).widget(), window._grp5)
-        self.assertIs(window._sidebar_layout.itemAt(4).widget(), window._grp6)
+        # Each section is a page of the four-step panel on the right.
+        pages = window._step_pages
+        self.assertEqual(len(pages), 4)
+        self.assertEqual(len(window._step_buttons), 4)
+        self.assertTrue(pages[0].isAncestorOf(window._grp1))
+        self.assertTrue(pages[0].isAncestorOf(window._grp5))
+        self.assertTrue(pages[1].isAncestorOf(window._grp4))
+        self.assertTrue(pages[2].isAncestorOf(window._annotation_panel))
+        self.assertTrue(pages[3].isAncestorOf(window._grp6))
+        self.assertTrue(pages[3].isAncestorOf(window._save_panel))
+        self.assertEqual(window.current_step(), 1)
+        self.assertTrue(window._step_buttons[0].isChecked())
+        self.assertFalse(window._step_prev_btn.isEnabled())
         self.assertFalse(window._grp4.isHidden())
         self.assertFalse(window._grp4._expanded)
 
@@ -1534,7 +1544,7 @@ class FigureModeStructureTests(unittest.TestCase):
                 window._export_tiff_btn.height(),
                 window._export_pptx_btn.height(),
             },
-            {25},
+            {36},
         )
         self.assertEqual(
             {
@@ -1580,9 +1590,9 @@ class FigureModeStructureTests(unittest.TestCase):
             button for button in window._grp1.findChildren(QPushButton)
             if button.text() == "Add Extra Blot Frame"
         )
-        self.assertEqual(create_frame.height(), 28)
-        self.assertEqual(window._saved_templates_btn.height(), 25)
-        self.assertEqual(add_extra.height(), 24)
+        self.assertEqual(create_frame.height(), 36)
+        self.assertEqual(window._saved_templates_btn.height(), 30)
+        self.assertEqual(add_extra.height(), 30)
         self.assertEqual(create_frame.objectName(), "step1PrimaryButton")
         self.assertEqual(add_extra.objectName(), "step1TextButton")
         create_condition = next(
@@ -1601,7 +1611,7 @@ class FigureModeStructureTests(unittest.TestCase):
         self.assertEqual(window._manual_detect_radio.text(), "Manual")
         self.assertFalse(window._auto_disclosure.isHidden())
         self.assertFalse(window._auto_disclosure.is_expanded())
-        self.assertEqual(window._auto_disclosure._header.height(), 26)
+        self.assertEqual(window._auto_disclosure._header.height(), 30)
         self.assertTrue(window._fixed_roi_disclosure.isHidden())
         self.assertTrue(window._selected_slot_lbl.isHidden())
         self.assertTrue(window._auto_fit_alignment.isHidden())
@@ -3096,6 +3106,64 @@ class FigureModeStructureTests(unittest.TestCase):
         window._on_canvas_blot_selection_cleared()
         self.assertFalse(window._grp4._expanded)
 
+    def test_step_panel_shows_one_step_at_a_time_and_jumps_freely(self) -> None:
+        window = FigureModeWindow()
+
+        window.go_to_step(3)
+        self.assertEqual(window.current_step(), 3)
+        self.assertEqual(window._step_stack.currentIndex(), 2)
+        self.assertTrue(window._step_buttons[2].isChecked())
+        self.assertFalse(window._step_buttons[0].isChecked())
+
+        window._step_buttons[0].click()
+        self.assertEqual(window.current_step(), 1)
+
+        window._step_next_btn.click()
+        self.assertEqual(window.current_step(), 2)
+        window._step_prev_btn.click()
+        self.assertEqual(window.current_step(), 1)
+
+        window.go_to_step(4)
+        self.assertFalse(window._step_next_btn.isEnabled())
+        window.go_to_step(99)
+        self.assertEqual(window.current_step(), 4)
+
+    def test_selecting_a_frame_on_step_one_moves_to_fill_step(self) -> None:
+        window = FigureModeWindow()
+        window._on_apply_structure()
+        self.assertEqual(window.current_step(), 1)
+
+        window._on_canvas_blot_selected(SourceRef(panel_idx=0, slot_idx=0))
+        self.assertEqual(window.current_step(), 2)
+
+        # Going back keeps what was already done.
+        window.go_to_step(1)
+        self.assertIsNotNone(window._project)
+        self.assertEqual(window._active_slot_ref, SourceRef(panel_idx=0, slot_idx=0))
+
+    def test_reveal_widget_opens_the_step_that_holds_it(self) -> None:
+        window = FigureModeWindow()
+
+        window.reveal_widget(window._export_pdf_btn)
+        self.assertEqual(window.current_step(), 4)
+        window.reveal_widget(window._bold_btn)
+        self.assertEqual(window.current_step(), 3)
+        window.reveal_widget(window._blot_file_list)
+        self.assertEqual(window.current_step(), 1)
+        # Controls outside the panel leave the step alone.
+        window.reveal_widget(window._fit_center_btn)
+        self.assertEqual(window.current_step(), 1)
+
+    def test_step_panel_follows_the_language(self) -> None:
+        window = FigureModeWindow()
+        window.set_language("zh_CN")
+        self.assertEqual(window._step_buttons[1].text(), "2\n填充图框")
+        self.assertEqual(window._step_title_lbl.text(), "第 1 步  选择布局")
+        self.assertEqual(window._step_next_btn.text(), "下一步")
+        window.set_language("en")
+        self.assertEqual(window._step_buttons[1].text(), "2\nFill Frames")
+        self.assertEqual(window._step_prev_btn.text(), "Previous")
+
     def test_new_overlay_text_is_selected_and_enables_font_controls(self) -> None:
         window = FigureModeWindow()
         detail_row_height = window._selection_detail_toolbar.height()
@@ -3364,7 +3432,7 @@ class FigureModeStructureTests(unittest.TestCase):
             0.95,
             delta=0.03,
         )
-        self.assertIn("background-color: #91BFA5", window._fit_center_btn.styleSheet())
+        self.assertIn("border: 1px solid #C9D3CE", window._fit_center_btn.styleSheet())
 
     def test_layout_engine_does_not_render_panel_letters(self) -> None:
         project = TemplateEngine.build_project("multi_panel", 3, 2, 4)

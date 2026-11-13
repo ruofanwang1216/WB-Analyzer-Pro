@@ -191,7 +191,7 @@ class _CollapseGroup(QWidget):
             self._step_badge.setFixedSize(22, 22)
             self._step_badge.setStyleSheet(
                 "QLabel { background:#2F8A64; color:#FFFFFF; border-radius:11px; "
-                "font-weight:700; font-size:10px; }"
+                "font-weight:700; font-size:12px; }"
             )
             self._step_badge.setAttribute(
                 Qt.WidgetAttribute.WA_TransparentForMouseEvents,
@@ -201,7 +201,7 @@ class _CollapseGroup(QWidget):
 
         self._title_label = QLabel(title)
         self._title_label.setStyleSheet(
-            "font-weight:600; color:#24352E; font-size:11px; background:transparent;"
+            "font-weight:600; color:#24352E; font-size:13px; background:transparent;"
         )
         self._title_label.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents,
@@ -251,9 +251,20 @@ class _CollapseGroup(QWidget):
             self._toggle()
             event.accept()
 
+    def set_flat(self, flat: bool) -> None:
+        """Show only the body: the step panel supplies the title and paging."""
+        self._flat = bool(flat)
+        self._header.setVisible(not self._flat)
+        if self._flat:
+            self.layout().setContentsMargins(0, 0, 0, 0)
+            self._body_layout.setContentsMargins(0, 0, 0, 0)
+            self._body.setStyleSheet("QWidget { background-color:transparent; }")
+            self._body.setVisible(True)
+
     def set_expanded(self, expanded: bool) -> None:
         self._expanded = bool(expanded)
-        self._body.setVisible(self._expanded)
+        # A flat section is a whole page; it never folds away.
+        self._body.setVisible(self._expanded or getattr(self, "_flat", False))
         self._toggle_btn.setText("⌄" if self._expanded else "›")
         self._refresh_header_style()
 
@@ -280,7 +291,7 @@ class _InlineDisclosure(QWidget):
         self._header = QFrame()
         self._header.setObjectName("inlineDisclosureHeader")
         self._header.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._header.setFixedHeight(26)
+        self._header.setFixedHeight(30)
         self._header.setStyleSheet(
             "QFrame#inlineDisclosureHeader { background:#FFFFFF; "
             "border:1px solid #D3DDD8; border-radius:6px; }"
@@ -290,7 +301,7 @@ class _InlineDisclosure(QWidget):
         header_layout.setSpacing(4)
         self._title_label = QLabel(title)
         self._title_label.setStyleSheet(
-            "font-size:10px; font-weight:500; color:#2F3D36; background:transparent;"
+            "font-size:12px; font-weight:500; color:#2F3D36; background:transparent;"
         )
         self._title_label.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents,
