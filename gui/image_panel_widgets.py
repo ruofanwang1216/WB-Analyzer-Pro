@@ -158,6 +158,25 @@ class _ImagePanelWidget(QFrame):
                 background-color: {COLOR_ACCENT_LIGHT};
                 border-color: #1F6B4A;
             }}
+            QToolButton#panel_fit_btn {{
+                background-color: #FFFFFF;
+                border: 1px solid #C9D3CE;
+                border-radius: 7px;
+                color: #3B4A43;
+                min-height: 26px;
+                max-height: 26px;
+                padding: 0px 10px;
+                font-size: 12px;
+            }}
+            QToolButton#panel_fit_btn:hover {{
+                background-color: {COLOR_ACCENT_LIGHT};
+                border-color: #1F6B4A;
+                color: {COLOR_ACCENT_TEXT};
+            }}
+            QToolButton#panel_fit_btn:disabled {{
+                color: #9AA8A1;
+                border-color: #E4E9E6;
+            }}
             QToolButton#panel_zoom_btn:pressed {{
                 background-color: #C5E2D7;
             }}
@@ -217,6 +236,12 @@ class _ImagePanelWidget(QFrame):
         self.zoom_in_btn.setIconSize(QSize(20, 20))
         self.zoom_in_btn.setToolTip("Zoom in image")
         top_row.addWidget(self.zoom_in_btn)
+        # One click brings the whole blot back, as large as the panel allows.
+        self.fit_btn = QToolButton()
+        self.fit_btn.setObjectName("panel_fit_btn")
+        self.fit_btn.setText("Fit")
+        self.fit_btn.setToolTip("Fit the whole image to this panel")
+        top_row.addWidget(self.fit_btn)
         self.filename_label = QLabel("")
         self.filename_label.setObjectName("panel_filename_label")
         self.filename_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)

@@ -93,4 +93,6 @@ ZH_CN_REDESIGN: dict[str, str] = {
     "Add the +/− condition labels above the lanes": "在泳道上方添加 +/− 条件标注",
     "Click New Blot Frames. Tutorial defaults are Panels = 1, Blot Frames = 2, and Lanes = 3, matching the supplied setup screenshot.": "点击“新建印迹图框”。教程默认值为版面数 1、印迹图框数 2、泳道数 3，与提供的设置截图一致。",
     "Click Add Conditions. Tutorial defaults are one condition row and one evenly divided Group Level 1.": "点击“添加条件”。教程默认设置为 1 个条件行，并创建 1 个采用均分方式的 Group Level 1。",
+    "Fit": "适应",
+    "Fit the whole image to this panel": "让整张图像刚好铺满这个窗口",
 }

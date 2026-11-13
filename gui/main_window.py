@@ -892,6 +892,8 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             panel.select_checkbox.setToolTip(tr("Select this image", language))
             panel.zoom_out_btn.setToolTip(tr("Zoom out image", language))
             panel.zoom_in_btn.setToolTip(tr("Zoom in image", language))
+            panel.fit_btn.setText(tr("Fit", language))
+            panel.fit_btn.setToolTip(tr("Fit the whole image to this panel", language))
             panel.remove_btn.setToolTip(tr("Remove image", language))
             panel.rotate_custom_action.setText(tr("Custom", language))
             panel.rotate_custom_action.setToolTip(tr("Press Enter/Return to apply", language))
@@ -1667,6 +1669,13 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         else:
             canvas.zoom_out()
 
+    def _on_panel_fit_requested(self, slot_index: int) -> None:
+        """Fit one image to its panel and make it the active image."""
+        if slot_index not in self._loaded_slot_indices():
+            return
+        self._set_active_slot_from_interaction(slot_index)
+        self._image_panels[slot_index].canvas.reset_zoom()
+
     def _on_panel_custom_rotate_requested(self, slot_index: int) -> None:
         if slot_index not in self._loaded_slot_indices():
             return
@@ -2119,6 +2128,9 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             )
             panel.zoom_in_btn.clicked.connect(
                 lambda _=False, i=idx: self._on_panel_zoom_requested(i, zoom_in=True)
+            )
+            panel.fit_btn.clicked.connect(
+                lambda _=False, i=idx: self._on_panel_fit_requested(i)
             )
             panel.remove_btn.clicked.connect(lambda _, i=idx: self._on_panel_remove_requested(i))
             panel.transform_btn.clicked.connect(lambda _, i=idx: self._on_panel_transform_requested(i))

@@ -100,6 +100,33 @@ class ImagePanelControlTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_fit_button_refits_the_image_and_activates_its_panel(self) -> None:
+        window = self._make_window()
+        try:
+            window._slot_states[0]["path"] = "first.tif"
+            window._slot_states[0]["selected"] = True
+            window._slot_states[1]["path"] = "second.tif"
+            window._refresh_image_panel_layout()
+            second_panel = window._image_panels[1]
+            self.assertEqual(second_panel.fit_btn.text(), "Fit")
+
+            with patch.object(second_panel.canvas, "reset_zoom") as reset_zoom:
+                second_panel.fit_btn.click()
+
+            reset_zoom.assert_called_once_with()
+            self.assertEqual(window._active_slot_index, 1)
+            self.assertTrue(second_panel.is_shown_selected())
+
+            # An empty panel ignores the button.
+            with patch.object(window._image_panels[2].canvas, "reset_zoom") as unused:
+                window._on_panel_fit_requested(2)
+            unused.assert_not_called()
+
+            window._set_language("zh_CN", persist=False)
+            self.assertEqual(second_panel.fit_btn.text(), "适应")
+        finally:
+            window.close()
+
     def test_each_panel_has_working_zoom_buttons_that_activate_its_image(self) -> None:
         window = self._make_window()
         try:
