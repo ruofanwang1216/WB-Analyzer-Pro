@@ -13,6 +13,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from core.lane_auto_detect import detect_lanes_in_roi
+from core.measure import background_strips, local_background_level, measure_all_lanes_in_array
 from gui.main_window import MainWindow
 
 
@@ -155,6 +156,86 @@ class LaneAutoDetectCoreTests(unittest.TestCase):
         self.assertEqual(result["lanes"], [])
 
 
+class LocalBackgroundTests(unittest.TestCase):
+    def test_strips_hug_the_box_and_are_a_quarter_of_its_height(self) -> None:
+        strips = background_strips((20.0, 30.0, 24.0, 12.0), [], (100.0, 100.0))
+        self.assertEqual(strips, [(20.0, 27.0, 24.0, 3.0), (20.0, 42.0, 24.0, 3.0)])
+
+    def test_strip_thickness_is_limited_to_two_to_four_pixels(self) -> None:
+        thin = background_strips((20.0, 30.0, 24.0, 4.0), [], (100.0, 100.0))
+        tall = background_strips((20.0, 30.0, 24.0, 40.0), [], (100.0, 100.0))
+        self.assertEqual({strip[3] for strip in thin}, {2.0})
+        self.assertEqual({strip[3] for strip in tall}, {4.0})
+
+    def test_side_touching_another_box_or_the_image_edge_is_dropped(self) -> None:
+        other_below = (20.0, 43.0, 24.0, 10.0)
+        self.assertEqual(
+            background_strips((20.0, 30.0, 24.0, 12.0), [other_below], (100.0, 100.0)),
+            [(20.0, 27.0, 24.0, 3.0)],
+        )
+        self.assertEqual(
+            background_strips((20.0, 1.0, 24.0, 12.0), [], (100.0, 100.0)),
+            [(20.0, 13.0, 24.0, 3.0)],
+        )
+
+    def _image(self) -> np.ndarray:
+        image = np.full((60, 60), 1000, dtype=np.uint16)
+        image[30:42, 20:44] = 5000  # the band, exactly filling its box
+        return image
+
+    def _roi(self, strips: list[tuple[float, float, float, float]]) -> dict:
+        return {
+            "x": 20, "y": 30, "width": 24, "height": 12, "lane": 1, "band": 1,
+            "background_rois": [
+                {"x": x, "y": y, "width": w, "height": h} for x, y, w, h in strips
+            ],
+            "light_on_dark": True,
+        }
+
+    def test_net_values_subtract_the_local_background(self) -> None:
+        image = self._image()
+        strips = background_strips((20.0, 30.0, 24.0, 12.0), [], (60.0, 60.0))
+
+        row = measure_all_lanes_in_array(image, [self._roi(strips)])[0]
+
+        self.assertEqual(row["Mean"], 5000.0)
+        self.assertEqual(row["Background"], 1000.0)
+        self.assertEqual(row["Net Mean"], 4000.0)
+        self.assertEqual(row["Net IntDen"], 4000.0 * 24 * 12)
+
+    def test_contaminated_side_is_ignored(self) -> None:
+        # A non-specific band right above the box must not raise the background.
+        image = self._image()
+        image[27:30, 20:44] = 3000
+        strips = background_strips((20.0, 30.0, 24.0, 12.0), [], (60.0, 60.0))
+
+        level = local_background_level(
+            image, [{"x": x, "y": y, "width": w, "height": h} for x, y, w, h in strips]
+        )
+
+        self.assertEqual(level, 1000.0)
+
+    def test_a_few_stray_pixels_do_not_move_the_background(self) -> None:
+        image = self._image()
+        image[28, 20:26] = 60000  # dust speck inside the upper strip
+        strips = background_strips((20.0, 30.0, 24.0, 12.0), [], (60.0, 60.0))
+
+        row = measure_all_lanes_in_array(image, [self._roi(strips)])[0]
+
+        self.assertEqual(row["Background"], 1000.0)
+
+    def test_no_usable_background_is_reported_not_guessed(self) -> None:
+        row = measure_all_lanes_in_array(self._image(), [self._roi([])])[0]
+        self.assertIsNone(row["Background"])
+        self.assertIsNone(row["Net IntDen"])
+
+    def test_plain_rois_keep_the_original_columns(self) -> None:
+        row = measure_all_lanes_in_array(
+            self._image(), [{"x": 20, "y": 30, "width": 24, "height": 12}]
+        )[0]
+        self.assertNotIn("Background", row)
+
+
 class LaneAutoDetectWindowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -195,6 +276,8 @@ class LaneAutoDetectWindowTests(unittest.TestCase):
             rois = window._quant_auto_band_rois()
             self.assertEqual([roi["lane"] for roi in rois], [1, 2, 3, 4, 5, 6])
             self.assertEqual([roi["band_label"] for roi in rois], [f"#{i}" for i in range(1, 7)])
+            self.assertTrue(all(len(roi["background_rois"]) == 2 for roi in rois))
+            self.assertEqual(len(window.canvas._auto_bg_strip_items), 12)
         finally:
             window.close()
 

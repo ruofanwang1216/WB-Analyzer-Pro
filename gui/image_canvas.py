@@ -545,6 +545,7 @@ class ImageCanvas(QGraphicsView):
         self._quant_auto_review = False
         self._drawing_new_auto_band = False
         self._new_auto_band_preview: QGraphicsRectItem | None = None
+        self._auto_bg_strip_items: list[QGraphicsRectItem] = []
         self._rotation_mode = False
         self._rotation_dragging = False
         self._rotation_angle_deg = 0.0
@@ -620,6 +621,7 @@ class ImageCanvas(QGraphicsView):
         self._quant_auto_review = False
         self._drawing_new_auto_band = False
         self._new_auto_band_preview = None
+        self._auto_bg_strip_items = []
         self._auto_edit_enabled = False
         self._rotation_mode = False
         self._rotation_dragging = False
@@ -1276,6 +1278,7 @@ class ImageCanvas(QGraphicsView):
         for label in self._auto_band_labels:
             self._scene.removeItem(label)
         self._auto_band_labels.clear()
+        self._clear_auto_background_strips()
         self.clear_manual_band_labels()
         self._auto_lane_frames.clear()
         if self._final_crop_item is not None:
@@ -1432,6 +1435,7 @@ class ImageCanvas(QGraphicsView):
             item.set_editing_enabled(enabled)
         if not enabled:
             self._quant_auto_review = False
+            self._clear_auto_background_strips()
             self._drawing_new_auto_band = False
             self._remove_new_auto_band_preview()
             self._scene.clearSelection()
@@ -1442,12 +1446,49 @@ class ImageCanvas(QGraphicsView):
         self._remove_new_auto_band_preview()
         self.set_auto_edit_mode(bool(enabled), "move")
         self._quant_auto_review = bool(enabled)
+        self._refresh_auto_background_strips()
 
     def is_quant_auto_review(self) -> bool:
         return self._quant_auto_review
 
     def refresh_auto_band_labels(self) -> None:
         self._refresh_auto_band_labels()
+        self._refresh_auto_background_strips()
+
+    def auto_band_background_strips(self) -> list[tuple[QRectF, list[QRectF]]]:
+        """Each band box (in #N label order) with the background strips it uses."""
+        from core.measure import background_strips
+
+        size = self.image_scene_size()
+        if size is None:
+            return []
+        rects = [item.scene_rect() for item in self._ordered_auto_band_items_row_major()]
+        as_tuples = [(r.x(), r.y(), r.width(), r.height()) for r in rects]
+        result: list[tuple[QRectF, list[QRectF]]] = []
+        for index, rect in enumerate(rects):
+            others = as_tuples[:index] + as_tuples[index + 1:]
+            strips = background_strips(as_tuples[index], others, (size.width(), size.height()))
+            result.append((rect, [QRectF(*strip) for strip in strips]))
+        return result
+
+    def _clear_auto_background_strips(self) -> None:
+        for item in self._auto_bg_strip_items:
+            self._scene.removeItem(item)
+        self._auto_bg_strip_items.clear()
+
+    def _refresh_auto_background_strips(self) -> None:
+        """Outline the local-background strips of every box during auto review."""
+        self._clear_auto_background_strips()
+        if not self._quant_auto_review:
+            return
+        pen = QPen(QColor(90, 110, 130, 200), 1.0, Qt.PenStyle.DotLine)
+        pen.setCosmetic(True)
+        for _rect, strips in self.auto_band_background_strips():
+            for strip in strips:
+                item = self._scene.addRect(strip, pen, QBrush(QColor(90, 110, 130, 28)))
+                item.setZValue(10.8)
+                item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+                self._auto_bg_strip_items.append(item)
 
     def ordered_auto_band_rects(self) -> list[tuple[QRectF, int | None]]:
         """Band boxes with their lane index, in the same order as the #N labels."""

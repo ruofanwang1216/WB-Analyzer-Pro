@@ -133,6 +133,7 @@ class AutoLaneMixin:
             )
             return
 
+        self._quant_auto_light_on_dark = bool(result.get("light_on_dark", True))
         self._band_roi = None
         self._lane_rects = [QRectF(lane["lane_rect"]) for lane in detections]
         self._auto_detections = self._clone_auto_detections(detections)
@@ -170,7 +171,11 @@ class AutoLaneMixin:
         rois: list[dict] = []
         row = 0
         previous: QRectF | None = None
-        for rect, lane_index in self.canvas.ordered_auto_band_rects():
+        lane_indices = [lane for _rect, lane in self.canvas.ordered_auto_band_rects()]
+        light_on_dark = bool(getattr(self, "_quant_auto_light_on_dark", True))
+        for (rect, strips), lane_index in zip(
+            self.canvas.auto_band_background_strips(), lane_indices
+        ):
             if (
                 previous is None
                 or rect.center().x() <= previous.center().x()
@@ -189,6 +194,12 @@ class AutoLaneMixin:
                     "band": row,
                     # Same "#N" as the label drawn above the box on the image.
                     "band_label": f"#{len(rois) + 1}",
+                    # Local background: thin strips right above / below the box,
+                    # already mapped to raw-image space for the measurement.
+                    "background_rois": [
+                        self.canvas.map_canvas_roi_to_raw(strip) for strip in strips
+                    ],
+                    "light_on_dark": light_on_dark,
                 }
             )
         return rois

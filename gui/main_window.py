@@ -2429,7 +2429,10 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         try:
             # Build results DataFrame
             df = pd.DataFrame(results)
-            ordered_cols = ["lane", "band", "Area", "Mean", "Min", "Max", "IntDen", "RawIntDen"]
+            ordered_cols = [
+                "lane", "band", "Area", "Mean", "Min", "Max", "IntDen", "RawIntDen",
+                "Background", "Net Mean", "Net IntDen",
+            ]
             available_cols = [col for col in ordered_cols if col in df.columns]
             df = df[available_cols]
             df.rename(columns={"lane": "Lane", "band": "Band"}, inplace=True)
