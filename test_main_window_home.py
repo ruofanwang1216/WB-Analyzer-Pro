@@ -184,7 +184,7 @@ class MainWindowHomePageTests(unittest.TestCase):
 
         window._set_language(LANG_EN, persist=False)
         self.assertEqual(window._act_open.text(), "Import Images")
-        self.assertEqual(window._figure_generation_btn.text(), "① Quantify & Plot")
+        self.assertEqual(window._figure_generation_btn.text(), "① Quantify && Plot")
         self.assertEqual(window._wb_plot_generation_btn.text(), "② Figure Layout")
 
     def test_image_rotation_menu_uses_compact_icon_actions(self) -> None:

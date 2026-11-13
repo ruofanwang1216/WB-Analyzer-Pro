@@ -196,7 +196,7 @@ class UploadMixin:
         if len(loaded) > 1:
             message = (
                 f"Loaded: {Path(image_path).name} — viewer showing {len(loaded)} images. "
-                "Select one image to draw ROIs."
+                "Click an image to work on it."
             )
         else:
             message = f"Loaded: {Path(image_path).name} — draw a ROI to continue."
