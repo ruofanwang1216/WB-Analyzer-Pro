@@ -298,8 +298,8 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         canvas_vbox = QVBoxLayout(canvas_card)
         canvas_vbox.setContentsMargins(1, 1, 1, 1)
         canvas_vbox.setSpacing(0)
-        # Building the bar also creates the annotation and save panels that
-        # are placed on the step pages below.
+        # The bar carries the annotation tools; building it also creates
+        # the save panel that is placed on the last step page below.
         canvas_vbox.addWidget(self._build_canvas_toolbar())
         canvas_vbox.addWidget(canvas_scroll, 1)
         root.addWidget(canvas_card, 1)
@@ -381,7 +381,6 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         page_contents: list[list[QWidget]] = [
             [self._grp1, _page_heading("Saved Blot Files"), self._grp5],
             [self._grp4],
-            [self._annotation_panel],
             [_page_heading("Export Figure"), self._grp6, self._save_panel],
         ]
         for widgets in page_contents:
@@ -437,14 +436,12 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
     # ── Step panel ────────────────────────────────────────────────────────
 
-    _STEP_TITLES = ("Choose Layout", "Fill Frames", "Annotate", "Save & Export")
+    _STEP_TITLES = ("Choose Layout", "Fill Frames", "Save & Export")
     _STEP_DESCRIPTIONS = (
         "Decide how many blot frames and lanes the figure has, reuse a saved "
         "template, or reopen a saved Blot File.",
         "Click a frame in the preview, draw the band region on the source "
         "image, then press Enter to place it.",
-        "Add text or lines. Select an item in the preview to format it. "
-        "This step is optional.",
         "Export the figure, or save it to keep editing later.",
     )
 
