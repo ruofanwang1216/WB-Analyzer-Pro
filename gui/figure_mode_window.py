@@ -313,12 +313,32 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             "border: 1px solid #D9E0DC; border-radius: 10px; }"
         )
         self._step_panel = panel
-        panel_layout = QVBoxLayout(panel)
+        panel_outer = QVBoxLayout(panel)
+        panel_outer.setContentsMargins(1, 1, 1, 1)
+        panel_outer.setSpacing(0)
+
+        # Tinted header: the step buttons and what the current step is for.
+        header = QFrame()
+        header.setObjectName("workflowStepHeader")
+        header.setStyleSheet(
+            "QFrame#workflowStepHeader { background: #DDE8E2; "
+            "border-top-left-radius: 9px; border-top-right-radius: 9px; }"
+        )
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(12, 12, 12, 12)
+        header_layout.setSpacing(8)
+        panel_outer.addWidget(header)
+
+        body = QWidget()
+        body.setObjectName("workflowStepBody")
+        body.setStyleSheet("QWidget#workflowStepBody { background: transparent; }")
+        panel_layout = QVBoxLayout(body)
         panel_layout.setContentsMargins(12, 12, 12, 12)
         panel_layout.setSpacing(10)
+        panel_outer.addWidget(body, 1)
         self._sidebar_layout = panel_layout
 
-        # Step buttons 1–4 across the top, as wide as the panel.
+        # Step buttons across the top, as wide as the panel.
         steps_row = QHBoxLayout()
         steps_row.setContentsMargins(0, 0, 0, 0)
         steps_row.setSpacing(6)
@@ -332,34 +352,29 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             button.setStyleSheet(
                 "QPushButton#workflowStepButton { background:#FFFFFF; "
-                "border:1px solid #D9E0DC; border-radius:8px; color:#3B4A43; "
+                "border:1px solid #C3D2CA; border-radius:8px; color:#3B4A43; "
                 "font-size:12px; padding:4px 2px; }"
-                "QPushButton#workflowStepButton:hover { background:#F3F5F4; "
-                "border-color:#1F6B4A; }"
-                "QPushButton#workflowStepButton:checked { background:#E3EFE8; "
-                "border-color:#1F6B4A; color:#134A32; font-weight:600; }"
+                "QPushButton#workflowStepButton:hover { border-color:#1F6B4A; "
+                "color:#134A32; }"
+                "QPushButton#workflowStepButton:checked { background:#1F6B4A; "
+                "border-color:#1F6B4A; color:#FFFFFF; font-weight:600; }"
             )
             button.clicked.connect(lambda _checked=False, n=number: self.go_to_step(n))
             steps_row.addWidget(button, 1)
             self._step_buttons.append(button)
-        panel_layout.addLayout(steps_row)
-
-        divider = QFrame()
-        divider.setFixedHeight(1)
-        divider.setStyleSheet("background: #E4E9E6; border: none;")
-        panel_layout.addWidget(divider)
+        header_layout.addLayout(steps_row)
 
         self._step_title_lbl = QLabel("")
         self._step_title_lbl.setStyleSheet(
-            "font-size:15px; font-weight:600; color:#1C2622; background:transparent;"
+            "font-size:15px; font-weight:600; color:#134A32; background:transparent;"
         )
-        panel_layout.addWidget(self._step_title_lbl)
+        header_layout.addWidget(self._step_title_lbl)
         self._step_desc_lbl = QLabel("")
         self._step_desc_lbl.setWordWrap(True)
         self._step_desc_lbl.setStyleSheet(
-            "font-size:12px; color:#4A5A53; background:transparent;"
+            "font-size:12px; color:#3B4A43; background:transparent;"
         )
-        panel_layout.addWidget(self._step_desc_lbl)
+        header_layout.addWidget(self._step_desc_lbl)
 
         # One page per step; only the current step's controls are on screen.
         self._grp1 = self._build_step1()

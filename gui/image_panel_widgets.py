@@ -35,7 +35,7 @@ class _PanelSelectionCheckBox(QCheckBox):
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         painter.setPen(pen)
-        left = (self.width() - 14.0) / 2.0
+        left = 3.0 + (16.0 - 14.0) / 2.0
         top = (self.height() - 14.0) / 2.0
         painter.drawLine(QPointF(left + 3.2, top + 7.2), QPointF(left + 5.8, top + 9.8))
         painter.drawLine(QPointF(left + 5.8, top + 9.8), QPointF(left + 10.8, top + 4.2))
@@ -56,18 +56,19 @@ class _ImagePanelWidget(QFrame):
             }}
             QCheckBox#panel_select_checkbox {{
                 background: transparent;
-                min-width: 14px;
-                max-width: 14px;
-                min-height: 14px;
-                max-height: 14px;
-                margin: 0px;
+                min-width: 22px;
+                max-width: 22px;
+                min-height: 22px;
+                max-height: 22px;
+                margin: 0px 2px 0px 0px;
                 padding: 0px;
             }}
             QCheckBox#panel_select_checkbox::indicator {{
-                width: 12px;
-                height: 12px;
-                border-radius: 2px;
-                border: 1px solid #9CB0BC;
+                width: 16px;
+                height: 16px;
+                margin-left: 2px;
+                border-radius: 4px;
+                border: 1px solid #9AA8A1;
                 background: #FFFFFF;
             }}
             QCheckBox#panel_select_checkbox::indicator:checked {{
@@ -161,6 +162,11 @@ class _ImagePanelWidget(QFrame):
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.setSpacing(6)
+        # The "use this image" tick leads the row, clear of the tool buttons.
+        self.select_checkbox = _PanelSelectionCheckBox()
+        self.select_checkbox.setObjectName("panel_select_checkbox")
+        self.select_checkbox.setToolTip("Select this image")
+        top_row.addWidget(self.select_checkbox)
         self.transform_btn = QPushButton("◐")
         self.transform_btn.setObjectName("panel_transform_btn")
         self.transform_btn.setToolTip("Image Transform: Low / High / Gamma")
@@ -189,10 +195,6 @@ class _ImagePanelWidget(QFrame):
         )
         self.rotate_btn.setMenu(self.rotate_menu)
         top_row.addWidget(self.rotate_btn)
-        self.select_checkbox = _PanelSelectionCheckBox()
-        self.select_checkbox.setObjectName("panel_select_checkbox")
-        self.select_checkbox.setToolTip("Select this image")
-        top_row.addWidget(self.select_checkbox)
         self.zoom_out_btn = QToolButton()
         self.zoom_out_btn.setObjectName("panel_zoom_btn")
         self.zoom_out_btn.setIcon(_zoom_icon(zoom_in=False))

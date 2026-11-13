@@ -52,8 +52,8 @@ class CanvasToolbarMixin:
         outer = QWidget()
         outer.setObjectName("canvasMiniToolbar")
         outer.setStyleSheet(
-            "QWidget#canvasMiniToolbar { background: #FFFFFF; "
-            "border-bottom: 1px solid #E4E9E6; }"
+            "QWidget#canvasMiniToolbar { background: #DDE8E2; "
+            "border-top-left-radius: 9px; border-top-right-radius: 9px; }"
         )
         outer_box = QVBoxLayout(outer)
         outer_box.setContentsMargins(0, 0, 0, 0)
@@ -65,7 +65,7 @@ class CanvasToolbarMixin:
 
         canvas_title = QLabel("Figure Preview")
         canvas_title.setStyleSheet(
-            "font-size:14px; font-weight:600; color:#1C2622; background:transparent;"
+            "font-size:14px; font-weight:600; color:#134A32; background:transparent;"
         )
         row1.addWidget(canvas_title)
         row1.addStretch(1)
@@ -130,8 +130,8 @@ class CanvasToolbarMixin:
         self._annotation_panel = QWidget()
         self._annotation_panel.setObjectName("annotationToolbar")
         self._annotation_panel.setStyleSheet(
-            "QWidget#annotationToolbar { background: #F7F9F8; "
-            "border-bottom: 1px solid #E4E9E6; }"
+            "QWidget#annotationToolbar { background: #F1F5F3; "
+            "border-bottom: 1px solid #D9E0DC; border-radius: 0px; }"
         )
         flow = _FlowLayout(self._annotation_panel, margin=8, h_spacing=6, v_spacing=6)
 
