@@ -1526,10 +1526,11 @@ class FigureModeStructureTests(unittest.TestCase):
         button_texts = [
             button.text() for button in window._grp1.findChildren(QPushButton)
         ]
-        self.assertIn("Create Blot Frame Template", button_texts)
-        self.assertIn("Create Blot Condition Template", button_texts)
-        self.assertIn("Add Extra Blot Frame", button_texts)
-        self.assertIn("Saved Templates   ›", button_texts)
+        # Step 1 is four plain buttons and nothing else.
+        self.assertEqual(
+            button_texts,
+            ["New Blot Frames", "Add Conditions", "Saved Templates   ›", "+ Extra Frame"],
+        )
         self.assertNotIn("Apply Template", button_texts)
         self.assertNotIn("Apply Structure", button_texts)
         self.assertEqual(window._export_pdf_btn.text(), "PDF")
@@ -1564,45 +1565,36 @@ class FigureModeStructureTests(unittest.TestCase):
         ])
         self.assertTrue(window._template_list.isHidden())
         self.assertEqual(window._grp1.findChildren(QGroupBox), [])
-        label_texts = [label.text() for label in window._grp1.findChildren(QLabel)]
-        self.assertIn("Blot Frame", label_texts)
-        self.assertIn("Blot Conditions", label_texts)
-        self.assertIn("Reuse a previous layout", label_texts)
-        self.assertNotIn("Set up the blot frame first, then add conditions.", label_texts)
-        self.assertNotIn("Define the area for lanes and bands.", label_texts)
-        self.assertNotIn("Add condition labels to the frame.", label_texts)
-        self.assertNotIn("Required", label_texts)
-        self.assertNotIn("Next", label_texts)
-        task_badges = [
-            label for label in window._grp1.findChildren(QLabel)
-            if label.objectName() == "step1TaskBadge"
+        # No numbered rail, nested cards or helper sentences.
+        visible_labels = [
+            label.text() for label in window._grp1.findChildren(QLabel)
+            if label is not window._grp1._title_label
+            and label is not window._grp1._step_badge
         ]
-        self.assertEqual([badge.text() for badge in task_badges], ["1", "2"])
-        self.assertTrue(all("background:#FFFFFF" in badge.styleSheet() for badge in task_badges))
-        self.assertTrue(all("color:#176B50" in badge.styleSheet() for badge in task_badges))
+        self.assertEqual(visible_labels, [])
         self.assertEqual(
-            len([
-                frame for frame in window._grp1.findChildren(QFrame)
-                if frame.objectName() == "step1Connector"
-            ]),
-            2,
+            [
+                frame.objectName() for frame in window._grp1.findChildren(QFrame)
+                if frame.objectName().startswith("step1")
+            ],
+            ["step1Divider"],
         )
         create_frame = next(
             button for button in window._grp1.findChildren(QPushButton)
-            if button.text() == "Create Blot Frame Template"
+            if button.text() == "New Blot Frames"
         )
         add_extra = next(
             button for button in window._grp1.findChildren(QPushButton)
-            if button.text() == "Add Extra Blot Frame"
+            if button.text() == "+ Extra Frame"
         )
-        self.assertEqual(create_frame.height(), 36)
-        self.assertEqual(window._saved_templates_btn.height(), 30)
-        self.assertEqual(add_extra.height(), 30)
+        self.assertEqual(create_frame.height(), 38)
+        self.assertEqual(window._saved_templates_btn.height(), 34)
+        self.assertEqual(add_extra.height(), 34)
         self.assertEqual(create_frame.objectName(), "step1PrimaryButton")
         self.assertEqual(add_extra.objectName(), "step1TextButton")
         create_condition = next(
             button for button in window._grp1.findChildren(QPushButton)
-            if button.text() == "Create Blot Condition Template"
+            if button.text() == "Add Conditions"
         )
         self.assertEqual(create_condition.objectName(), "step1SecondaryButton")
         self.assertLessEqual(
@@ -3176,11 +3168,24 @@ class FigureModeStructureTests(unittest.TestCase):
     def test_step_panel_follows_the_language(self) -> None:
         window = FigureModeWindow()
         window.set_language("zh_CN")
-        self.assertEqual(window._step_buttons[1].text(), "2\n填充图框")
-        self.assertEqual(window._step_title_lbl.text(), "第 1 步  选择布局")
+        self.assertEqual(
+            [button.text() for button in window._step_buttons],
+            ["1  布局", "2  填充", "3  导出"],
+        )
         self.assertEqual(window._step_next_btn.text(), "下一步")
+        # Only the step that needs explaining carries a one-line hint.
+        self.assertTrue(window._step_desc_lbl.isHidden())
+        window.go_to_step(2)
+        self.assertFalse(window._step_desc_lbl.isHidden())
+        self.assertEqual(window._step_desc_lbl.text(), "点图框 → 在原图上框选 → 回车")
         window.set_language("en")
-        self.assertEqual(window._step_buttons[1].text(), "2\nFill Frames")
+        self.assertEqual(
+            [button.text() for button in window._step_buttons],
+            ["1  Layout", "2  Fill", "3  Export"],
+        )
+        self.assertEqual(
+            window._step_desc_lbl.text(), "Click a frame → draw on the image → Enter"
+        )
         self.assertEqual(window._step_prev_btn.text(), "Previous")
 
     def test_new_overlay_text_is_selected_and_enables_font_controls(self) -> None:
