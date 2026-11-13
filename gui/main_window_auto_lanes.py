@@ -58,6 +58,7 @@ class AutoLaneMixin:
         )
 
     def _leave_quant_auto_review(self) -> None:
+        self.param_panel.set_adjacent_band_option(False)
         if self.canvas.is_quant_auto_review():
             self.canvas.set_quant_auto_review(False)
 
@@ -75,6 +76,11 @@ class AutoLaneMixin:
             )
             return
         roi = self.canvas.get_roi()
+        if roi is None and self.param_panel.adjacent_band_option_available():
+            # The ROI was cleared while the adjacent-band choice was still
+            # showing; retire the choice quietly instead of raising a dialog.
+            self.param_panel.set_adjacent_band_option(False)
+            return
         if roi is None:
             QMessageBox.information(
                 self, title,
@@ -91,10 +97,12 @@ class AutoLaneMixin:
         lane_count = self.param_panel.get_lane_count()
         try:
             pixels = _presentation_pixels(raw, self.canvas.get_geometry_transform())
+            include_adjacent = self.param_panel.include_adjacent_band()
             result = detect_lanes_in_roi(
                 pixels,
                 (roi.x(), roi.y(), roi.width(), roi.height()),
                 lane_count,
+                include_adjacent=include_adjacent,
             )
         except Exception as exc:  # detection must never take the window down
             log.exception("Quantification auto lane detection failed")
@@ -143,6 +151,31 @@ class AutoLaneMixin:
         self._save_active_slot_state()
         self._act_analyze.setEnabled(True)
         rows = len(result.get("rows", []))
+        adjacent_rows = result.get("adjacent_rows", [])
+        self.param_panel.set_adjacent_band_option(bool(adjacent_rows))
+        if adjacent_rows:
+            # The choice changes what is measured, so say which way it is set.
+            if result.get("include_adjacent"):
+                self._status_bar.showMessage(
+                    self._quant_auto_msg(
+                        f"Found {len(detections)} lane(s) × {rows} band row(s). A faint band next to the "
+                        "main band is INCLUDED in the boxes — untick “Include adjacent band” to measure "
+                        "the main band only.",
+                        f"识别到 {len(detections)} 条泳道 × {rows} 排条带。主条带旁边的淡条带已包含在框内——"
+                        "取消勾选“包含相邻条带”可只测主条带。",
+                    )
+                )
+            else:
+                self._status_bar.showMessage(
+                    self._quant_auto_msg(
+                        f"Found {len(detections)} lane(s) × {rows} band row(s). A faint band sits right next "
+                        "to the main band: boxes cover the MAIN band only — tick “Include adjacent band” "
+                        "to measure both together.",
+                        f"识别到 {len(detections)} 条泳道 × {rows} 排条带。主条带旁边紧挨着一条淡条带：目前的框"
+                        "只包住主条带——勾选“包含相邻条带”可把两条一起测。",
+                    )
+                )
+            return
         self._status_bar.showMessage(
             self._quant_auto_msg(
                 f"Found {len(detections)} lane(s) × {rows} band row(s). Drag boxes to adjust, "

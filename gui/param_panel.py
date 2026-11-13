@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QGroupBox,
     QSpinBox, QAbstractSpinBox, QPushButton,
     QHBoxLayout, QLabel, QSizePolicy,
-    QListWidget, QListWidgetItem, QInputDialog, QToolButton,
+    QListWidget, QListWidgetItem, QInputDialog, QToolButton, QCheckBox,
 )
 from config.settings import (
     COLOR_ACCENT,
@@ -229,6 +229,21 @@ class ParamPanel(QWidget):
         self._auto_lane_btn.clicked.connect(self.auto_lane_detect_requested)
         manual_layout.addWidget(self._auto_lane_btn)
 
+        # Shown only when auto-detect finds a faint band right next to a main
+        # band.  Off: boxes wrap the main band only.  On: both bands together.
+        self._adjacent_band_check = QCheckBox("Include adjacent band")
+        self._adjacent_band_check.setStyleSheet(
+            f"QCheckBox {{ color: {COLOR_TEXT}; font-size: 10px; background: transparent; }}"
+        )
+        self._adjacent_band_check.setToolTip(
+            "A faint second band was found right next to the main band. "
+            "Unticked: measure the main band only. Ticked: measure both bands in one box."
+        )
+        self._adjacent_band_check.setVisible(False)
+        self._adjacent_band_available = False
+        self._adjacent_band_check.toggled.connect(lambda _checked: self.auto_lane_detect_requested.emit())
+        manual_layout.addWidget(self._adjacent_band_check)
+
         self._fixed_label = QLabel("Fixed ROI")
         fixed_label = self._fixed_label
         fixed_label.setStyleSheet(
@@ -290,6 +305,12 @@ class ParamPanel(QWidget):
         self._fixed_label.setText(tr("Fixed ROI", language))
         self._fix_btn.setText(tr("Fix ROI", language))
         self._auto_lane_btn.setText(tr("Auto-detect lanes", language))
+        self._adjacent_band_check.setText(tr("Include adjacent band", language))
+        self._adjacent_band_check.setToolTip(tr(
+            "A faint second band was found right next to the main band. "
+            "Unticked: measure the main band only. Ticked: measure both bands in one box.",
+            language,
+        ))
         self._auto_lane_btn.setToolTip(tr(
             "Draw one large ROI around the bands, set the lane count, then click to "
             "find every lane and band automatically. Drag boxes to adjust, Delete to "
@@ -450,6 +471,22 @@ class ParamPanel(QWidget):
 
     def get_lane_count(self) -> int:
         return self.lane_count.value()
+
+    def include_adjacent_band(self) -> bool:
+        """Whether auto-detect boxes should also take in a faint adjacent band."""
+        return self._adjacent_band_available and self._adjacent_band_check.isChecked()
+
+    def adjacent_band_option_available(self) -> bool:
+        return self._adjacent_band_available
+
+    def set_adjacent_band_option(self, available: bool) -> None:
+        """Show the main-only / include-adjacent choice only when it applies."""
+        if not available and self._adjacent_band_check.isChecked():
+            blocked = self._adjacent_band_check.blockSignals(True)
+            self._adjacent_band_check.setChecked(False)
+            self._adjacent_band_check.blockSignals(blocked)
+        self._adjacent_band_available = bool(available)
+        self._adjacent_band_check.setVisible(bool(available))
 
     def set_rotation_controls_enabled(self, enabled: bool) -> None:
         # Rotation is controlled from each image panel's own menu.

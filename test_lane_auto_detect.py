@@ -29,6 +29,7 @@ def _synthetic_blot(
     band_height: float = 3.0,
     background: float = 3000.0,
     seed: int = 7,
+    adjacent: tuple[tuple[float, float, float], ...] = (),
 ) -> np.ndarray:
     """16-bit light-on-dark blot: soft-edged bands on a noisy, tilted background."""
     h, w = shape
@@ -39,6 +40,12 @@ def _synthetic_blot(
             across = 1.0 / (1.0 + np.exp((np.abs(xx - centre) - lane_width / 2.0) / 1.2))
             along = np.exp(-0.5 * ((yy - row) / band_height) ** 2)
             image += amplitude * across * along
+    for offset, relative, height in adjacent:
+        for row in rows:
+            for centre, amplitude in zip(lane_centres, amplitudes):
+                across = 1.0 / (1.0 + np.exp((np.abs(xx - centre) - lane_width / 2.0) / 1.2))
+                along = np.exp(-0.5 * ((yy - (row + offset)) / height) ** 2)
+                image += relative * amplitude * across * along
     image += np.random.default_rng(seed).normal(0.0, 60.0, size=shape)
     return np.clip(image, 0, 65535).astype(np.uint16)
 
@@ -143,6 +150,31 @@ class LaneAutoDetectCoreTests(unittest.TestCase):
             self.assertLessEqual(left[0] + left[2], right[0] + 1e-6, "boxes must not overlap")
         self.assertEqual(len({box[2] for box in boxes}), 1)
 
+    def test_faint_adjacent_band_is_left_out_by_default_and_can_be_included(self) -> None:
+        # A faint band 8 px below every main band: too weak to be a row of
+        # its own, so it would silently end up inside the main band's box.
+        centres = [40.0, 64.0, 88.0, 112.0]
+        image = _synthetic_blot(centres, [20000.0] * 4, adjacent=((8.0, 0.25, 2.5),))
+
+        main_only = detect_lanes_in_roi(image, self.ROI, 4)
+        merged = detect_lanes_in_roi(image, self.ROI, 4, include_adjacent=True)
+
+        self.assertEqual(main_only["adjacent_rows"], [{"row_index": 1, "side": "below"}])
+        _x, y, _w, height = main_only["lanes"][0]["bands"][0]["band_rect"]
+        self.assertLess(y, 40.0)
+        self.assertLessEqual(y + height, 46.5, "main-only box must stop before the faint band at y=48")
+        _x, y2, _w, height2 = merged["lanes"][0]["bands"][0]["band_rect"]
+        self.assertGreaterEqual(y2 + height2, 50.0, "merged box must take in the faint band")
+        self.assertLess(y2, 40.0)
+
+    def test_clean_band_and_symmetric_halo_offer_no_adjacent_choice(self) -> None:
+        centres = [40.0, 64.0, 88.0, 112.0]
+        clean = _synthetic_blot(centres, [20000.0] * 4)
+        halo = _synthetic_blot(centres, [20000.0] * 4, adjacent=((0.0, 0.25, 9.0),))
+
+        self.assertEqual(detect_lanes_in_roi(clean, self.ROI, 4)["adjacent_rows"], [])
+        self.assertEqual(detect_lanes_in_roi(halo, self.ROI, 4)["adjacent_rows"], [])
+
     def test_dark_on_light_images_are_handled(self) -> None:
         centres = [40.0, 64.0, 88.0, 112.0]
         image = 65535 - _synthetic_blot(centres, [20000.0] * 4)
@@ -243,14 +275,14 @@ class LaneAutoDetectWindowTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication([])
 
-    def _window_with_blot(self) -> MainWindow:
+    def _window_with_blot(self, adjacent: tuple = ()) -> MainWindow:
         with (
             patch("gui.main_window.AppPersistence.update_config", return_value=None),
             patch("gui.main_window.AppPersistence.read_config", return_value={"ui": {}}),
         ):
             window = MainWindow()
         centres = [40.0, 64.0, 88.0, 112.0, 136.0, 160.0]
-        image = _synthetic_blot(centres, [20000.0] * 6)
+        image = _synthetic_blot(centres, [20000.0] * 6, adjacent=adjacent)
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         path = str(Path(folder.name) / "blot.tif")
@@ -358,6 +390,40 @@ class LaneAutoDetectWindowTests(unittest.TestCase):
                 self.assertTrue(
                     label.flags() & QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations
                 )
+        finally:
+            window.close()
+
+    def test_adjacent_band_choice_appears_only_when_found_and_reruns_detection(self) -> None:
+        window = self._window_with_blot(adjacent=((8.0, 0.25, 2.5),))
+        try:
+            panel = window.param_panel
+            panel.lane_count.setValue(6)
+            self.assertFalse(panel.adjacent_band_option_available())
+
+            panel._auto_lane_btn.click()
+
+            self.assertTrue(panel.adjacent_band_option_available())
+            self.assertFalse(panel.include_adjacent_band())
+            main_height = window.canvas._auto_band_items[0].scene_rect().height()
+
+            panel._adjacent_band_check.setChecked(True)
+
+            self.assertTrue(window.canvas.is_quant_auto_review())
+            merged_height = window.canvas._auto_band_items[0].scene_rect().height()
+            self.assertGreater(merged_height, main_height + 3.0)
+
+            window._on_roi_changed(QRectF(20, 20, 120, 40))
+            self.assertFalse(panel.adjacent_band_option_available())
+            self.assertFalse(panel._adjacent_band_check.isChecked())
+        finally:
+            window.close()
+
+    def test_clean_blot_shows_no_adjacent_band_choice(self) -> None:
+        window = self._window_with_blot()
+        try:
+            window.param_panel.lane_count.setValue(6)
+            window.param_panel._auto_lane_btn.click()
+            self.assertFalse(window.param_panel.adjacent_band_option_available())
         finally:
             window.close()
 
