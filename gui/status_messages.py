@@ -16,8 +16,8 @@ from utils.i18n import LANG_ZH_CN, tr
 
 # (pattern, Chinese template) for messages built with f-strings.
 _ZH_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"^Loaded: (?P<name>.+) — viewer showing (?P<count>\d+) images\. Select one image to draw ROIs\.$"),
-     "已载入 {name}。当前显示 {count} 张图像，请先勾选其中一张再框选。"),
+    (re.compile(r"^Loaded: (?P<name>.+) — viewer showing (?P<count>\d+) images\. Click an image to work on it\.$"),
+     "已载入 {name}。当前显示 {count} 张图像，点击其中一张即可选中它。"),
     (re.compile(r"^Loaded: (?P<name>.+) — draw a ROI to continue\.$"),
      "已载入 {name}。请在图像上框选泳道。"),
     (re.compile(r"^Loading (?P<name>.+) — preparing preview…$"),

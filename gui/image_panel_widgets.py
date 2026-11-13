@@ -17,29 +17,34 @@ from PySide6.QtWidgets import (
 )
 
 from config.settings import COLOR_ACCENT_LIGHT, COLOR_ACCENT_TEXT
+
+# Clear without being loud: a mid green between the accent and its tint.
+SELECTED_PANEL_BORDER = "#4FA683"
 from gui.icons import _image_operation_icon, _zoom_icon
 from gui.image_canvas import ImageCanvas
 
 
 class _PanelSelectionCheckBox(QCheckBox):
-    """Image selector that adds a small red tick to the existing checked style."""
+    """Holds which image is selected; the panel frame shows it, not a tick.
 
-    def paintEvent(self, event) -> None:
-        super().paintEvent(event)
-        if not self.isChecked():
-            return
+    The box itself stays hidden.  It remains the single source of truth so
+    the window's selection logic is unchanged, and it tells its panel to
+    restyle whenever the state is set, including with signals blocked.
+    """
 
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        pen = QPen(QColor("#D74A43"), 1.8)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        painter.setPen(pen)
-        left = 3.0 + (16.0 - 14.0) / 2.0
-        top = (self.height() - 14.0) / 2.0
-        painter.drawLine(QPointF(left + 3.2, top + 7.2), QPointF(left + 5.8, top + 9.8))
-        painter.drawLine(QPointF(left + 5.8, top + 9.8), QPointF(left + 10.8, top + 4.2))
-        painter.end()
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.on_state_set = None
+
+    def setChecked(self, checked: bool) -> None:  # noqa: N802 - Qt API
+        super().setChecked(checked)
+        if self.on_state_set is not None:
+            self.on_state_set(bool(checked))
+
+    def nextCheckState(self) -> None:  # noqa: N802 - Qt API
+        super().nextCheckState()
+        if self.on_state_set is not None:
+            self.on_state_set(self.isChecked())
 
 
 class _ImagePanelWidget(QFrame):
@@ -51,8 +56,11 @@ class _ImagePanelWidget(QFrame):
         self.setStyleSheet(f"""
             QFrame#image_panel {{
                 background-color: #FFFFFF;
-                border: none;
+                border: 2px solid transparent;
                 border-radius: 8px;
+            }}
+            QFrame#image_panel[selected="true"] {{
+                border: 2px solid {SELECTED_PANEL_BORDER};
             }}
             QCheckBox#panel_select_checkbox {{
                 background: transparent;
@@ -156,17 +164,19 @@ class _ImagePanelWidget(QFrame):
         """)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
+        root.setContentsMargins(6, 6, 6, 6)
         root.setSpacing(6)
 
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.setSpacing(6)
-        # The "use this image" tick leads the row, clear of the tool buttons.
+        # Which image is in use is shown by the panel's frame colour.
         self.select_checkbox = _PanelSelectionCheckBox()
         self.select_checkbox.setObjectName("panel_select_checkbox")
         self.select_checkbox.setToolTip("Select this image")
-        top_row.addWidget(self.select_checkbox)
+        self.select_checkbox.setParent(self)
+        self.select_checkbox.hide()
+        self.select_checkbox.on_state_set = self._show_selected
         self.transform_btn = QPushButton("◐")
         self.transform_btn.setObjectName("panel_transform_btn")
         self.transform_btn.setToolTip("Image Transform: Low / High / Gamma")
@@ -225,6 +235,25 @@ class _ImagePanelWidget(QFrame):
     def set_filename(self, name: str) -> None:
         self.filename_label.setText(name)
         self.filename_label.setToolTip(name)
+
+    def is_shown_selected(self) -> bool:
+        return self.property("selected") == "true"
+
+    def _show_selected(self, selected: bool) -> None:
+        """Frame the panel in green while it is the image being worked on."""
+        value = "true" if selected else "false"
+        if self.property("selected") == value:
+            return
+        self.setProperty("selected", value)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+    def mousePressEvent(self, event) -> None:
+        # A click on the header (not only on the image) selects the panel.
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.canvas.panel_interacted.emit()
+        super().mousePressEvent(event)
 
 
 class _UploadedFileListRow(QWidget):

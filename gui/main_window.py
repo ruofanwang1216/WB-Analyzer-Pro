@@ -384,7 +384,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         workspace_layout = QHBoxLayout(self._workspace_toolbar_group)
         workspace_layout.setContentsMargins(4, 4, 4, 4)
         workspace_layout.setSpacing(4)
-        self._figure_generation_btn = QPushButton("① Quantify & Plot")
+        self._figure_generation_btn = QPushButton("① Quantify && Plot")
         self._figure_generation_btn.setObjectName("figure_generation_btn")
         self._figure_generation_btn.setCheckable(True)
         self._figure_generation_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -851,7 +851,10 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         self._act_open.setText(tr("Import Images", language))
         self._act_image_transform.setText(tr("Image Transform", language))
         self._act_analyze.setText(tr("Analyze", language))
-        self._figure_generation_btn.setText(tr("① Quantify & Plot", language))
+        # "&&" shows a literal ampersand instead of a keyboard mnemonic.
+        self._figure_generation_btn.setText(
+            tr("① Quantify & Plot", language).replace("&", "&&")
+        )
         self._wb_plot_generation_btn.setText(tr("② Figure Layout", language))
         self._files_drop_hint.setText(tr("Drop .scn / .tif files here", language))
         self._analyze_hint.setText(

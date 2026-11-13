@@ -1873,7 +1873,6 @@ class ColumnTableWindow(QMainWindow):
         self._negative_btn.setObjectName("selectNegativeControlButton")
         self._negative_btn.setStyleSheet(_BTN_SECONDARY_STYLE)
         self._negative_btn.clicked.connect(self._on_select_negative_control_clicked)
-        top_row.addWidget(self._negative_btn)
         root.addLayout(top_row)
 
         total_rows = self._replicates * self._ROWS_PER_REPLICATE
@@ -1979,6 +1978,10 @@ class ColumnTableWindow(QMainWindow):
 
         table.itemChanged.connect(self._on_table_item_changed)
 
+        # Two short rows so nothing is clipped when the panel is narrow.
+        options_row = QHBoxLayout()
+        options_row.setContentsMargins(0, 0, 0, 0)
+        options_row.setSpacing(8)
         bottom_row = QHBoxLayout()
         bottom_row.setContentsMargins(0, 0, 0, 0)
         bottom_row.setSpacing(8)
@@ -1991,8 +1994,11 @@ class ColumnTableWindow(QMainWindow):
         auto_fill.setChecked(self._auto_fill_checked)
         auto_fill.toggled.connect(self._on_auto_fill_toggled)
         auto_fill.setVisible(self._auto_figure_enabled)
-        bottom_row.addWidget(auto_fill)
+        options_row.addWidget(auto_fill)
         self._auto_fill_checkbox = auto_fill
+        options_row.addStretch(1)
+        options_row.addWidget(self._negative_btn)
+        root.addLayout(options_row)
         bottom_row.addStretch(1)
         reset_btn = QPushButton("Reset")
         reset_btn.setStyleSheet(_BTN_SECONDARY_STYLE)

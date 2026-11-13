@@ -53,26 +53,52 @@ class ImagePanelControlTests(unittest.TestCase):
         ):
             return MainWindow()
 
-    def test_selected_checkbox_adds_red_tick_only_when_checked(self) -> None:
+    def test_selected_panel_is_framed_and_shows_no_tick(self) -> None:
         panel = _ImagePanelWidget()
         try:
             panel.resize(420, 260)
             panel.show()
             self._app.processEvents()
 
-            panel.select_checkbox.setChecked(False)
-            self._app.processEvents()
-            unchecked_red = self._red_pixel_count(panel.select_checkbox)
+            # The tick box is gone from view; the frame carries the state.
+            self.assertTrue(panel.select_checkbox.isHidden())
+            self.assertFalse(panel.is_shown_selected())
+            self.assertEqual(self._red_pixel_count(panel), 0)
 
             panel.select_checkbox.setChecked(True)
-            panel.select_checkbox.setEnabled(False)
             self._app.processEvents()
-            checked_red = self._red_pixel_count(panel.select_checkbox)
+            self.assertTrue(panel.is_shown_selected())
+            framed = panel.grab().toImage()
+            edge = framed.pixelColor(framed.width() // 2, 1)
+            self.assertGreater(edge.green(), edge.red() + 40)
+            self.assertEqual(self._red_pixel_count(panel), 0)
 
-            self.assertEqual(unchecked_red, 0)
-            self.assertGreater(checked_red, 0)
+            # Also when the window sets it with signals blocked.
+            panel.select_checkbox.blockSignals(True)
+            panel.select_checkbox.setChecked(False)
+            panel.select_checkbox.blockSignals(False)
+            self.assertFalse(panel.is_shown_selected())
         finally:
             panel.close()
+
+    def test_clicking_a_panel_selects_it_and_moves_the_frame(self) -> None:
+        window = self._make_window()
+        try:
+            window._slot_states[0]["path"] = "first.tif"
+            window._slot_states[0]["selected"] = True
+            window._slot_states[1]["path"] = "second.tif"
+            window._refresh_image_panel_layout()
+            first, second = window._image_panels[0], window._image_panels[1]
+            self.assertTrue(first.is_shown_selected())
+            self.assertFalse(second.is_shown_selected())
+
+            second.canvas.panel_interacted.emit()
+
+            self.assertEqual(window._active_slot_index, 1)
+            self.assertTrue(second.is_shown_selected())
+            self.assertFalse(first.is_shown_selected())
+        finally:
+            window.close()
 
     def test_each_panel_has_working_zoom_buttons_that_activate_its_image(self) -> None:
         window = self._make_window()
