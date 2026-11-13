@@ -137,7 +137,95 @@ def find_band_rows(signal: np.ndarray, min_rel: float = 0.12) -> list[dict]:
             valley = lo + int(np.argmin(profile[lo:hi + 1]))
             upper["bottom"] = max(upper["center"], valley - 1)
             lower["top"] = min(lower["center"], valley + 1)
+    # A faint band hugging a main band is too weak to be a row of its own; it
+    # shows up as a one-sided shoulder on the main band's flank.
+    for index, row in enumerate(rows):
+        lo_limit = rows[index - 1]["bottom"] + 1 if index > 0 else 0
+        hi_limit = rows[index + 1]["top"] - 1 if index < len(rows) - 1 else h - 1
+        above = _flank_shoulder(profile, row["center"], -1, lo_limit)
+        below = _flank_shoulder(profile, row["center"], +1, hi_limit)
+        row["adjacent"] = None
+        if (above is None) == (below is None):
+            # None, or both sides (a diffuse halo around a strong band): one band.
+            continue
+        if below is not None:
+            main_edge, far_edge = below
+            row["adjacent"] = {
+                "side": "below",
+                "main": (row["top"], min(row["bottom"], main_edge)),
+                "full": (row["top"], max(row["bottom"], far_edge)),
+            }
+        else:
+            main_edge, far_edge = above
+            row["adjacent"] = {
+                "side": "above",
+                "main": (max(row["top"], main_edge), row["bottom"]),
+                "full": (min(row["top"], far_edge), row["bottom"]),
+            }
+    # Two neighbouring rows may claim the same stretch between them: share it.
+    for upper, lower in zip(rows, rows[1:]):
+        up_adj, low_adj = upper["adjacent"], lower["adjacent"]
+        up_end = up_adj["full"][1] if up_adj else upper["bottom"]
+        low_start = low_adj["full"][0] if low_adj else lower["top"]
+        if up_end >= low_start:
+            cut = (upper["bottom"] + lower["top"]) // 2
+            if up_adj:
+                up_adj["full"] = (up_adj["full"][0], max(upper["bottom"], min(up_end, cut)))
+            if low_adj:
+                low_adj["full"] = (min(lower["top"], max(low_start, cut + 1)), low_adj["full"][1])
     return rows
+
+
+def _flank_shoulder(profile: np.ndarray, peak: int, step: int, limit: int) -> tuple[int, int] | None:
+    """Find a faint band riding on one flank of a main band.
+
+    Walking outwards from the peak, the flank first falls steeply.  If it then
+    flattens out while still well above the baseline, and stays there long
+    enough to hold real signal, that plateau (or small second hump) is an
+    adjacent band.  Returns (last index of the main band, last index of the
+    adjacent band), or None for a clean flank.
+    """
+    peak_v = float(profile[peak])
+    if peak_v <= 0:
+        return None
+    idx = [peak]
+    i = peak
+    quiet = 0
+    while 0 <= (i + step) < len(profile) and (i + step - limit) * step <= 0:
+        i += step
+        idx.append(i)
+        quiet = quiet + 1 if profile[i] < 0.04 * peak_v else 0
+        if quiet >= 3:
+            break
+    if len(idx) < 5:
+        return None
+    values = profile[idx] / peak_v
+    drops = values[:-1] - values[1:]
+    steepest = int(np.argmax(drops))
+    if drops[steepest] <= 0:
+        return None
+    # Where the steep fall of the main band gives way to a plateau or a rise.
+    start = None
+    for j in range(steepest + 1, len(drops)):
+        if drops[j] < 0.35 * drops[steepest]:
+            start = j
+            break
+    if start is None:
+        return None
+    if values[start] <= 0.08:
+        return None
+    # The adjacent band must touch the main band and stay close to it: stop
+    # at the first real gap, and never reach further than the main band is wide.
+    reach = min(len(values) - 1, start + max(4, int(round(1.5 * start))))
+    end = start
+    while end + 1 <= reach and values[end + 1] > 0.08:
+        end += 1
+    extent = int(np.count_nonzero(values[start:end + 1] > 0.08))
+    main_area = float(values[:start].sum())
+    shoulder_area = float(values[start:end + 1].sum())
+    if extent < 3 or main_area <= 0 or shoulder_area < 0.15 * main_area:
+        return None
+    return idx[start - 1], idx[end]
 
 
 # ── Lanes ────────────────────────────────────────────────────────────────────
@@ -247,8 +335,13 @@ def detect_lanes_in_roi(
     lane_count: int,
     *,
     light_on_dark: bool | None = None,
+    include_adjacent: bool = False,
 ) -> dict[str, Any]:
     """Detect ``lane_count`` lanes and their band boxes inside ``roi``.
+
+    When a faint band sits right next to a main band, boxes wrap the main band
+    only unless ``include_adjacent`` is set; ``result["adjacent_rows"]`` lists
+    the rows where that choice exists.
 
     Returns ``{"lanes": [...], "rows": [...], "light_on_dark": bool, "message": str}``.
     Each lane is ``{"lane_index", "lane_rect", "bands": [{"band_rect", "band_index",
@@ -264,7 +357,10 @@ def detect_lanes_in_roi(
     x2 = min(img_w, int(np.ceil(rx + rw)))
     y2 = min(img_h, int(np.ceil(ry + rh)))
     lane_count = max(1, int(lane_count))
-    result: dict[str, Any] = {"lanes": [], "rows": [], "light_on_dark": True, "message": ""}
+    result: dict[str, Any] = {
+        "lanes": [], "rows": [], "light_on_dark": True, "message": "",
+        "adjacent_rows": [], "include_adjacent": bool(include_adjacent),
+    }
     if x2 - x1 < max(6, 2 * lane_count) or y2 - y1 < 6:
         result["message"] = "ROI is too small for automatic lane detection."
         return result
@@ -277,6 +373,15 @@ def detect_lanes_in_roi(
     h, w = signal.shape
 
     rows = find_band_rows(signal)
+    for row in rows:
+        adjacent = row.get("adjacent")
+        row["pad_top"] = row["pad_bottom"] = True
+        if adjacent is None:
+            continue
+        row["top"], row["bottom"] = adjacent["full"] if include_adjacent else adjacent["main"]
+        if not include_adjacent:
+            # No extra margin on the side that faces the adjacent band.
+            row["pad_bottom" if adjacent["side"] == "below" else "pad_top"] = False
     if not rows:
         result["message"] = "No band rows found in the ROI."
         rows_for_lanes = [{"center": h // 2, "top": 0, "bottom": h - 1}]
@@ -319,8 +424,10 @@ def detect_lanes_in_roi(
     for row_index, row in enumerate(rows, start=1):
         row_h = max(3, row["bottom"] - row["top"] + 1)
         pad = max(2, int(round(row_h * 0.25)))
-        box_h = row_h + 2 * pad
-        base_top = row["top"] - pad
+        pad_top = pad if row.get("pad_top", True) else 0
+        pad_bottom = pad if row.get("pad_bottom", True) else 0
+        box_h = row_h + pad_top + pad_bottom
+        base_top = row["top"] - pad_top
         max_shift = max(1, int(round(0.6 * row_h)))
         offsets: list[int | None] = []
         strengths: list[float] = []
@@ -423,6 +530,14 @@ def detect_lanes_in_roi(
                 val = float(column[tt:bb].sum())
                 if val > best_val + 1e-9 or (abs(val - best_val) <= 1e-9 and abs(off) < abs(best_off)):
                     best_off, best_val = off, val
+            if row.get("pad_top", True) != row.get("pad_bottom", True) and best_val > 0.02 * box_h:
+                # Main-band-only box beside a faint adjacent band: the largest
+                # sum would slide the box onto that band, so follow the main
+                # band's own peak in this lane instead.
+                lo_y = max(0, row["center"] - max_shift)
+                hi_y = min(h, row["center"] + max_shift + 1)
+                smooth_col = gaussian_filter1d(column, 1.0)
+                best_off = lo_y + int(np.argmax(smooth_col[lo_y:hi_y])) - row["center"]
             base_val = float(column[max(0, base_top):min(h, base_top + box_h)].sum())
             strengths.append(base_val)
             offsets.append(best_off if best_val > 0.02 * box_h else None)
@@ -458,6 +573,12 @@ def detect_lanes_in_roi(
     result["rows"] = [
         {"top": y1 + r["top"], "bottom": y1 + r["bottom"], "center": y1 + r["center"]} for r in rows
     ]
+    result["adjacent_rows"] = [
+        {"row_index": index, "side": r["adjacent"]["side"]}
+        for index, r in enumerate(rows, start=1)
+        if r.get("adjacent") is not None
+    ]
+    result["include_adjacent"] = bool(include_adjacent)
     result["pitch"] = float(pitch)
     if rows:
         result["message"] = f"{len(lanes)} lane(s), {len(rows)} band row(s)."

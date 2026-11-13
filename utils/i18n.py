@@ -209,6 +209,11 @@ _ZH_CN = {
         "按住空格键拖动可平移；滚动鼠标滚轮可缩放。"
     ),
     "Auto-detect lanes": "自动识别泳道",
+    "Include adjacent band": "包含相邻条带",
+    "A faint second band was found right next to the main band. "
+    "Unticked: measure the main band only. Ticked: measure both bands in one box.": (
+        "在主条带旁边紧挨着发现了一条淡条带。不勾选：只测主条带；勾选：把两条带放在同一个框里一起测。"
+    ),
     "Draw one large ROI around the bands, set the lane count, then click to "
     "find every lane and band automatically. Drag boxes to adjust, Delete to "
     "remove, drag on empty space to add.": (
