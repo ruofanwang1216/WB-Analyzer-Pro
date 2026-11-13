@@ -8,7 +8,8 @@ from unittest.mock import patch
 
 import numpy as np
 from PIL import Image
-from PySide6.QtCore import QRectF
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from core.lane_auto_detect import detect_lanes_in_roi
@@ -123,6 +124,22 @@ class LaneAutoDetectCoreTests(unittest.TestCase):
             }
             self.assertEqual(len(sizes), 1, "boxes of one row must have equal area")
 
+    def test_boxes_wrap_bands_that_fill_the_lane(self) -> None:
+        # Bands nearly as wide as the lane pitch, each nudged off the lane
+        # centre: every box must still contain its whole band.
+        centres = [41.0, 63.0, 89.0, 111.0, 137.0, 159.0]
+        image = _synthetic_blot(centres, [20000.0] * 6, lane_width=21.0)
+
+        result = detect_lanes_in_roi(image, self.ROI, 6)
+
+        boxes = [lane["bands"][0]["band_rect"] for lane in result["lanes"]]
+        for (x, _y, width, _h), centre in zip(boxes, centres):
+            self.assertLessEqual(x, centre - 10.5 + 1.5)
+            self.assertGreaterEqual(x + width, centre + 10.5 - 1.5)
+        for left, right in zip(boxes, boxes[1:]):
+            self.assertLessEqual(left[0] + left[2], right[0] + 1e-6, "boxes must not overlap")
+        self.assertEqual(len({box[2] for box in boxes}), 1)
+
     def test_dark_on_light_images_are_handled(self) -> None:
         centres = [40.0, 64.0, 88.0, 112.0]
         image = 65535 - _synthetic_blot(centres, [20000.0] * 4)
@@ -202,6 +219,39 @@ class LaneAutoDetectWindowTests(unittest.TestCase):
             worker.assert_called_once()
             measured = worker.call_args.args[1]
             self.assertEqual([roi["lane"] for roi in measured], [2, 3, 4, 5, 6])
+        finally:
+            window.close()
+
+    def test_small_box_moves_from_its_middle_and_resizes_from_its_edge(self) -> None:
+        window = self._window_with_blot()
+        try:
+            window.param_panel.lane_count.setValue(6)
+            window.param_panel._auto_lane_btn.click()
+            item = window.canvas._auto_band_items[0]
+            rect = item.rect()
+
+            self.assertIsNone(item._handle_for_pos(rect.center()))
+            self.assertEqual(
+                item._handle_for_pos(QPointF(rect.right(), rect.center().y())), "right"
+            )
+        finally:
+            window.close()
+
+    def test_arrow_keys_nudge_the_selected_box_without_resizing(self) -> None:
+        window = self._window_with_blot()
+        try:
+            window.param_panel.lane_count.setValue(6)
+            window.param_panel._auto_lane_btn.click()
+            item = window.canvas._auto_band_items[0]
+            before = item.scene_rect()
+            item.setSelected(True)
+
+            QTest.keyClick(window.canvas, Qt.Key.Key_Right)
+            QTest.keyClick(window.canvas, Qt.Key.Key_Down)
+
+            after = item.scene_rect()
+            self.assertEqual((after.x(), after.y()), (before.x() + 1.0, before.y() + 1.0))
+            self.assertEqual((after.width(), after.height()), (before.width(), before.height()))
         finally:
             window.close()
 

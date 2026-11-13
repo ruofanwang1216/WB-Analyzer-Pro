@@ -318,7 +318,7 @@ def detect_lanes_in_roi(
 
     for row_index, row in enumerate(rows, start=1):
         row_h = max(3, row["bottom"] - row["top"] + 1)
-        pad = max(1, int(round(row_h * 0.15)))
+        pad = max(2, int(round(row_h * 0.25)))
         box_h = row_h + 2 * pad
         base_top = row["top"] - pad
         max_shift = max(1, int(round(0.6 * row_h)))
@@ -339,10 +339,73 @@ def detect_lanes_in_roi(
             if total > best_sum * 1.02 + 1e-9:
                 best_dx, best_sum = dx, total
         row_dx = best_dx
-        for lane in lanes:
+
+        # Horizontal extent of every band in this row, so the boxes wrap the
+        # whole band instead of a fixed fraction of the lane pitch.
+        row_line = gaussian_filter1d(signal[r_top:r_bot].sum(axis=0), 0.8)
+        spans: list[tuple[float, float] | None] = []
+        for lane_i, lane in enumerate(lanes):
             c = lane["centre"] + row_dx
-            cx1 = int(max(0, round(c - box_w / 2)))
-            cx2 = int(min(w, round(c + box_w / 2)))
+            lo_lim = int(np.clip(np.floor(c - 0.75 * pitch), 0, w - 1))
+            hi_lim = int(np.clip(np.ceil(c + 0.75 * pitch), 0, w - 1))
+            if lane_i > 0:
+                lo_lim = max(lo_lim, int(np.ceil((lanes[lane_i - 1]["centre"] + lane["centre"]) / 2 + row_dx)))
+            if lane_i < len(lanes) - 1:
+                hi_lim = min(hi_lim, int(np.floor((lanes[lane_i + 1]["centre"] + lane["centre"]) / 2 + row_dx)))
+            core_a = int(np.clip(round(c - 0.3 * pitch), lo_lim, hi_lim))
+            core_b = int(np.clip(round(c + 0.3 * pitch), lo_lim, hi_lim))
+            if core_b <= core_a:
+                spans.append(None)
+                continue
+            peak_x = core_a + int(np.argmax(row_line[core_a:core_b + 1]))
+            peak_v = float(row_line[peak_x])
+            if peak_v <= 0.02 * (r_bot - r_top):
+                spans.append(None)
+                continue
+            floor_v = 0.1 * peak_v
+            left = peak_x
+            while left > lo_lim and row_line[left - 1] > floor_v:
+                left -= 1
+            right = peak_x
+            while right < hi_lim and row_line[right + 1] > floor_v:
+                right += 1
+            spans.append((float(left), float(right + 1)))
+        found = [b - a for span in spans if span is not None for a, b in [span]]
+        side_pad = max(1.0, round(0.05 * pitch))
+        row_box_w = box_w
+        if found:
+            row_box_w = max(box_w, float(np.ceil(max(found) + 2 * side_pad)))
+        if len(lanes) > 1:
+            row_box_w = min(row_box_w, float(np.floor(np.min(np.diff([ln["centre"] for ln in lanes])) + 2 * side_pad)))
+        row_box_w = float(min(row_box_w, w))
+        # Centre each box on its own band; empty lanes keep the fitted centre.
+        box_centres = [
+            (span[0] + span[1]) / 2.0 if span is not None else lane["centre"] + row_dx
+            for lane, span in zip(lanes, spans)
+        ]
+        box_lefts = [float(np.clip(cx - row_box_w / 2, 0, max(0.0, w - row_box_w))) for cx in box_centres]
+        # Neighbouring boxes must not overlap: push them apart (an empty
+        # lane's box gives way entirely to a real band).
+        for _ in range(3):
+            moved = False
+            for i in range(1, len(box_lefts)):
+                overlap = box_lefts[i - 1] + row_box_w - box_lefts[i]
+                if overlap <= 0:
+                    continue
+                moved = True
+                if spans[i - 1] is None and spans[i] is not None:
+                    box_lefts[i - 1] -= overlap
+                elif spans[i] is None and spans[i - 1] is not None:
+                    box_lefts[i] += overlap
+                else:
+                    box_lefts[i - 1] -= overlap / 2.0
+                    box_lefts[i] += overlap / 2.0
+            if not moved:
+                break
+        box_lefts = [float(np.clip(left, 0, max(0.0, w - row_box_w))) for left in box_lefts]
+        for lane, box_left in zip(lanes, box_lefts):
+            cx1 = int(max(0, round(box_left)))
+            cx2 = int(min(w, round(box_left + row_box_w)))
             column = signal[:, cx1:cx2].mean(axis=1) if cx2 > cx1 else np.zeros(h)
             best_off, best_val = 0, -1.0
             for off in range(-max_shift, max_shift + 1):
@@ -359,12 +422,12 @@ def detect_lanes_in_roi(
         known = [o for o in offsets if o is not None]
         fallback = int(round(float(np.median(known)))) if known else 0
         row_peak = max(strengths) if strengths else 0.0
-        for lane, off, strength in zip(lanes, offsets, strengths):
+        for lane, off, strength, box_left in zip(lanes, offsets, strengths, box_lefts):
             top = base_top + (fallback if off is None else off)
             top = int(min(max(0, top), max(0, h - box_h)))
-            bx = float(np.clip(lane["centre"] + row_dx - box_w / 2, 0, max(0.0, w - box_w)))
+            bx = box_left
             lane["bands"].append({
-                "band_rect": (x1 + bx, float(y1 + top), float(box_w), float(min(box_h, h))),
+                "band_rect": (x1 + bx, float(y1 + top), float(row_box_w), float(min(box_h, h))),
                 "row_index": row_index,
                 "empty": off is None or strength < 0.05 * row_peak,
             })

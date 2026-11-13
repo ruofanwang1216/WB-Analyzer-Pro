@@ -297,10 +297,19 @@ class EditableBandRectItem(QGraphicsRectItem):
             return None
 
         rect = self.rect()
-        left = abs(pos.x() - rect.left()) <= self._HANDLE_MARGIN
-        right = abs(pos.x() - rect.right()) <= self._HANDLE_MARGIN
-        top = abs(pos.y() - rect.top()) <= self._HANDLE_MARGIN
-        bottom = abs(pos.y() - rect.bottom()) <= self._HANDLE_MARGIN
+        # The grab zone is a few *screen* pixels wide and never more than a
+        # quarter of the box, so the middle of even a small box always moves
+        # the whole box instead of resizing it.
+        zoom = 1.0
+        scene = self.scene()
+        if scene is not None and scene.views():
+            zoom = max(1e-6, abs(scene.views()[0].transform().m11()))
+        margin_x = min(self._HANDLE_MARGIN / zoom, rect.width() * 0.25)
+        margin_y = min(self._HANDLE_MARGIN / zoom, rect.height() * 0.25)
+        left = abs(pos.x() - rect.left()) <= margin_x
+        right = abs(pos.x() - rect.right()) <= margin_x
+        top = abs(pos.y() - rect.top()) <= margin_y
+        bottom = abs(pos.y() - rect.bottom()) <= margin_y
 
         if left and top:
             return "top_left"
@@ -431,11 +440,14 @@ class EditableBandRectItem(QGraphicsRectItem):
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         rect = self.rect()
-        pen = QPen(QColor("#E8A87C"), 2, Qt.PenStyle.SolidLine)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        # Cosmetic pen: a constant thin outline on screen, so the frame does
+        # not hide the band edges on small (low-resolution) blots.
+        selected = self._editing_enabled and self.isSelected()
+        pen = QPen(QColor("#D9773C" if selected else "#E8A87C"), 2.0 if selected else 1.5, Qt.PenStyle.SolidLine)
+        pen.setCosmetic(True)
+        pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
         painter.setPen(pen)
-        painter.setBrush(QBrush(QColor(232, 168, 124, 50)))
+        painter.setBrush(QBrush(QColor(232, 168, 124, 30)))
         painter.drawRect(rect)
 
         center_pen = QPen(QColor(140, 79, 33, 160), 1, Qt.PenStyle.SolidLine)
@@ -454,7 +466,11 @@ class EditableBandRectItem(QGraphicsRectItem):
 
     def _handle_rects(self) -> list[QRectF]:
         rect = self.rect()
-        size = 6.0
+        zoom = 1.0
+        scene = self.scene()
+        if scene is not None and scene.views():
+            zoom = max(1e-6, abs(scene.views()[0].transform().m11()))
+        size = min(6.0 / zoom, rect.width() * 0.2, rect.height() * 0.2)
         half = size / 2.0
         points = [
             rect.topLeft(),
@@ -2087,6 +2103,23 @@ class ImageCanvas(QGraphicsView):
                     self._auto_band_items.remove(item)
                     removed = True
             if removed:
+                self._emit_auto_rois_changed()
+                event.accept()
+                return
+        nudges = {
+            Qt.Key.Key_Left: (-1.0, 0.0),
+            Qt.Key.Key_Right: (1.0, 0.0),
+            Qt.Key.Key_Up: (0.0, -1.0),
+            Qt.Key.Key_Down: (0.0, 1.0),
+        }
+        if self._auto_edit_enabled and event.key() in nudges:
+            selected = [item for item in self._auto_band_items if item.isSelected()]
+            if selected:
+                dx, dy = nudges[event.key()]
+                step = 5.0 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1.0
+                for item in selected:
+                    # setPos runs through itemChange, which keeps the box inside the image.
+                    item.setPos(item.pos() + QPointF(dx * step, dy * step))
                 self._emit_auto_rois_changed()
                 event.accept()
                 return
