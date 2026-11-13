@@ -948,7 +948,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         bl = grp.body_layout()
 
         self._blot_file_list = QListWidget()
-        self._blot_file_list.setMaximumHeight(86)
+        self._blot_file_list.setMaximumHeight(200)
         self._blot_file_list.setStyleSheet(
             "QListWidget { background:#FFFFFF; border:1px solid #C9B6B6; border-radius:6px; font-size:12px; }"
             "QListWidget::item { padding:2px 4px; }"

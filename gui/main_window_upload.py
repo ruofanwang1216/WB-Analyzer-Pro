@@ -85,7 +85,7 @@ class UploadMixin:
                 name = f"{name} (conversion failed)"
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, source_key)
-            item.setSizeHint(QSize(0, 26))
+            item.setSizeHint(QSize(0, 32))
             item.setToolTip(str(entry["source"]))
             self._files_list.addItem(item)
             row = _UploadedFileListRow(source_key, name, str(entry["source"]))

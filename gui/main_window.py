@@ -66,6 +66,7 @@ from gui.main_window_upload import UploadMixin
 from gui.main_window_image_ops import ImageOperationsMixin
 from gui.main_window_fixed_roi import FixedRoiMixin
 from gui.redesign_styles import restyle_param_panel
+from gui.status_messages import LocalizedStatusBar
 
 log = get_logger(__name__)
 
@@ -460,7 +461,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
                 outline: none;
             }}
             QListWidget#uploaded_files_list::item {{
-                padding: 6px 6px;
+                padding: 0px;
                 border-radius: 6px;
             }}
             QListWidget#uploaded_files_list::item:selected {{
@@ -742,7 +743,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         self._param_panel_host.setVisible(False)
 
         # Status bar
-        self._status_bar = QStatusBar()
+        self._status_bar = LocalizedStatusBar(lambda: self._language)
         self.setStatusBar(self._status_bar)
         self._refresh_image_panel_layout()
         self._sync_workspace_tabs()

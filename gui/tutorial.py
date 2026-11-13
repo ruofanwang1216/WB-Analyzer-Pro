@@ -1046,7 +1046,7 @@ class TutorialController(QObject):
                 _Step(
                     "create_column_table",
                     "Create the column table first",
-                    "Click Densitometry Figure Generation. The tutorial opens Column Setup directly with Samples = 3 and Replicates = 2. Confirm it before drawing any ROI.",
+                    "Click ① Quantify & Plot at the top. The tutorial opens Column Setup with Samples = 3 and Replicates = 2. Confirm it before drawing any ROI.",
                     lambda: host._figure_generation_btn,
                     True,
                 ),
