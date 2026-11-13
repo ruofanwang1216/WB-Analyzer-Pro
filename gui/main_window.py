@@ -2580,15 +2580,33 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             or "Mean" not in df.columns
         ):
             return
-        values = [
-            self.results_panel._format_cell(value)
-            for value in df["Mean"].tolist()
-        ]
-        values = [value for value in values if value]
-        if not values:
-            return
-        filled = table.autofill_next(values)
-        if filled is None:
+        # One table row per band row.  A manual run measures a single band
+        # across the lanes; an auto-detected run can hold several rows.
+        if "Band" in df.columns:
+            runs = [group for _band, group in df.groupby("Band", sort=False)]
+        else:
+            runs = [df]
+        groups, _replicates = table.table_dimensions()
+        filled_rows: list[str] = []
+        written_total = 0
+        extra = 0
+        for run in runs:
+            values = [
+                self.results_panel._format_cell(value)
+                for value in run["Mean"].tolist()
+            ]
+            values = [value for value in values if value]
+            if not values:
+                continue
+            filled = table.autofill_next(values)
+            if filled is None:
+                break
+            description, written = filled
+            filled_rows.append(description)
+            written_total += written
+            groups, _replicates = table.table_dimensions()
+            extra = max(extra, len(values) - groups)
+        if not filled_rows:
             self._status_bar.showMessage(
                 tr(
                     "Analysis done. The data table is full — click a row to overwrite it, or add replicates.",
@@ -2597,19 +2615,25 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
                 6000,
             )
             return
-        description, written = filled
-        groups, _replicates = table.table_dimensions()
-        message = tr(
-            "Analysis done — {count} value(s) filled into {row}.",
-            self._language,
-            count=written,
-            row=description,
-        )
-        if len(values) > groups:
+        if len(filled_rows) > 1:
+            message = tr(
+                "Analysis done — {count} value(s) filled into {rows} table rows.",
+                self._language,
+                count=written_total,
+                rows=len(filled_rows),
+            )
+        else:
+            message = tr(
+                "Analysis done — {count} value(s) filled into {row}.",
+                self._language,
+                count=written_total,
+                row=filled_rows[0],
+            )
+        if extra > 0:
             message += " " + tr(
                 "{extra} extra lane(s) did not fit; raise Groups to include them.",
                 self._language,
-                extra=len(values) - groups,
+                extra=extra,
             )
         self._status_bar.showMessage(message, 6000)
 

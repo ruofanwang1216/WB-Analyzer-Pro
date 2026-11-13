@@ -82,4 +82,5 @@ ZH_CN_REDESIGN: dict[str, str] = {
     "Upload post-processing failed — see error dialog.": "导入后的处理失败，详情见弹出的提示。",
     "WB Plot mode uses one large ROI only.": "图像排版只需要框选一个大区域。",
     "Click ① Quantify & Plot at the top. The tutorial opens Column Setup with Samples = 3 and Replicates = 2. Confirm it before drawing any ROI.": "点击顶部的“① 定量与作图”。教程会打开数据表设置，并预填样本组数 3、重复次数 2。请先确认，再开始框选。",
+    "Analysis done — {count} value(s) filled into {rows} table rows.": "分析完成：已把 {count} 个数值填入数据表的 {rows} 行。",
 }

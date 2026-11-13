@@ -171,6 +171,23 @@ class QuantWorkspaceTests(unittest.TestCase):
         self.assertTrue(table.has_generated_figure())
         self.assertIn("Replicate 1", window._status_bar.currentMessage())
 
+    def test_run_with_several_band_rows_fills_one_table_row_each(self) -> None:
+        window = MainWindowFactory.make()
+        window._on_figure_generation_clicked()
+        table = window._embedded_column_table
+        results = [
+            {"lane": lane, "band": band, "Area": 10.0, "Mean": float(band * 100 + lane)}
+            for band in (1, 2)
+            for lane in (1, 2, 3)
+        ]
+
+        window._on_measurement_done(results)
+
+        self.assertEqual([_cell(table, 0, g) for g in range(3)], ["101.0", "102.0", "103.0"])
+        self.assertEqual([_cell(table, 1, g) for g in range(3)], ["201.0", "202.0", "203.0"])
+        self.assertEqual(table.table_dimensions(), (3, 3))
+        self.assertTrue(table.has_generated_figure())
+
     def test_auto_fill_can_be_switched_off(self) -> None:
         window = MainWindowFactory.make()
         window._on_figure_generation_clicked()
