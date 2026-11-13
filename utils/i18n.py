@@ -198,9 +198,19 @@ _ZH_CN = {
     "Cancel fixed ROI": "取消固定 ROI",
     "Capture the current lane ROI size, or arm the next drawn ROI as the fixed size.": "记录当前泳道 ROI 尺寸；或将下一次绘制的 ROI 设为固定尺寸。",
     "Return Manual mode to freehand ROI drawing.": "恢复为手动自由绘制 ROI。",
-    "Manual: draw lane ROI → draw band ROI → Analyze\nHold Space + drag to pan. Scroll to zoom.": (
-        "手动模式：框选泳道 ROI → 框选条带 ROI → 定量分析\n"
+    "Manual: draw lane ROI → draw band ROI → Analyze\n"
+    "Auto: draw one large ROI → set Lanes → Auto-detect lanes → adjust → Analyze\n"
+    "Hold Space + drag to pan. Scroll to zoom.": (
+        "手动：框选泳道 ROI → 框选条带 ROI → 定量分析\n"
+        "自动：框一个大区域 → 填泳道数 → 自动识别 → 微调 → 定量分析\n"
         "按住空格键拖动可平移；滚动鼠标滚轮可缩放。"
+    ),
+    "Auto-detect lanes": "自动识别泳道",
+    "Draw one large ROI around the bands, set the lane count, then click to "
+    "find every lane and band automatically. Drag boxes to adjust, Delete to "
+    "remove, drag on empty space to add.": (
+        "先框一个包含所有条带的大区域并填好泳道数，再点此按钮自动找出每条泳道和条带。"
+        "拖动框可调整，Delete 键删除，在空白处拖拽可补画。"
     ),
     "Image Transform": "图像显示调整",
     "Analyze follows the current Low / High / Gamma. Invert remains preview-only.": (

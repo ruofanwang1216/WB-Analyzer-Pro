@@ -59,6 +59,7 @@ from gui.image_panel_widgets import (
 from gui.main_window_upload import UploadMixin
 from gui.main_window_image_ops import ImageOperationsMixin
 from gui.main_window_fixed_roi import FixedRoiMixin
+from gui.main_window_auto_lanes import AutoLaneMixin
 
 log = get_logger(__name__)
 
@@ -198,7 +199,7 @@ def _run_auto_fit_guided_with_polarity_fallback(
 
 # ── Main window ────────────────────────────────────────────────────────────────
 
-class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
+class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(APP_NAME)
@@ -1122,7 +1123,9 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         self._restore_param_panel()
         self._results_dock.setVisible(True)
         self._set_analyze_toolbar_visible(True)
-        self._act_analyze.setEnabled(self._band_roi is not None)
+        self._act_analyze.setEnabled(
+            self._band_roi is not None or self._quant_auto_active()
+        )
         self._workspace_toolbar_action.setVisible(True)
         self._set_workspace_focus_target("image")
         self._status_bar.showMessage(
@@ -1142,7 +1145,9 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
                 self._figure_mode_window.set_context_controls_widget(None)
             self._restore_param_panel()
             self._results_dock.setVisible(True)
-            self._act_analyze.setEnabled(self._band_roi is not None)
+            self._act_analyze.setEnabled(
+            self._band_roi is not None or self._quant_auto_active()
+        )
         total = max(sum(self._workspace_splitter.sizes()), 1)
         left = max(420, int(total * 0.50 if page == "wb_plot" else total * 0.58))
         right = max(360, total - left)
@@ -1427,7 +1432,9 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         self.canvas = self._image_panels[slot_index].canvas
         self.canvas.set_interaction_mode(self._current_mode)
         self._load_slot_state(slot_index)
-        self._act_analyze.setEnabled(self._band_roi is not None)
+        self._act_analyze.setEnabled(
+            self._band_roi is not None or self._quant_auto_active()
+        )
         self._refresh_rotation_controls()
         self._sync_image_transform_dialog()
 
@@ -2031,6 +2038,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
         self.param_panel.params_changed.connect(self._on_params_changed)
         self.param_panel.status_message.connect(self._status_bar.showMessage)
         self.param_panel.detect_requested.connect(self._detect_bands)
+        self.param_panel.auto_lane_detect_requested.connect(self._run_quant_auto_lane_detect)
         self.param_panel.custom_rotate_requested.connect(self._on_custom_rotate_requested)
         self.param_panel.rotate_requested.connect(self._on_rotate_requested)
         self.param_panel.cancel_rotate_requested.connect(self._on_cancel_rotate_requested)
@@ -2108,6 +2116,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
                 f"WB Plot ROI set ({roi.width():.0f} × {roi.height():.0f} px) — select a blot target and press Return/Enter."
             )
             return
+        self._leave_quant_auto_review()
         self._auto_detections = []
         self._band_roi = None
         self._act_analyze.setEnabled(False)
@@ -2150,6 +2159,11 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
             if self._is_wb_plot_workspace_active():
                 self._lane_rects = [QRectF(roi)]
                 self.canvas.clear_auto_overlays()
+                self._refresh_detection_actions()
+                return
+            if self._quant_auto_active():
+                # Lane count changed during auto review → detect again.
+                self._run_quant_auto_lane_detect()
                 self._refresh_detection_actions()
                 return
             self._recalculate_lanes(roi)
@@ -2275,6 +2289,9 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
 
     def _on_auto_rois_changed(self, detections: list[dict]) -> None:
         """Keep WB Plot Auto-Fit review overlays synchronized with the source canvas."""
+        if self._quant_auto_active():
+            self._on_quant_auto_rois_edited(detections)
+            return
         self._auto_detections = self._normalize_auto_detections(detections, preserve_target_row=True)
         self.canvas.set_auto_detect_overlays(self._auto_detections)
         total_bands = sum(len(lane["bands"]) for lane in self._auto_detections)
@@ -2305,6 +2322,10 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
 
         if self._image_path is None:
             QMessageBox.warning(self, "No Image", "Please open an image first.")
+            return
+
+        if self._quant_auto_active():
+            self._run_quant_auto_analysis()
             return
 
         roi = self.canvas.get_roi()

@@ -9,3 +9,6 @@ build/
 dist_installer/
 .pytest_cache/
 tmp/
+
+# Local test images from raw lab data (not for the repo)
+sample_images/

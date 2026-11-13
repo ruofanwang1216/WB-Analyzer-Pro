@@ -512,6 +512,11 @@ class ImageCanvas(QGraphicsView):
         self._interaction_mode = "manual"
         self._auto_edit_enabled = False
         self._auto_edit_tool = "move"
+        # Densitometry auto-lane review: boxes are editable and a drag on
+        # empty space inside the lane ROI adds a new box.
+        self._quant_auto_review = False
+        self._drawing_new_auto_band = False
+        self._new_auto_band_preview: QGraphicsRectItem | None = None
         self._rotation_mode = False
         self._rotation_dragging = False
         self._rotation_angle_deg = 0.0
@@ -584,6 +589,10 @@ class ImageCanvas(QGraphicsView):
         self._manual_band_labels.clear()
         self._auto_lane_frames.clear()
         self._final_crop_item = None
+        self._quant_auto_review = False
+        self._drawing_new_auto_band = False
+        self._new_auto_band_preview = None
+        self._auto_edit_enabled = False
         self._rotation_mode = False
         self._rotation_dragging = False
         self._rotation_angle_deg = 0.0
@@ -1180,6 +1189,7 @@ class ImageCanvas(QGraphicsView):
         """Use single large ROI behavior for WB Plot cropping."""
         self._wb_plot_roi_only = enabled
         if enabled:
+            self.set_quant_auto_review(False)
             if self._band_roi_item is not None:
                 self._scene.removeItem(self._band_roi_item)
                 self._band_roi_item = None
@@ -1225,6 +1235,7 @@ class ImageCanvas(QGraphicsView):
         self._moving_fixed_roi = False
         if not self._fixed_roi_enabled:
             self._fixed_roi_size = None
+        self.set_quant_auto_review(False)
         self.clear_auto_overlays()
 
     def clear_auto_overlays(self) -> None:
@@ -1392,7 +1403,41 @@ class ImageCanvas(QGraphicsView):
         for item in self._auto_band_items:
             item.set_editing_enabled(enabled)
         if not enabled:
+            self._quant_auto_review = False
+            self._drawing_new_auto_band = False
+            self._remove_new_auto_band_preview()
             self._scene.clearSelection()
+
+    def set_quant_auto_review(self, enabled: bool) -> None:
+        """Enter/leave densitometry auto-lane review (editable boxes + add by drag)."""
+        self._drawing_new_auto_band = False
+        self._remove_new_auto_band_preview()
+        self.set_auto_edit_mode(bool(enabled), "move")
+        self._quant_auto_review = bool(enabled)
+
+    def is_quant_auto_review(self) -> bool:
+        return self._quant_auto_review
+
+    def refresh_auto_band_labels(self) -> None:
+        self._refresh_auto_band_labels()
+
+    def ordered_auto_band_rects(self) -> list[tuple[QRectF, int | None]]:
+        """Band boxes with their lane index, in the same order as the #N labels."""
+        return [
+            (item.scene_rect(), self._lane_index_for_rect(item.scene_rect()))
+            for item in self._ordered_auto_band_items_row_major()
+        ]
+
+    def _remove_new_auto_band_preview(self) -> None:
+        if self._new_auto_band_preview is not None:
+            self._scene.removeItem(self._new_auto_band_preview)
+            self._new_auto_band_preview = None
+
+    def _editable_band_item_at(self, viewport_pos: QPoint) -> EditableBandRectItem | None:
+        for item in self.items(viewport_pos):
+            if isinstance(item, EditableBandRectItem):
+                return item
+        return None
 
     def get_auto_detections(self) -> list[dict]:
         detections = [
@@ -1747,6 +1792,29 @@ class ImageCanvas(QGraphicsView):
                 super().mousePressEvent(event)
                 return
 
+        if (
+            self._quant_auto_review
+            and event.button() == Qt.MouseButton.LeftButton
+            and self._pixmap_item is not None
+            and self.dragMode() == QGraphicsView.DragMode.NoDrag
+        ):
+            if self._editable_band_item_at(event.pos()) is not None:
+                # Move / resize an existing box.
+                super().mousePressEvent(event)
+                return
+            if not self._lane_roi_contains_viewport_pos(event.pos()):
+                # Same rule as the manual workflow: clicking outside the
+                # lane ROI discards the current ROI set.
+                self.clear_roi()
+                self.roi_cleared.emit()
+                event.accept()
+                return
+            self._scene.clearSelection()
+            self._drawing_new_auto_band = True
+            self._draw_start = self._clamp_to_image(self.mapToScene(event.pos()))
+            event.accept()
+            return
+
         # After the first manual Lane ROI is complete, an out-of-frame click
         # cancels it instead of accidentally starting a Band ROI elsewhere.
         # The tolerance is measured in viewport pixels so it feels identical
@@ -1844,6 +1912,21 @@ class ImageCanvas(QGraphicsView):
             event.accept()
             return
 
+        if self._drawing_new_auto_band and self._pixmap_item:
+            sp = self._clamp_to_image(self.mapToScene(event.pos()))
+            rect = QRectF(self._draw_start, sp).normalized()
+            if self._new_auto_band_preview is None:
+                pen = QPen(QColor("#E8A87C"), 2, Qt.PenStyle.DashLine)
+                pen.setCosmetic(True)
+                self._new_auto_band_preview = self._scene.addRect(
+                    rect, pen, QBrush(QColor(232, 168, 124, 40))
+                )
+                self._new_auto_band_preview.setZValue(13)
+            else:
+                self._new_auto_band_preview.setRect(rect)
+            event.accept()
+            return
+
         if self._drawing and self._pixmap_item:
             sp = self._clamp_to_image(self.mapToScene(event.pos()))
             rect = QRectF(self._draw_start, sp).normalized()
@@ -1896,6 +1979,28 @@ class ImageCanvas(QGraphicsView):
                 self.roi_changed.emit(self._roi_item.rect())
             if self._fixed_band_roi_relative is not None and self._band_roi_item is not None:
                 self.band_roi_changed.emit(self._band_roi_item.rect())
+            event.accept()
+            return
+
+        if self._drawing_new_auto_band and event.button() == Qt.MouseButton.LeftButton:
+            self._drawing_new_auto_band = False
+            rect = (
+                self._new_auto_band_preview.rect()
+                if self._new_auto_band_preview is not None
+                else QRectF()
+            )
+            self._remove_new_auto_band_preview()
+            if rect.width() > 3 and rect.height() > 3 and self._pixmap_item is not None:
+                item = EditableBandRectItem(
+                    rect,
+                    self._pixmap_item.sceneBoundingRect(),
+                    self._emit_auto_rois_changed,
+                )
+                item.set_editing_enabled(True)
+                self._scene.addItem(item)
+                item.setSelected(True)
+                self._auto_band_items.append(item)
+                self._emit_auto_rois_changed()
             event.accept()
             return
 
