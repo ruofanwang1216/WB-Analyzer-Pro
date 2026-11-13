@@ -59,10 +59,13 @@ class ChineseLocalizationTests(unittest.TestCase):
         self.assertFalse(hasattr(workspace, "_text_rotation_spin"))
         self.assertEqual(workspace._export_pdf_btn.toolTip(), "将图形导出为 PDF")
         self.assertEqual(workspace._export_tiff_btn.toolTip(), "将图形导出为 TIFF")
-        step1_labels = [label.text() for label in workspace._grp1.findChildren(QLabel)]
-        self.assertIn("印迹图框", step1_labels)
-        self.assertIn("印迹条件", step1_labels)
-        self.assertIn("复用之前的布局", step1_labels)
+        step1_buttons = [
+            button.text() for button in workspace._grp1.findChildren(QPushButton)
+        ]
+        self.assertEqual(
+            step1_buttons,
+            ["新建印迹图框", "添加条件", "已保存模板   ›", "+ 加一个图框"],
+        )
 
         workspace.set_language(LANG_EN)
         self.assertEqual(workspace._grp1._title_label.text(), "Step 1: Choose Layout")

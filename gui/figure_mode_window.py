@@ -325,7 +325,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             "border-top-left-radius: 9px; border-top-right-radius: 9px; }"
         )
         header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(12, 12, 12, 12)
+        header_layout.setContentsMargins(10, 10, 10, 10)
         header_layout.setSpacing(8)
         panel_outer.addWidget(header)
 
@@ -348,12 +348,12 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             button.setObjectName("workflowStepButton")
             button.setCheckable(True)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setMinimumHeight(52)
+            button.setFixedHeight(34)
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             button.setStyleSheet(
                 "QPushButton#workflowStepButton { background:#FFFFFF; "
                 "border:1px solid #C3D2CA; border-radius:8px; color:#3B4A43; "
-                "font-size:12px; padding:4px 2px; }"
+                "font-size:13px; padding:2px 2px; }"
                 "QPushButton#workflowStepButton:hover { border-color:#1F6B4A; "
                 "color:#134A32; }"
                 "QPushButton#workflowStepButton:checked { background:#1F6B4A; "
@@ -364,11 +364,6 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             self._step_buttons.append(button)
         header_layout.addLayout(steps_row)
 
-        self._step_title_lbl = QLabel("")
-        self._step_title_lbl.setStyleSheet(
-            "font-size:15px; font-weight:600; color:#134A32; background:transparent;"
-        )
-        header_layout.addWidget(self._step_title_lbl)
         self._step_desc_lbl = QLabel("")
         self._step_desc_lbl.setWordWrap(True)
         self._step_desc_lbl.setStyleSheet(
@@ -396,7 +391,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         page_contents: list[list[QWidget]] = [
             [self._grp1, _page_heading("Saved Blot Files"), self._grp5],
             [self._grp4],
-            [_page_heading("Export Figure"), self._grp6, self._save_panel],
+            [self._grp6, self._save_panel],
         ]
         for widgets in page_contents:
             page = QWidget()
@@ -451,13 +446,12 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
     # ── Step panel ────────────────────────────────────────────────────────
 
-    _STEP_TITLES = ("Choose Layout", "Fill Frames", "Save & Export")
+    # Short on purpose: the panel should read at a glance.
+    _STEP_TITLES = ("Layout", "Fill", "Export")
     _STEP_DESCRIPTIONS = (
-        "Decide how many blot frames and lanes the figure has, reuse a saved "
-        "template, or reopen a saved Blot File.",
-        "Click a frame in the preview, draw the band region on the source "
-        "image, then press Enter to place it.",
-        "Export the figure, or save it to keep editing later.",
+        "",
+        "Click a frame → draw on the image → Enter",
+        "",
     )
 
     def current_step(self) -> int:
@@ -486,16 +480,11 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
     def _refresh_step_panel_texts(self) -> None:
         for index, button in enumerate(self._step_buttons, start=1):
-            button.setText(f"{index}\n{tr(self._STEP_TITLES[index - 1], self._language)}")
+            button.setText(f"{index}  {tr(self._STEP_TITLES[index - 1], self._language)}")
         current = self._current_step
-        self._step_title_lbl.setText(
-            tr("Step {number}", self._language, number=current)
-            + "  "
-            + tr(self._STEP_TITLES[current - 1], self._language)
-        )
-        self._step_desc_lbl.setText(
-            tr(self._STEP_DESCRIPTIONS[current - 1], self._language)
-        )
+        hint = self._STEP_DESCRIPTIONS[current - 1]
+        self._step_desc_lbl.setText(tr(hint, self._language) if hint else "")
+        self._step_desc_lbl.setVisible(bool(hint))
         self._step_prev_btn.setText(tr("Previous", self._language))
         self._step_next_btn.setText(tr("Next", self._language))
 

@@ -1267,7 +1267,7 @@ class TutorialController(QObject):
             _Step(
                 "frame_template",
                 "Create the blot frames",
-                "Click Create Blot Frame Template. Tutorial defaults are Panels = 1, Blot Frames = 2, and Lanes = 3, matching the supplied setup screenshot.",
+                "Click New Blot Frames. Tutorial defaults are Panels = 1, Blot Frames = 2, and Lanes = 3, matching the supplied setup screenshot.",
                 lambda: figure_target("step1PrimaryButton"),
                 True,
             ),
@@ -1281,7 +1281,7 @@ class TutorialController(QObject):
             _Step(
                 "condition_template",
                 "Create the blot conditions",
-                "Click Create Blot Condition Template. Tutorial defaults are one condition row and one evenly divided Group Level 1.",
+                "Click Add Conditions. Tutorial defaults are one condition row and one evenly divided Group Level 1.",
                 lambda: figure_target("step1SecondaryButton"),
                 True,
             ),
