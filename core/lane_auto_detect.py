@@ -376,7 +376,7 @@ def detect_lanes_in_roi(
         if found:
             row_box_w = max(box_w, float(np.ceil(max(found) + 2 * side_pad)))
         if len(lanes) > 1:
-            row_box_w = min(row_box_w, float(np.floor(np.min(np.diff([ln["centre"] for ln in lanes])) + 2 * side_pad)))
+            row_box_w = min(row_box_w, float(np.floor(np.mean(np.sort(np.diff([ln["centre"] for ln in lanes]))[: max(1, len(lanes) // 2)]))))
         row_box_w = float(min(row_box_w, w))
         # Centre each box on its own band; empty lanes keep the fitted centre.
         box_centres = [
@@ -386,11 +386,11 @@ def detect_lanes_in_roi(
         box_lefts = [float(np.clip(cx - row_box_w / 2, 0, max(0.0, w - row_box_w))) for cx in box_centres]
         # Neighbouring boxes must not overlap: push them apart (an empty
         # lane's box gives way entirely to a real band).
-        for _ in range(3):
+        for _ in range(12):
             moved = False
             for i in range(1, len(box_lefts)):
                 overlap = box_lefts[i - 1] + row_box_w - box_lefts[i]
-                if overlap <= 0:
+                if overlap <= 1e-6:
                     continue
                 moved = True
                 if spans[i - 1] is None and spans[i] is not None:
