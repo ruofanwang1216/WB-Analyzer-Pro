@@ -2050,7 +2050,7 @@ class FigureModeStructureTests(unittest.TestCase):
                 )
                 self.assertEqual(mode_selector.text(), "Evenly")
                 self.assertTrue(mode_selector.isVisible())
-                self.assertEqual(mode_selector.size(), QSize(76, 30))
+                self.assertEqual(mode_selector.size(), QSize(76, 28))
                 self.assertAlmostEqual(
                     mode_selector.mapTo(dialog, QPoint()).y()
                     + mode_selector.height() / 2.0,
@@ -2364,13 +2364,15 @@ class FigureModeStructureTests(unittest.TestCase):
             self.assertEqual(custom_button.width(), mode_selector.width())
             self.assertEqual(custom_button.size(), evenly_size)
             self.assertEqual(dialog.size(), dialog_size)
+            # Edit sits beside the selector on the same line, so choosing
+            # Custom never changes the row height.
             self.assertGreater(
-                custom_button.mapTo(dialog, QPoint()).y(),
-                mode_selector.mapTo(dialog, QPoint()).y(),
-            )
-            self.assertAlmostEqual(
                 custom_button.mapTo(dialog, QPoint()).x(),
                 mode_selector.mapTo(dialog, QPoint()).x(),
+            )
+            self.assertAlmostEqual(
+                custom_button.mapTo(dialog, QPoint()).y(),
+                mode_selector.mapTo(dialog, QPoint()).y(),
                 delta=2,
             )
             dialog.reject()

@@ -11,8 +11,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypedDict
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QSignalBlocker, QTimer
-from PySide6.QtGui import QAction, QColor, QFont, QPainter, QPen
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QSignalBlocker, QTimer
+from PySide6.QtGui import QAction, QColor, QFont, QPainter, QPen, QRegion
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QGridLayout,
     QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QSpinBox,
@@ -58,7 +58,7 @@ class LaneGroupControl(TypedDict, total=False):
     custom_action: QAction
     custom_btn: QPushButton
     selector_column: QWidget
-    selector_layout: QVBoxLayout
+    selector_layout: QHBoxLayout
     individual_remove_btn: QToolButton
     custom_ranges: list[tuple[int, int]] | None
     custom_lane_count: int | None
@@ -249,6 +249,52 @@ def request_custom_panel_lane_ranges(
     return result
 
 
+class _MagnifiedPreview(QWidget):
+    """Shows the condition preview enlarged, as the dialog's main element.
+
+    The real preview widget keeps its own size, which the figure layout
+    depends on; this view redraws it through a scaled painter so the text
+    stays sharp.
+    """
+
+    def __init__(self, source: QWidget, zoom: float, parent=None) -> None:
+        super().__init__(parent)
+        self._source = source
+        self._zoom = float(zoom)
+        source.installEventFilter(self)
+        self._sync_size()
+
+    def zoom(self) -> float:
+        return self._zoom
+
+    def _sync_size(self) -> None:
+        self.setFixedSize(
+            int(round(self._source.width() * self._zoom)),
+            int(round(self._source.height() * self._zoom)),
+        )
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt API
+        # Resize only: rendering the source raises paint events on it, so
+        # reacting to those here would repaint forever.
+        if watched is self._source and event.type() == QEvent.Type.Resize:
+            self._sync_size()
+            self.update()
+        return super().eventFilter(watched, event)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802 - Qt API
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        painter.scale(self._zoom, self._zoom)
+        self._source.render(
+            painter,
+            QPoint(0, 0),
+            QRegion(),
+            QWidget.RenderFlag.DrawChildren,
+        )
+        painter.end()
+
+
 class ConditionTemplateDialogController:
     """Own the condition dialog, draft state, synchronization, and signals.
 
@@ -366,8 +412,8 @@ class ConditionTemplateDialogController:
         rows_card = QFrame()
         rows_card.setObjectName('conditionRowsCard')
         rows_card_layout = QVBoxLayout(rows_card)
-        rows_card_layout.setContentsMargins(18, 14, 18, 14)
-        rows_card_layout.setSpacing(10)
+        rows_card_layout.setContentsMargins(16, 10, 16, 10)
+        rows_card_layout.setSpacing(8)
         # One line: the label, the number, and (several panels only) the
         # all-panels / per-panel switch.
         rows_header = QHBoxLayout()
@@ -421,8 +467,8 @@ class ConditionTemplateDialogController:
         self.lane_card = QFrame()
         self.lane_card.setObjectName('conditionLaneGroupsCard')
         lane_layout = QVBoxLayout(self.lane_card)
-        lane_layout.setContentsMargins(18, 14, 18, 16)
-        lane_layout.setSpacing(10)
+        lane_layout.setContentsMargins(16, 10, 16, 12)
+        lane_layout.setSpacing(6)
         lane_header = QHBoxLayout()
         lane_header.setSpacing(9)
         lane_header.addWidget(self.section_title('Lane groups'))
@@ -479,7 +525,7 @@ class ConditionTemplateDialogController:
     # Shared measurements so the form lines up.
     _FORM_LABEL_WIDTH = 96
     _SPIN_WIDTH = 72
-    _CONTROL_HEIGHT = 30
+    _CONTROL_HEIGHT = 28
     _SELECTOR_WIDTH = 76
 
     def section_title(self, text: str) -> QLabel:
@@ -618,6 +664,10 @@ class ConditionTemplateDialogController:
         preview_project.global_layout.show_condition_table = True
         preview_project.global_layout.condition_table_row_height_pt = 13.0
         self.preview.set_layout_project(preview_project)
+        mirror = getattr(self, 'preview_view', None)
+        if mirror is not None:
+            mirror._sync_size()
+            mirror.update()
 
     def update_control(self, control: LaneGroupControl, lanes: int) -> None:
         control['group_spin'].setMaximum(max(1, lanes))
@@ -625,6 +675,13 @@ class ConditionTemplateDialogController:
         control['group_mode'].setEnabled(True)
         evenly = control['group_mode'].currentData() != 'custom'
         control['selector_layout'].setContentsMargins(0, 0, 0, 0)
+        # Edit sits beside the selector, so the row height never changes.
+        control['selector_column'].setFixedSize(
+            self._SELECTOR_WIDTH
+            if evenly or not has_groups
+            else self._SELECTOR_WIDTH * 2 + 4,
+            self._CONTROL_HEIGHT,
+        )
         control['mode_selector'].setEnabled(True)
         selector_width = self._SELECTOR_WIDTH
         control['mode_selector'].setFixedSize(selector_width, self._CONTROL_HEIGHT)
@@ -846,12 +903,10 @@ class ConditionTemplateDialogController:
         custom_btn.hide()
         selector_column = QWidget(row)
         selector_column.setObjectName('conditionLaneDistributionColumn')
-        selector_column.setFixedSize(
-            self._SELECTOR_WIDTH, self._CONTROL_HEIGHT * 2 + 3
-        )
-        selector_layout = QVBoxLayout(selector_column)
+        selector_column.setFixedHeight(self._CONTROL_HEIGHT)
+        selector_layout = QHBoxLayout(selector_column)
         selector_layout.setContentsMargins(0, 0, 0, 0)
-        selector_layout.setSpacing(3)
+        selector_layout.setSpacing(4)
         selector_layout.addWidget(mode_selector)
         selector_layout.addWidget(custom_btn)
         selector_layout.addStretch(1)
@@ -1101,22 +1156,31 @@ class ConditionTemplateDialogController:
         self.shared_rows_spin.valueChanged.connect(self.refresh_preview)
         for spin in self.panel_rows_spins:
             spin.valueChanged.connect(self.refresh_preview)
-        self.outer.addWidget(self.lane_card)
-        self.outer.addSpacing(16)
-        preview_title = self.group_heading_label(tr('Preview', self._language))
-        self.outer.addWidget(preview_title)
-        self.outer.addSpacing(6)
-        # The preview sits on its own white card, like the form above it.
+        # The preview leads the dialog, enlarged; the real preview widget
+        # stays at its working size out of sight and is mirrored here.
+        self.preview.setParent(self.dialog)
+        self.preview.hide()
+        self.preview_view = _MagnifiedPreview(
+            self.preview,
+            1.5 if self.panel_count == 1 else 1.15,
+            self.dialog,
+        )
+        self.preview_view.setObjectName('conditionPreviewView')
         preview_card = QFrame()
         preview_card.setObjectName('conditionPreviewCard')
         preview_card.setStyleSheet(
             'QFrame#conditionPreviewCard { background:#FFFFFF; '
-            'border:1px solid #D9E0DC; border-radius:10px; }'
+            'border:1px solid #BFD3C8; border-radius:12px; }'
         )
-        preview_card_layout = QHBoxLayout(preview_card)
-        preview_card_layout.setContentsMargins(12, 12, 12, 12)
-        preview_card_layout.addWidget(self.preview, 0, Qt.AlignmentFlag.AlignHCenter)
-        self.outer.addWidget(preview_card)
+        preview_card_layout = QVBoxLayout(preview_card)
+        preview_card_layout.setContentsMargins(18, 14, 18, 18)
+        preview_card_layout.setSpacing(8)
+        preview_title = self.group_heading_label(tr('Preview', self._language))
+        preview_card_layout.addWidget(preview_title)
+        preview_card_layout.addWidget(self.preview_view, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.outer.insertWidget(0, preview_card)
+        self.outer.insertSpacing(1, 14)
+        self.outer.addWidget(self.lane_card)
         self.outer.addSpacing(16)
         button_row = QHBoxLayout()
         button_row.setSpacing(10)
