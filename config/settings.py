@@ -13,7 +13,7 @@ DEFAULT_PROJECT_DIR = app_data_dir()
 
 # Shared by the global stylesheet (gui/theme.py) and the densitometry widgets.
 # ── Colour palette (2026 UI redesign: white cards on a soft grey-green ground) ──────────────────────────────────────────────────────
-COLOR_BG           = "#F3F5F4"   # app background
+COLOR_BG           = "#E7ECE9"   # app background
 COLOR_SURFACE      = "#FFFFFF"   # canvas, input fields, table rows
 COLOR_TOOLBAR      = "#FFFFFF"   # toolbar, title bar, status bar
 COLOR_SIDEBAR      = "#FFFFFF"   # param panel background
