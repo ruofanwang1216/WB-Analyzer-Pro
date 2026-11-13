@@ -123,7 +123,11 @@ def find_band_rows(signal: np.ndarray, min_rel: float = 0.12) -> list[dict]:
     peak_max = float(profile.max())
     if peak_max <= 1e-6:
         return []
-    peaks, props = find_peaks(profile, prominence=peak_max * min_rel, distance=max(2, h // 60))
+    # Pad with zeros so a band cut by the top or bottom edge of a tightly
+    # drawn ROI still counts as a peak.
+    padded = np.concatenate([[0.0], profile, [0.0]])
+    peaks, props = find_peaks(padded, prominence=peak_max * min_rel, distance=max(2, h // 60))
+    peaks = peaks - 1
     rows: list[dict] = []
     for peak, prom in zip(peaks, props["prominences"]):
         top, bottom = _row_extent(profile, int(peak))

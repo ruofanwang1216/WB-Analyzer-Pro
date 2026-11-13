@@ -1340,7 +1340,9 @@ class ImageCanvas(QGraphicsView):
             label.setZValue(12)
             self._manual_band_labels.append(label)
 
-    def set_auto_detect_overlays(self, detections: list[dict], *, quiet_lanes: bool = False) -> None:
+    def set_auto_detect_overlays(
+        self, detections: list[dict], *, quiet_lanes: bool | None = None
+    ) -> None:
         """
         Draw lane frames (blue) and band boxes (orange) from auto_detect_all()
         results. Clears any previous overlays first.
@@ -1351,6 +1353,9 @@ class ImageCanvas(QGraphicsView):
         above their box, so nothing is drawn over the band being measured.
         """
         self.clear_auto_overlays()
+        if quiet_lanes is None:
+            # Redrawing after an edit keeps whatever style the review started in.
+            quiet_lanes = self._auto_quiet_lanes
         self._auto_quiet_lanes = bool(quiet_lanes)
         if self._band_roi_item is not None:
             self._scene.removeItem(self._band_roi_item)

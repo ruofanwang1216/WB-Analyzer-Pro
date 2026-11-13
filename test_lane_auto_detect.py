@@ -175,6 +175,16 @@ class LaneAutoDetectCoreTests(unittest.TestCase):
         self.assertEqual(detect_lanes_in_roi(clean, self.ROI, 4)["adjacent_rows"], [])
         self.assertEqual(detect_lanes_in_roi(halo, self.ROI, 4)["adjacent_rows"], [])
 
+    def test_band_cut_by_a_tight_roi_edge_is_still_found(self) -> None:
+        centres = [40.0, 64.0, 88.0, 112.0]
+        image = _synthetic_blot(centres, [20000.0] * 4)
+
+        # The ROI starts one pixel above the band's peak row (y=40).
+        result = detect_lanes_in_roi(image, (10.0, 39.0, 240.0, 30.0), 4)
+
+        self.assertEqual(len(result["rows"]), 1)
+        self.assertCentresClose(_band_centres(result), centres)
+
     def test_dark_on_light_images_are_handled(self) -> None:
         centres = [40.0, 64.0, 88.0, 112.0]
         image = 65535 - _synthetic_blot(centres, [20000.0] * 4)
@@ -424,6 +434,32 @@ class LaneAutoDetectWindowTests(unittest.TestCase):
             window.param_panel.lane_count.setValue(6)
             window.param_panel._auto_lane_btn.click()
             self.assertFalse(window.param_panel.adjacent_band_option_available())
+        finally:
+            window.close()
+
+    def test_wb_plot_auto_fit_uses_the_lane_fit_detector_when_lane_count_is_known(self) -> None:
+        window = self._window_with_blot()
+        try:
+            roi = QRectF(10, 10, 240, 70)
+
+            found = window._wb_plot_lane_fit_detections(roi, 6)
+
+            self.assertIsNotNone(found)
+            detections, metadata = found
+            self.assertEqual(metadata["mode"], "lane_fit")
+            self.assertEqual([lane["lane_index"] for lane in detections], [1, 2, 3, 4, 5, 6])
+            centres = [lane["bands"][0]["band_rect"].center().x() for lane in detections]
+            for got, want in zip(centres, [40.0, 64.0, 88.0, 112.0, 136.0, 160.0]):
+                self.assertLess(abs(got - want), 4.0)
+            self.assertTrue(all(lane["bands"][0]["row_index"] == 1 for lane in detections))
+        finally:
+            window.close()
+
+    def test_wb_plot_auto_fit_falls_back_without_a_lane_count(self) -> None:
+        window = self._window_with_blot()
+        try:
+            self.assertIsNone(window._wb_plot_lane_fit_detections(QRectF(10, 10, 240, 70), None))
+            self.assertIsNone(window._wb_plot_lane_fit_detections(None, 6))
         finally:
             window.close()
 
