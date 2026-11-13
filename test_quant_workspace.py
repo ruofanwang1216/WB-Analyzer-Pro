@@ -154,7 +154,7 @@ class QuantWorkspaceTests(unittest.TestCase):
 
     def _results(self, means: list[float]) -> list[dict]:
         return [
-            {"lane": index + 1, "band": 1, "Area": 10.0, "Mean": mean}
+            {"lane": index + 1, "band": f"#{index + 1}", "Area": 10.0, "Mean": mean}
             for index, mean in enumerate(means)
         ]
 
@@ -176,7 +176,13 @@ class QuantWorkspaceTests(unittest.TestCase):
         window._on_figure_generation_clicked()
         table = window._embedded_column_table
         results = [
-            {"lane": lane, "band": band, "Area": 10.0, "Mean": float(band * 100 + lane)}
+            {
+                "lane": lane,
+                # As the measurement reports it: one "#N" label per box.
+                "band": f"#{(band - 1) * 3 + lane}",
+                "Area": 10.0,
+                "Mean": float(band * 100 + lane),
+            }
             for band in (1, 2)
             for lane in (1, 2, 3)
         ]

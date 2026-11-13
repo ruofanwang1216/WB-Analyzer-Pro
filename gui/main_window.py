@@ -2546,6 +2546,23 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
 
     # ── Results → data table → chart ───────────────────────────────────────────
 
+    @staticmethod
+    def _split_results_into_band_rows(df: pd.DataFrame) -> list[pd.DataFrame]:
+        if "Lane" not in df.columns or len(df) <= 1:
+            return [df]
+        starts = [0]
+        previous: float | None = None
+        for position, lane in enumerate(df["Lane"].tolist()):
+            try:
+                current = float(lane)
+            except (TypeError, ValueError):
+                return [df]
+            if previous is not None and current <= previous:
+                starts.append(position)
+            previous = current
+        bounds = starts + [len(df)]
+        return [df.iloc[bounds[i]:bounds[i + 1]] for i in range(len(starts))]
+
     def _auto_fill_table_from_results(self, df: pd.DataFrame) -> None:
         """Send one finished analysis run into the data table and chart."""
         table = self._embedded_column_table
@@ -2558,10 +2575,9 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
             return
         # One table row per band row.  A manual run measures a single band
         # across the lanes; an auto-detected run can hold several rows.
-        if "Band" in df.columns:
-            runs = [group for _band, group in df.groupby("Band", sort=False)]
-        else:
-            runs = [df]
+        # Rows are listed lane by lane, so the lane number starting over
+        # marks the next band row.
+        runs = self._split_results_into_band_rows(df)
         groups, _replicates = table.table_dimensions()
         filled_rows: list[str] = []
         written_total = 0
