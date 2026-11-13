@@ -10,7 +10,9 @@ import numpy as np
 from PIL import Image
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import (
+    QApplication, QGraphicsItem, QGraphicsRectItem, QGraphicsTextItem,
+)
 
 from core.lane_auto_detect import detect_lanes_in_roi
 from core.measure import background_strips, local_background_level, measure_all_lanes_in_array
@@ -335,6 +337,27 @@ class LaneAutoDetectWindowTests(unittest.TestCase):
             after = item.scene_rect()
             self.assertEqual((after.x(), after.y()), (before.x() + 1.0, before.y() + 1.0))
             self.assertEqual((after.width(), after.height()), (before.width(), before.height()))
+        finally:
+            window.close()
+
+    def test_review_keeps_lane_lines_and_labels_off_the_bands(self) -> None:
+        window = self._window_with_blot()
+        try:
+            window.param_panel.lane_count.setValue(6)
+            window.param_panel._auto_lane_btn.click()
+            canvas = window.canvas
+
+            frames = [item for item in canvas._lane_items if isinstance(item, QGraphicsRectItem)]
+            self.assertEqual(len(frames), 6)
+            for frame in frames:
+                self.assertTrue(frame.pen().isCosmetic(), "lane borders must stay hairlines at any zoom")
+                self.assertEqual(frame.brush().style(), Qt.BrushStyle.NoBrush)
+            lane_labels = [item for item in canvas._lane_items if isinstance(item, QGraphicsTextItem)]
+            self.assertTrue(lane_labels and not any(label.isVisible() for label in lane_labels))
+            for label in canvas._auto_band_labels:
+                self.assertTrue(
+                    label.flags() & QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations
+                )
         finally:
             window.close()
 

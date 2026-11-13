@@ -546,6 +546,7 @@ class ImageCanvas(QGraphicsView):
         self._drawing_new_auto_band = False
         self._new_auto_band_preview: QGraphicsRectItem | None = None
         self._auto_bg_strip_items: list[QGraphicsRectItem] = []
+        self._auto_quiet_lanes = False
         self._rotation_mode = False
         self._rotation_dragging = False
         self._rotation_angle_deg = 0.0
@@ -1339,12 +1340,18 @@ class ImageCanvas(QGraphicsView):
             label.setZValue(12)
             self._manual_band_labels.append(label)
 
-    def set_auto_detect_overlays(self, detections: list[dict]) -> None:
+    def set_auto_detect_overlays(self, detections: list[dict], *, quiet_lanes: bool = False) -> None:
         """
         Draw lane frames (blue) and band boxes (orange) from auto_detect_all()
         results. Clears any previous overlays first.
+
+        ``quiet_lanes`` (densitometry auto review) keeps everything except the
+        band boxes out of the way: lane borders become hairlines with no fill
+        and no "L" label, and the "#N" labels keep a constant on-screen size
+        above their box, so nothing is drawn over the band being measured.
         """
         self.clear_auto_overlays()
+        self._auto_quiet_lanes = bool(quiet_lanes)
         if self._band_roi_item is not None:
             self._scene.removeItem(self._band_roi_item)
             self._band_roi_item = None
@@ -1359,16 +1366,25 @@ class ImageCanvas(QGraphicsView):
         for lane in detections:
             lane_rect = lane["lane_rect"]
 
-            pen = QPen(QColor(COLOR_BAND_ROI), 1.5, Qt.PenStyle.DashLine)
-            item = self._scene.addRect(
-                lane_rect,
-                pen,
-                QBrush(QColor(138, 174, 196, 20)),
-            )
-            item.setZValue(8)
-            self._lane_items.append(item)
+            if quiet_lanes:
+                pen = QPen(QColor(90, 130, 160, 150), 1.0, Qt.PenStyle.DotLine)
+                pen.setCosmetic(True)
+                item = self._scene.addRect(lane_rect, pen, QBrush(Qt.BrushStyle.NoBrush))
+                item.setZValue(8)
+                item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+                self._lane_items.append(item)
+            else:
+                pen = QPen(QColor(COLOR_BAND_ROI), 1.5, Qt.PenStyle.DashLine)
+                item = self._scene.addRect(
+                    lane_rect,
+                    pen,
+                    QBrush(QColor(138, 174, 196, 20)),
+                )
+                item.setZValue(8)
+                self._lane_items.append(item)
 
             label = self._scene.addText(f"L{lane['lane_index']}")
+            label.setVisible(not quiet_lanes)
             label.setDefaultTextColor(QColor(COLOR_ACCENT_TEXT))
             font = label.font()
             font.setPointSize(8)
@@ -1554,8 +1570,19 @@ class ImageCanvas(QGraphicsView):
             font.setPointSize(8)
             font.setBold(True)
             label.setFont(font)
-            label_y = max(scene_top + 2.0, rect.y() - 14.0)
-            label.setPos(rect.x() + 2.0, label_y)
+            if self._auto_quiet_lanes:
+                # Constant on-screen size, sitting above the box and its
+                # background strip instead of on top of the band.
+                font.setPointSize(11)
+                label.setFont(font)
+                label.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+                label.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+                clearance = min(4.0, max(2.0, round(rect.height() / 4.0)))
+                label.setPos(rect.x(), max(scene_top, rect.y() - clearance))
+                label.setTransform(QTransform.fromTranslate(-4.0, -24.0))
+            else:
+                label_y = max(scene_top + 2.0, rect.y() - 14.0)
+                label.setPos(rect.x() + 2.0, label_y)
             label.setZValue(12)
             self._auto_band_labels.append(label)
 
