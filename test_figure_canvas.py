@@ -1917,27 +1917,27 @@ class FigureModeStructureTests(unittest.TestCase):
                     label.text(): label
                     for label in dialog.findChildren(QLabel)
                     if (
-                        label.text() in {"Group Level 1", "Group Level 2"}
+                        label.text() in {"Level 1", "Level 2"}
                         and label.isVisible()
                     )
                 }
                 self.assertEqual(
                     set(level_headings),
-                    {"Group Level 1", "Group Level 2"},
+                    {"Level 1", "Level 2"},
                 )
                 self.assertLess(
-                    level_headings["Group Level 1"].mapTo(
+                    level_headings["Level 1"].mapTo(
                         dialog, QPoint()
                     ).x(),
-                    level_headings["Group Level 2"].mapTo(
+                    level_headings["Level 2"].mapTo(
                         dialog, QPoint()
                     ).x(),
                 )
                 self.assertAlmostEqual(
-                    level_headings["Group Level 1"].mapTo(
+                    level_headings["Level 1"].mapTo(
                         dialog, QPoint()
                     ).y(),
-                    level_headings["Group Level 2"].mapTo(
+                    level_headings["Level 2"].mapTo(
                         dialog, QPoint()
                     ).y(),
                     delta=2,
@@ -2032,7 +2032,7 @@ class FigureModeStructureTests(unittest.TestCase):
                 level_heading = next(
                     label
                     for label in dialog.findChildren(QLabel)
-                    if label.text() == "Group Level 1" and label.isVisible()
+                    if label.text() == "Level 1" and label.isVisible()
                 )
                 self.assertLessEqual(
                     level_heading.mapTo(dialog, QPoint()).x(),
@@ -2050,7 +2050,7 @@ class FigureModeStructureTests(unittest.TestCase):
                 )
                 self.assertEqual(mode_selector.text(), "Evenly")
                 self.assertTrue(mode_selector.isVisible())
-                self.assertEqual(mode_selector.size(), QSize(53, 22))
+                self.assertEqual(mode_selector.size(), QSize(76, 30))
                 self.assertAlmostEqual(
                     mode_selector.mapTo(dialog, QPoint()).y()
                     + mode_selector.height() / 2.0,
@@ -2276,13 +2276,13 @@ class FigureModeStructureTests(unittest.TestCase):
                     label.text()
                     for label in dialog.findChildren(QLabel)
                     if (
-                        label.text().startswith("Group Level ")
+                        label.text().startswith("Level ")
                         and label.isVisible()
                     )
                 ]
                 self.assertEqual(
                     visible_headings,
-                    ["Group Level 1", "Group Level 2"],
+                    ["Level 1", "Level 2"],
                 )
             except BaseException as error:
                 errors.append(error)
@@ -2399,7 +2399,7 @@ class FigureModeStructureTests(unittest.TestCase):
                     "Create independent condition panel",
                     visible_text,
                 )
-                self.assertIn("Condition rows", visible_text)
+                self.assertIn("Rows", visible_text)
                 self.assertIn("Lane groups", visible_text)
                 self.assertFalse(dialog.findChild(
                     QToolButton, "conditionRowsModeSelector"
@@ -2666,52 +2666,47 @@ class FigureModeStructureTests(unittest.TestCase):
                     button is not None and button.isVisible()
                     for button in panel_buttons
                 ))
-                condition_rows_heading = next(
+                rows_title = next(
                     label
                     for label in dialog.findChildren(QLabel)
-                    if (
-                        label.text() == "Condition rows #:"
-                        and label.isVisible()
-                    )
+                    if label.text() == "Rows" and label.isVisible()
                 )
-                level_one_heading = next(
+                lane_groups_title = next(
                     label
                     for label in dialog.findChildren(QLabel)
-                    if (
-                        label.text() == "Group Level 1"
-                        and label.isVisible()
-                    )
+                    if label.text() == "Lane groups" and label.isVisible()
                 )
+                # The two section labels share one style and one left edge.
+                self.assertEqual(rows_title.objectName(), "conditionSectionTitle")
                 self.assertEqual(
-                    condition_rows_heading.objectName(),
-                    "conditionGroupHeading",
-                )
-                self.assertEqual(
-                    condition_rows_heading.font().bold(),
-                    level_one_heading.font().bold(),
+                    rows_title.objectName(), lane_groups_title.objectName()
                 )
                 self.assertAlmostEqual(
-                    condition_rows_heading.mapTo(dialog, QPoint()).x(),
-                    level_one_heading.mapTo(dialog, QPoint()).x(),
+                    rows_title.mapTo(dialog, QPoint()).x(),
+                    lane_groups_title.mapTo(dialog, QPoint()).x(),
                     delta=2,
                 )
+                self.assertFalse(any(
+                    label.text() == "Condition rows #:"
+                    for label in dialog.findChildren(QLabel)
+                ))
                 panel_buttons[1].click()
                 self._app.processEvents()
                 headings = {
                     label.text(): label
                     for label in dialog.findChildren(QLabel)
                     if (
-                        label.text() in {"Group Level 1", "Group Level 2"}
+                        label.text() in {"Level 1", "Level 2"}
                         and label.isVisible()
                     )
                 }
                 self.assertLess(
-                    headings["Group Level 1"].mapTo(dialog, QPoint()).x(),
-                    headings["Group Level 2"].mapTo(dialog, QPoint()).x(),
+                    headings["Level 1"].mapTo(dialog, QPoint()).x(),
+                    headings["Level 2"].mapTo(dialog, QPoint()).x(),
                 )
                 self.assertAlmostEqual(
-                    headings["Group Level 1"].mapTo(dialog, QPoint()).y(),
-                    headings["Group Level 2"].mapTo(dialog, QPoint()).y(),
+                    headings["Level 1"].mapTo(dialog, QPoint()).y(),
+                    headings["Level 2"].mapTo(dialog, QPoint()).y(),
                     delta=2,
                 )
                 self.assertTrue(dialog.findChild(
@@ -2805,7 +2800,7 @@ class FigureModeStructureTests(unittest.TestCase):
                     2,
                 )
                 self.assertFalse(any(
-                    label.text() == "Group Level 2" and label.isVisible()
+                    label.text() == "Level 2" and label.isVisible()
                     for label in dialog.findChildren(QLabel)
                 ))
                 preview = dialog.findChild(_ConditionPreviewWidget)
