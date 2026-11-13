@@ -362,7 +362,9 @@ def detect_lanes_in_roi(
             if peak_v <= 0.02 * (r_bot - r_top):
                 spans.append(None)
                 continue
-            floor_v = 0.1 * peak_v
+            # Half-maximum edges: a low threshold lets a one-sided tail or the
+            # neighbour's shoulder drag the box off-centre and clip the far end.
+            floor_v = 0.5 * peak_v
             left = peak_x
             while left > lo_lim and row_line[left - 1] > floor_v:
                 left -= 1
@@ -371,7 +373,7 @@ def detect_lanes_in_roi(
                 right += 1
             spans.append((float(left), float(right + 1)))
         found = [b - a for span in spans if span is not None for a, b in [span]]
-        side_pad = max(1.0, round(0.05 * pitch))
+        side_pad = max(2.0, round(0.08 * pitch))
         row_box_w = box_w
         if found:
             row_box_w = max(box_w, float(np.ceil(max(found) + 2 * side_pad)))
@@ -379,10 +381,15 @@ def detect_lanes_in_roi(
             row_box_w = min(row_box_w, float(np.floor(np.mean(np.sort(np.diff([ln["centre"] for ln in lanes]))[: max(1, len(lanes) // 2)]))))
         row_box_w = float(min(row_box_w, w))
         # Centre each box on its own band; empty lanes keep the fitted centre.
-        box_centres = [
-            (span[0] + span[1]) / 2.0 if span is not None else lane["centre"] + row_dx
-            for lane, span in zip(lanes, spans)
-        ]
+        box_centres = []
+        for lane, span in zip(lanes, spans):
+            fitted = lane["centre"] + row_dx
+            if span is None or (span[1] - span[0]) < 0.4 * pitch:
+                # No band, or only a noisy sliver of one: trust the lane fit.
+                box_centres.append(fitted)
+                continue
+            measured = (span[0] + span[1]) / 2.0
+            box_centres.append(float(np.clip(measured, fitted - 0.25 * pitch, fitted + 0.25 * pitch)))
         box_lefts = [float(np.clip(cx - row_box_w / 2, 0, max(0.0, w - row_box_w))) for cx in box_centres]
         # Neighbouring boxes must not overlap: push them apart (an empty
         # lane's box gives way entirely to a real band).
