@@ -167,6 +167,35 @@ class LaneAutoDetectCoreTests(unittest.TestCase):
         self.assertGreaterEqual(y2 + height2, 50.0, "merged box must take in the faint band")
         self.assertLess(y2, 40.0)
 
+    def test_include_adjacent_takes_only_the_nearest_band(self) -> None:
+        # Main band at y=40, a touching band at y=47, and a third, separate
+        # faint band further down at y=60.  Lanes sit at slightly different
+        # heights, which is what blurs touching bands in a pooled profile.
+        centres = [40.0, 64.0, 88.0, 112.0]
+        shape = (100, 260)
+        yy, xx = np.mgrid[0:shape[0], 0:shape[1]].astype(np.float64)
+        image = 3000.0 + 4.0 * xx + 2.0 * yy
+        for centre, tilt in zip(centres, (0.0, 1.0, 2.0, 3.0)):
+            across = 1.0 / (1.0 + np.exp((np.abs(xx - centre) - 8.0) / 1.2))
+            for row, amplitude, height in ((40.0, 20000.0, 2.5), (47.0, 11000.0, 2.0), (60.0, 4000.0, 2.0)):
+                image += amplitude * across * np.exp(-0.5 * ((yy - (row + tilt)) / height) ** 2)
+        image += np.random.default_rng(3).normal(0.0, 60.0, size=shape)
+        image = np.clip(image, 0, 65535).astype(np.uint16)
+        roi = (10.0, 10.0, 240.0, 80.0)
+
+        main_only = detect_lanes_in_roi(image, roi, 4)
+        merged = detect_lanes_in_roi(image, roi, 4, include_adjacent=True)
+
+        self.assertEqual([entry["side"] for entry in main_only["adjacent_rows"]], ["below"])
+        _x, y, _w, height = main_only["lanes"][0]["bands"][0]["band_rect"]
+        self.assertLessEqual(y + height, 45.5, "main-only box must stop before the touching band at y=47")
+        _x, y2, _w, height2 = merged["lanes"][0]["bands"][0]["band_rect"]
+        self.assertGreaterEqual(y2 + height2, 48.5, "merged box must take in the touching band")
+        self.assertLessEqual(y2 + height2, 56.0, "merged box must stop before the third band at y=60")
+        # Each lane's box follows that lane's own height.
+        tops = [lane["bands"][0]["band_rect"][1] for lane in merged["lanes"]]
+        self.assertEqual([round(top - tops[0]) for top in tops], [0, 1, 2, 3])
+
     def test_clean_band_and_symmetric_halo_offer_no_adjacent_choice(self) -> None:
         centres = [40.0, 64.0, 88.0, 112.0]
         clean = _synthetic_blot(centres, [20000.0] * 4)
