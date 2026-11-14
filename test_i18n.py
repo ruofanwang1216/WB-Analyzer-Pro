@@ -81,7 +81,7 @@ class ChineseLocalizationTests(unittest.TestCase):
         self.assertEqual(workspace._grp1.title_text(), "步骤 1：选择布局")
         self.assertEqual(workspace._grp4.title_text(), "步骤 2：填充印迹图框")
         self.assertEqual(workspace._annot_undo_btn.text(), "撤销")
-        self.assertEqual(workspace._fit_center_btn.text(), "适配并居中")
+        self.assertEqual(workspace._fit_center_btn.text(), "适应")
 
     def test_wb_figure_dialog_created_after_language_change_is_chinese(self) -> None:
         workspace = FigureModeWindow()

@@ -1499,24 +1499,29 @@ class FigureModeStructureTests(unittest.TestCase):
         self.assertEqual(window._grp5._step_badge.text(), "3")
         self.assertEqual(window._grp6._step_badge.text(), "4")
 
-        # Each section is a page of the four-step panel on the right.
-        pages = window._step_pages
-        self.assertEqual(len(pages), 3)
-        self.assertEqual(len(window._step_buttons), 3)
-        self.assertTrue(pages[0].isAncestorOf(window._grp1))
-        self.assertTrue(pages[0].isAncestorOf(window._grp5))
-        self.assertTrue(pages[1].isAncestorOf(window._grp4))
-        self.assertTrue(pages[2].isAncestorOf(window._grp6))
-        self.assertTrue(pages[2].isAncestorOf(window._save_panel))
-        # Annotation tools are not a step: they sit above the preview.
-        self.assertFalse(
-            any(page.isAncestorOf(window._annotation_panel) for page in pages)
+        # All three stages are stacked on one screen in the right panel.
+        sections = window._step_pages
+        self.assertEqual(len(sections), 3)
+        self.assertEqual(
+            [heading.text() for heading in window._step_headings],
+            ["1   Layout", "2   Fill", "3   Export"],
         )
+        self.assertTrue(sections[0].isAncestorOf(window._grp1))
+        self.assertTrue(sections[0].isAncestorOf(window._saved_blot_files_btn))
+        self.assertTrue(sections[1].isAncestorOf(window._grp4))
+        self.assertTrue(sections[2].isAncestorOf(window._grp6))
+        self.assertTrue(sections[2].isAncestorOf(window._save_panel))
+        self.assertFalse(any(section.isHidden() for section in sections))
+        # No paging controls are left.
+        self.assertFalse(hasattr(window, "_step_buttons"))
+        self.assertFalse(hasattr(window, "_step_next_btn"))
+        # Saved Blot Files open from a button, not an always-on list.
+        self.assertFalse(window._step_panel.isAncestorOf(window._blot_file_list))
+        self.assertEqual(window._saved_blot_files_btn.text(), "Saved Blot Files   ›")
+        # Annotation tools sit above the preview, outside the panel.
         self.assertFalse(window._step_panel.isAncestorOf(window._bold_btn))
         self.assertTrue(window._annotation_panel.isAncestorOf(window._bold_btn))
         self.assertEqual(window.current_step(), 1)
-        self.assertTrue(window._step_buttons[0].isChecked())
-        self.assertFalse(window._step_prev_btn.isEnabled())
         self.assertFalse(window._grp4.isHidden())
         self.assertFalse(window._grp4._expanded)
 
@@ -3100,90 +3105,87 @@ class FigureModeStructureTests(unittest.TestCase):
         window._on_canvas_blot_selection_cleared()
         self.assertFalse(window._grp4._expanded)
 
-    def test_step_panel_shows_one_step_at_a_time_and_jumps_freely(self) -> None:
+    def test_all_stages_are_visible_and_go_to_step_only_scrolls(self) -> None:
         window = FigureModeWindow()
+        window.resize(900, 700)
+        window.show()
+        self._app.processEvents()
 
-        window.go_to_step(3)
-        self.assertEqual(window.current_step(), 3)
-        self.assertEqual(window._step_stack.currentIndex(), 2)
-        self.assertTrue(window._step_buttons[2].isChecked())
-        self.assertFalse(window._step_buttons[0].isChecked())
-        self.assertFalse(window._step_next_btn.isEnabled())
+        for step in (3, 1, 2, 99):
+            window.go_to_step(step)
+            self.assertEqual(window.current_step(), min(step, 3))
+            self.assertTrue(all(section.isVisible() for section in window._step_pages))
+        self.assertTrue(window._export_pdf_btn.isVisible())
+        self.assertTrue(window._auto_detect_radio.isVisible())
+        window.close()
 
-        window._step_buttons[0].click()
-        self.assertEqual(window.current_step(), 1)
-
-        window._step_next_btn.click()
-        self.assertEqual(window.current_step(), 2)
-        window._step_prev_btn.click()
-        self.assertEqual(window.current_step(), 1)
-
-        window.go_to_step(99)
-        self.assertEqual(window.current_step(), 3)
-
-    def test_annotation_tools_work_from_any_step(self) -> None:
+    def test_annotation_tools_work_whatever_stage_is_in_view(self) -> None:
         window = FigureModeWindow()
         window._on_apply_structure()
-        for step in (1, 2, 3):
-            window.go_to_step(step)
-            self.assertFalse(window._annotation_panel.isHidden())
         window.go_to_step(2)
+        self.assertFalse(window._annotation_panel.isHidden())
 
         window._canvas.add_overlay_text_box()
         self._app.processEvents()
 
-        # Selecting text enables formatting and leaves the step alone.
         self.assertTrue(window._bold_btn.isEnabled())
         self.assertEqual(window.current_step(), 2)
 
-    def test_selecting_a_frame_on_step_one_moves_to_fill_step(self) -> None:
+    def test_selecting_a_frame_points_at_the_fill_stage(self) -> None:
         window = FigureModeWindow()
         window._on_apply_structure()
         self.assertEqual(window.current_step(), 1)
 
         window._on_canvas_blot_selected(SourceRef(panel_idx=0, slot_idx=0))
         self.assertEqual(window.current_step(), 2)
-
-        # Going back keeps what was already done.
-        window.go_to_step(1)
         self.assertIsNotNone(window._project)
-        self.assertEqual(window._active_slot_ref, SourceRef(panel_idx=0, slot_idx=0))
 
-    def test_reveal_widget_opens_the_step_that_holds_it(self) -> None:
+    def test_reveal_widget_finds_the_stage_that_holds_a_control(self) -> None:
         window = FigureModeWindow()
 
         window.reveal_widget(window._export_pdf_btn)
         self.assertEqual(window.current_step(), 3)
-        window.reveal_widget(window._blot_file_list)
+        window.reveal_widget(window._saved_blot_files_btn)
         self.assertEqual(window.current_step(), 1)
+        # Controls outside the panel leave it alone.
         window.reveal_widget(window._bold_btn)
-        self.assertEqual(window.current_step(), 1)
-        # Controls outside the panel leave the step alone.
-        window.reveal_widget(window._fit_center_btn)
         self.assertEqual(window.current_step(), 1)
 
     def test_step_panel_follows_the_language(self) -> None:
         window = FigureModeWindow()
         window.set_language("zh_CN")
         self.assertEqual(
-            [button.text() for button in window._step_buttons],
-            ["1  布局", "2  填充", "3  导出"],
+            [heading.text() for heading in window._step_headings],
+            ["1   布局", "2   填充", "3   导出"],
         )
-        self.assertEqual(window._step_next_btn.text(), "下一步")
-        # Only the step that needs explaining carries a one-line hint.
-        self.assertTrue(window._step_desc_lbl.isHidden())
-        window.go_to_step(2)
-        self.assertFalse(window._step_desc_lbl.isHidden())
         self.assertEqual(window._step_desc_lbl.text(), "点图框 → 在原图上框选 → 回车")
+        self.assertEqual(window._saved_blot_files_btn.text(), "已保存印迹图文件   ›")
         window.set_language("en")
         self.assertEqual(
-            [button.text() for button in window._step_buttons],
-            ["1  Layout", "2  Fill", "3  Export"],
+            [heading.text() for heading in window._step_headings],
+            ["1   Layout", "2   Fill", "3   Export"],
         )
         self.assertEqual(
             window._step_desc_lbl.text(), "Click a frame → draw on the image → Enter"
         )
-        self.assertEqual(window._step_prev_btn.text(), "Previous")
+
+    def test_saved_blot_files_open_in_a_dialog_and_return_the_list(self) -> None:
+        window = FigureModeWindow()
+        seen = []
+
+        def inspect_and_close() -> None:
+            dialog = self._app.activeModalWidget()
+            seen.append(dialog.isAncestorOf(window._blot_file_list))
+            seen.append(window._blot_file_open_btn.isVisibleTo(dialog))
+            dialog.reject()
+
+        QTimer.singleShot(0, inspect_and_close)
+        window._saved_blot_files_btn.click()
+
+        self.assertEqual(seen, [True, True])
+        # The list is handed back so the next opening works too.
+        self.assertTrue(window.isAncestorOf(window._blot_file_list))
+        self.assertTrue(window._grp5.isHidden())
 
     def test_new_overlay_text_is_selected_and_enables_font_controls(self) -> None:
         window = FigureModeWindow()

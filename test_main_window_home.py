@@ -255,7 +255,7 @@ class MainWindowHomePageTests(unittest.TestCase):
         self.assertEqual(figure._grp4.title_text(), "步骤 2：填充印迹图框")
         self.assertEqual(figure._saved_templates_btn.text(), "已保存模板   ›")
         self.assertEqual(figure._annot_undo_btn.text(), "撤销")
-        self.assertEqual(figure._fit_center_btn.text(), "适配并居中")
+        self.assertEqual(figure._fit_center_btn.text(), "适应")
 
         after_entry = self._make_window()
         after_entry._on_wb_plot_mode()

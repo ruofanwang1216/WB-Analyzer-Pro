@@ -77,7 +77,7 @@ class CanvasToolbarMixin:
         row1.addWidget(self._annot_undo_btn)
         self._annot_undo_btn.clicked.connect(self._undo_canvas_state)
 
-        self._fit_center_btn = QPushButton("Fit & Center")
+        self._fit_center_btn = QPushButton("Fit")
         self._fit_center_btn.setStyleSheet(_SMALL_BTN_STYLE)
         self._fit_center_btn.setToolTip(
             "Reset zoom and place the complete WB figure in the canvas center"
