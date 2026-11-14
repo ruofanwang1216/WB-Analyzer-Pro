@@ -2090,6 +2090,25 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
                 shortcut.activated.connect(self._trigger_analyze_from_return_shortcut)
                 self._analyze_return_shortcuts.append(shortcut)
 
+    def keyPressEvent(self, event) -> None:  # type: ignore[override]
+        """Command+Z anywhere in the window undoes the last Figure Layout step.
+
+        Key presses that the focused widget does not use travel up to the
+        window, so this catches Undo pressed while, say, the source image has
+        focus after drawing an ROI.  Text fields use the key themselves and
+        the figure preview has its own handler, so neither reaches here.
+        """
+        figure = self._figure_mode_window
+        if (
+            figure is not None
+            and self._is_wb_plot_workspace_active()
+            and event.matches(QKeySequence.StandardKey.Undo)
+        ):
+            figure._queue_canvas_undo()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def _trigger_analyze_from_return_shortcut(self) -> None:
         if self.canvas.is_rotation_mode():
             self._on_rotate_requested()
