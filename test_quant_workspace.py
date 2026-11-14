@@ -6,6 +6,8 @@ from unittest.mock import Mock, patch
 
 import pandas as pd
 from PySide6.QtCore import QMimeData, QUrl
+from PySide6.QtGui import QKeySequence
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from gui.figure_generation import ColumnTableWindow
@@ -226,6 +228,85 @@ class QuantWorkspaceTests(unittest.TestCase):
         self.assertFalse(table.auto_fill_enabled())
         self.assertEqual(_cell(table, 0, 0), "")
         window._tutorial_controller.stop()
+
+    @staticmethod
+    def _change_first_label(figure, text: str) -> None:
+        """Make one undoable Figure Layout change."""
+        figure._remember_canvas_undo_state()
+        figure._project.panels[0].blot_slots[0].label = text
+
+    @staticmethod
+    def _first_label(figure) -> str:
+        return figure._project.panels[0].blot_slots[0].label
+
+    def _press_undo(self, widget) -> None:
+        QTest.keySequence(widget, QKeySequence(QKeySequence.StandardKey.Undo))
+        self._app.processEvents()
+
+    def test_command_z_undoes_figure_layout_from_anywhere_in_the_window(self) -> None:
+        window = MainWindowFactory.make()
+        window.show()
+        window._on_wb_plot_mode()
+        figure = window._figure_mode_window
+        figure._on_apply_structure()
+        original = self._first_label(figure)
+        # Put an image panel on screen, as after importing a blot.
+        window._slot_states[0]["path"] = "first.tif"
+        window._slot_states[0]["selected"] = True
+        window._refresh_image_panel_layout()
+        self._app.processEvents()
+        self.assertTrue(window._image_panels[0].canvas.isVisible())
+
+        # With the source image, the sidebar or the window itself in focus.
+        for widget in (
+            window._image_panels[0].canvas,
+            window._files_list,
+            window,
+        ):
+            self._change_first_label(figure, "Changed")
+            self._press_undo(widget)
+            # The undo runs a couple of event-loop turns after the key.
+            for _ in range(5):
+                self._app.processEvents()
+            self.assertEqual(
+                self._first_label(figure), original, type(widget).__name__
+            )
+            self.assertFalse(figure._canvas_undo_stack)
+        window.close()
+
+    def test_command_z_in_a_text_field_keeps_its_own_undo(self) -> None:
+        window = MainWindowFactory.make()
+        window.show()
+        window._on_wb_plot_mode()
+        figure = window._figure_mode_window
+        figure._on_apply_structure()
+        self._change_first_label(figure, "Changed")
+
+        self._press_undo(window.param_panel.lane_count)
+        for _ in range(5):
+            self._app.processEvents()
+
+        self.assertEqual(self._first_label(figure), "Changed")
+        self.assertTrue(figure._canvas_undo_stack)
+        window.close()
+
+    def test_command_z_leaves_figure_layout_alone_in_quantify(self) -> None:
+        window = MainWindowFactory.make()
+        window.show()
+        window._on_wb_plot_mode()
+        figure = window._figure_mode_window
+        figure._on_apply_structure()
+        self._change_first_label(figure, "Changed")
+        window._on_figure_generation_clicked()
+
+        self._press_undo(window._image_panels[0].canvas)
+        for _ in range(5):
+            self._app.processEvents()
+
+        # The Figure Layout history is untouched.
+        self.assertEqual(self._first_label(figure), "Changed")
+        self.assertTrue(figure._canvas_undo_stack)
+        window.close()
 
     def test_dropped_images_are_imported(self) -> None:
         window = MainWindowFactory.make()

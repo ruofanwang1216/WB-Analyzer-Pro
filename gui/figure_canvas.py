@@ -110,6 +110,8 @@ class _OverlayScene(QGraphicsScene):
 class ResizableBlotFrameItem(QGraphicsRectItem):
     _HANDLE_MARGIN = 7.0
     _MIN_SIZE = 18.0
+    # Screen pixels the pointer must travel before a press becomes a move.
+    _MOVE_START_DISTANCE_PX = 6
 
     def __init__(
         self,
@@ -129,6 +131,7 @@ class ResizableBlotFrameItem(QGraphicsRectItem):
         self._active_handle: str | None = None
         self._start_rect = QRectF()
         self._start_scene_pos = QPointF()
+        self._start_screen_pos = QPointF()
         self._moved_during_drag = False
         self._selected = False
         self._apply_style()
@@ -185,6 +188,7 @@ class ResizableBlotFrameItem(QGraphicsRectItem):
         self._active_handle = self._handle_for_pos(event.pos())
         self._start_rect = QRectF(self.rect())
         self._start_scene_pos = event.scenePos()
+        self._start_screen_pos = self._event_screen_pos(event)
         self._moved_during_drag = False
         if self._active_handle is None:
             self._active_handle = "move"
@@ -194,12 +198,29 @@ class ResizableBlotFrameItem(QGraphicsRectItem):
             self._canvas._notify_state_about_to_change()
         event.accept()
 
+    @staticmethod
+    def _event_screen_pos(event) -> QPointF:
+        """Pointer position in screen pixels (scene units as a fallback)."""
+        screen_pos = getattr(event, "screenPos", None)
+        point = screen_pos() if callable(screen_pos) else event.scenePos()
+        return QPointF(point)
+
     def mouseMoveEvent(self, event) -> None:
         if self._active_handle is None:
             event.accept()
             return
         delta = event.scenePos() - self._start_scene_pos
         if self._active_handle == "move":
+            if not self._moved_during_drag:
+                # A click that wobbles a few pixels is still a click: the
+                # frame only starts to move after a deliberate drag.
+                travelled = self._event_screen_pos(event) - self._start_screen_pos
+                if (
+                    abs(travelled.x()) + abs(travelled.y())
+                    < self._MOVE_START_DISTANCE_PX
+                ):
+                    event.accept()
+                    return
             self._canvas._preview_blot_frame_move(delta)
             self._moved_during_drag = True
             event.accept()

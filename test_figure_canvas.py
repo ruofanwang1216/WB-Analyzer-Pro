@@ -3105,6 +3105,28 @@ class FigureModeStructureTests(unittest.TestCase):
         window._on_canvas_blot_selection_cleared()
         self.assertFalse(window._grp4._expanded)
 
+    def test_clicking_a_blot_frame_does_not_nudge_it(self) -> None:
+        window = FigureModeWindow()
+        window._on_apply_structure()
+        frame = next(iter(window._canvas._blot_frames.values()))
+        start = QPointF(frame.pos())
+        press = frame.mapToScene(frame.rect().center())
+
+        # A click whose pointer wobbles a few pixels leaves the frame alone.
+        frame.mousePressEvent(_FakeMouseEvent(press, pos=frame.rect().center()))
+        frame.mouseMoveEvent(_FakeMouseEvent(press + QPointF(3.0, 2.0)))
+        self.assertEqual(frame.pos(), start)
+        frame.mouseReleaseEvent(_FakeMouseEvent(press + QPointF(3.0, 2.0)))
+        self._app.processEvents()
+        frame = next(iter(window._canvas._blot_frames.values()))
+        self.assertEqual(frame.pos(), start)
+
+        # A deliberate drag still moves it.
+        frame.mousePressEvent(_FakeMouseEvent(press, pos=frame.rect().center()))
+        frame.mouseMoveEvent(_FakeMouseEvent(press + QPointF(40.0, 0.0)))
+        self.assertNotEqual(frame.pos(), start)
+        frame.mouseReleaseEvent(_FakeMouseEvent(press + QPointF(40.0, 0.0)))
+
     def test_all_stages_are_visible_and_go_to_step_only_scrolls(self) -> None:
         window = FigureModeWindow()
         window.resize(900, 700)
