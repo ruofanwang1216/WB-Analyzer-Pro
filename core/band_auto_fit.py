@@ -282,3 +282,47 @@ def calculate_band_auto_fit(
         composite_width=composite_width,
         composite_height=composite_height,
     )
+
+
+def equalize_strip_heights(strips: list[dict]) -> list[dict]:
+    """Give every blot strip of one panel the same frame height.
+
+    Each strip is ``{"crop": (x, y, w, h), "frame_width": float,
+    "image_height": float | None}``.  Strips are drawn at their frame width
+    with the crop's own proportions, so a tight crop around a thin band gives
+    a shorter frame than one around a thick band.  To line them up, the
+    tallest strip sets the height and every shorter strip's crop is grown
+    vertically (more membrane above and below, centred on the old crop) until
+    it has the same proportions.  Nothing is stretched and widths, and
+    therefore lanes, do not move.
+
+    Returns ``{"crop": (x, y, w, h), "frame_height": float}`` per strip.  A
+    strip whose source image is too short to supply the extra rows keeps the
+    tallest crop the image allows.
+    """
+    usable = [
+        strip for strip in strips
+        if strip["crop"][2] > 0 and strip["crop"][3] > 0 and strip["frame_width"] > 0
+    ]
+    if not usable:
+        return [
+            {"crop": tuple(strip["crop"]), "frame_height": 0.0} for strip in strips
+        ]
+    target = max(strip["frame_width"] * strip["crop"][3] / strip["crop"][2] for strip in usable)
+    results: list[dict] = []
+    for strip in strips:
+        x, y, w, h = (float(value) for value in strip["crop"])
+        frame_width = float(strip["frame_width"])
+        if w <= 0 or h <= 0 or frame_width <= 0:
+            results.append({"crop": (x, y, w, h), "frame_height": 0.0})
+            continue
+        wanted = w * target / frame_width
+        if wanted > h + 1e-6:
+            image_height = strip.get("image_height")
+            new_h = wanted if not image_height else min(wanted, float(image_height))
+            new_y = y - (new_h - h) / 2.0
+            if image_height:
+                new_y = min(max(0.0, new_y), max(0.0, float(image_height) - new_h))
+            y, h = new_y, new_h
+        results.append({"crop": (x, y, w, h), "frame_height": frame_width * h / w})
+    return results

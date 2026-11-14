@@ -459,5 +459,99 @@ class BandAutoFitTests(unittest.TestCase):
                 self.assertLessEqual(result.crop_box.y + result.crop_box.h, height)
 
 
+class EqualizeStripHeightsTests(unittest.TestCase):
+    """Strips of one figure panel share one frame height, without stretching."""
+
+    def test_shorter_strips_grow_to_the_tallest_and_keep_their_width(self) -> None:
+        from core.band_auto_fit import equalize_strip_heights
+
+        strips = [
+            {"crop": (50.0, 70.0, 200.0, 40.0), "frame_width": 300.0, "image_height": 260.0},
+            {"crop": (50.0, 160.0, 200.0, 20.0), "frame_width": 300.0, "image_height": 260.0},
+        ]
+
+        fitted = equalize_strip_heights(strips)
+
+        self.assertEqual([round(item["frame_height"], 6) for item in fitted], [60.0, 60.0])
+        self.assertEqual(fitted[0]["crop"], (50.0, 70.0, 200.0, 40.0))
+        x, y, w, h = fitted[1]["crop"]
+        self.assertEqual((x, w), (50.0, 200.0))
+        self.assertEqual((y, h), (150.0, 40.0))  # 10 px more above and below the band
+
+    def test_every_strip_keeps_its_own_proportions(self) -> None:
+        from core.band_auto_fit import equalize_strip_heights
+
+        strips = [
+            {"crop": (10.0, 30.0, 180.0, 30.0), "frame_width": 300.0, "image_height": 260.0},
+            {"crop": (40.0, 90.0, 400.0, 30.0), "frame_width": 300.0, "image_height": 520.0},
+        ]
+
+        for item in equalize_strip_heights(strips):
+            _x, _y, w, h = item["crop"]
+            self.assertAlmostEqual(300.0 * h / w, item["frame_height"])
+            self.assertAlmostEqual(item["frame_height"], 50.0)
+
+    def test_growth_stays_inside_the_source_image(self) -> None:
+        from core.band_auto_fit import equalize_strip_heights
+
+        strips = [
+            {"crop": (0.0, 100.0, 200.0, 80.0), "frame_width": 300.0, "image_height": 260.0},
+            {"crop": (0.0, 5.0, 200.0, 20.0), "frame_width": 300.0, "image_height": 260.0},
+            {"crop": (0.0, 10.0, 200.0, 20.0), "frame_width": 300.0, "image_height": 50.0},
+        ]
+
+        fitted = equalize_strip_heights(strips)
+
+        self.assertEqual(fitted[1]["crop"], (0.0, 0.0, 200.0, 80.0))  # shifted down off the top edge
+        self.assertEqual(fitted[2]["crop"], (0.0, 0.0, 200.0, 50.0))  # image only 50 px tall
+        self.assertAlmostEqual(fitted[2]["frame_height"], 75.0)
+
+    def test_panel_slots_end_up_with_one_height_after_auto_fit(self) -> None:
+        from types import SimpleNamespace
+
+        from core.figure_project import BlotSlot
+        from gui.figure_mode_window import FigureModeWindow
+
+        def slot(box: ImageBBox, height_pt: float, *, auto: bool = True) -> BlotSlot:
+            return BlotSlot(
+                label="", mw_marker="", source_image_path="blot.tif", bounding_box=box,
+                preserve_image_aspect=auto, display_height_pt=height_pt,
+                saved_preview_path="old.png",
+            )
+
+        thick = slot(ImageBBox(50, 70, 200, 40), 60.0)
+        thin = slot(ImageBBox(50, 160, 200, 20), 30.0)
+        manual = slot(ImageBBox(0, 0, 100, 10), 22.0, auto=False)
+        empty = BlotSlot(label="", mw_marker="", source_image_path="", bounding_box=None)
+        window = SimpleNamespace(
+            _project=SimpleNamespace(
+                panels=[SimpleNamespace(blot_slots=[thick, thin, manual, empty])]
+            ),
+            _presentation_image_height=lambda _slot: 260.0,
+        )
+
+        FigureModeWindow._equalize_panel_strip_heights(window, 0, 300.0)
+
+        self.assertEqual((thick.display_height_pt, thin.display_height_pt), (60.0, 60.0))
+        self.assertEqual(
+            (thin.bounding_box.x, thin.bounding_box.y, thin.bounding_box.w, thin.bounding_box.h),
+            (50, 150.0, 200, 40.0),
+        )
+        self.assertEqual(thin.saved_preview_path, "")       # stale preview dropped
+        self.assertEqual(thick.saved_preview_path, "old.png")  # untouched strip keeps its preview
+        self.assertEqual(manual.display_height_pt, 22.0)    # manually filled frames are left alone
+        self.assertEqual(manual.bounding_box.h, 10)
+
+    def test_single_strip_is_left_alone(self) -> None:
+        from core.band_auto_fit import equalize_strip_heights
+
+        strips = [{"crop": (5.0, 6.0, 100.0, 25.0), "frame_width": 200.0, "image_height": 300.0}]
+        self.assertEqual(
+            equalize_strip_heights(strips),
+            [{"crop": (5.0, 6.0, 100.0, 25.0), "frame_height": 50.0}],
+        )
+
+
+
 if __name__ == "__main__":
     unittest.main()

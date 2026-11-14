@@ -48,7 +48,7 @@ from config.paths import blot_files_dir
 from core.export_engine import (
     PPTX_AVAILABLE,
 )
-from core.band_auto_fit import calculate_band_auto_fit
+from core.band_auto_fit import calculate_band_auto_fit, equalize_strip_heights
 from core.image_transform import geometry_transform_from_dict
 from core.condition_template import even_lane_group_ranges, make_condition_table
 from core.figure_project import (
@@ -1485,6 +1485,9 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             if frame is not None:
                 frame_width_pt = scene_to_pt(frame.rect().width())
                 slot.display_height_pt = frame_width_pt / crop_aspect_ratio
+                # Strips of one panel are shown at one height: shorter crops
+                # are widened vertically to match the tallest strip.
+                self._equalize_panel_strip_heights(ref.panel_idx, frame_width_pt)
             # Keep lane definitions and frame width unchanged. Only Auto-Fit
             # height follows the tight crop so contain-scaling fills the frame.
             self._rebuild_step4()
@@ -1508,6 +1511,52 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
                 "without stretching or generating band pixels.",
             )
         return True
+
+    def _equalize_panel_strip_heights(self, panel_idx: int, default_width_pt: float) -> None:
+        """Make every Auto-Fit strip in a panel the same height without stretching."""
+        if self._project is None or not (0 <= panel_idx < len(self._project.panels)):
+            return
+        slots = [
+            slot
+            for slot in self._project.panels[panel_idx].blot_slots
+            if slot.source_image_path
+            and slot.bounding_box is not None
+            and slot.preserve_image_aspect
+            and not slot.lane_crops
+        ]
+        if len(slots) < 2:
+            return
+        strips = []
+        for slot in slots:
+            box = slot.bounding_box
+            strips.append({
+                "crop": (box.x, box.y, box.w, box.h),
+                "frame_width": float(slot.display_width_pt or default_width_pt),
+                "image_height": self._presentation_image_height(slot),
+            })
+        for slot, fitted in zip(slots, equalize_strip_heights(strips)):
+            x, y, w, h = fitted["crop"]
+            if abs(h - slot.bounding_box.h) > 1e-6 or abs(y - slot.bounding_box.y) > 1e-6:
+                slot.bounding_box = ImageBBox(x, y, w, h)
+                slot.saved_preview_path = ""
+            if fitted["frame_height"] > 0:
+                slot.display_height_pt = fitted["frame_height"]
+
+    @staticmethod
+    def _presentation_image_height(slot: BlotSlot) -> float | None:
+        """Height of the slot's source image as displayed (after rotate/flip)."""
+        try:
+            from PIL import Image
+
+            with Image.open(slot.source_image_path) as image:
+                width, height = image.size
+            transform = geometry_transform_from_dict(slot.geometry_transform)
+            if not transform.is_identity():
+                _matrix, (_out_w, out_h) = transform.affine(width, height)
+                return float(out_h)
+            return float(height)
+        except Exception:
+            return None
 
     @staticmethod
     def _lane_rois_for_auto_fit(
