@@ -99,4 +99,6 @@ ZH_CN_REDESIGN: dict[str, str] = {
     "Level {number}": "层级 {number}",
     "Number of condition rows above the lanes": "泳道上方条件标注的行数",
     "Number of lane groups": "把泳道分成几组",
+    "Saved Blot Files   ›": "已保存印迹图文件   ›",
+    "Reopen a figure you saved earlier": "重新打开之前保存的图",
 }

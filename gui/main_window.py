@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QToolBar, QStatusBar, QDockWidget, QMessageBox,
     QFileDialog,  # noqa: F401 - used by the mixins; kept importable from here
     QHBoxLayout, QToolButton, QPushButton, QFrame, QSizePolicy, QLabel, QListWidget, QDialog, QGridLayout, QComboBox,
+    QSpacerItem,
 )
 
 from config.settings import (
@@ -500,7 +501,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         files_header = QHBoxLayout()
         files_header.setContentsMargins(0, 0, 0, 0)
         files_header.setSpacing(6)
-        self._files_toggle_btn = QPushButton("◀")
+        self._files_toggle_btn = QPushButton("▼")
         self._files_toggle_btn.setObjectName("files_panel_toggle")
         self._files_toggle_btn.setToolTip("Collapse Uploaded Files panel")
         files_header.addWidget(self._files_toggle_btn)
@@ -537,6 +538,12 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._param_panel_layout.setSpacing(0)
         self._param_panel_layout.addWidget(self.param_panel)
         files_layout.addWidget(self._param_panel_host)
+        # Takes up the slack when the file list is folded, so the lane
+        # settings move up instead of stretching.
+        self._files_bottom_spacer = QSpacerItem(
+            0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum
+        )
+        files_layout.addSpacerItem(self._files_bottom_spacer)
         self._main_splitter.addWidget(self._files_panel)
 
         # ── Workspace: [image over results] | [data table over bar chart] ─────
@@ -756,63 +763,74 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         *,
         persist: bool = True,
     ) -> None:
+        """Fold the file list away.
+
+        In the Quantify workspace only the list folds: the lane settings stay
+        where they are, with more room.  Where the sidebar holds nothing but
+        files (Home, Figure Layout) it shrinks to a narrow rail instead.
+        """
         if self._main_splitter is None:
             return
-
-        if collapsed == self._files_panel_collapsed:
-            self._sync_param_panel_visibility()
-            return
-
-        sizes = self._main_splitter.sizes()
-        total = max(sum(sizes), self._main_splitter.width(), 1)
-
-        if collapsed:
+        if collapsed != self._files_panel_collapsed and collapsed:
             current_width = self._files_panel.width()
             if current_width > self._files_panel_collapsed_width:
                 self._files_panel_last_width = max(
                     self._files_panel_min_width,
                     min(current_width, self._files_panel_max_width),
                 )
-            self._files_title.setVisible(False)
-            self._files_list.setVisible(False)
-            self._files_drop_hint.setVisible(False)
-            self._export_all_tiffs_btn.setVisible(False)
+        changed = collapsed != self._files_panel_collapsed
+        self._files_panel_collapsed = collapsed
+        self._sync_param_panel_visibility()
+        if changed and persist:
+            self._persistence.remember_ui_state(files_panel_collapsed=collapsed)
+
+    def _lane_settings_belong_on_screen(self) -> bool:
+        return not self._home_mode_active and not self._is_wb_plot_workspace_active()
+
+    def _sync_param_panel_visibility(self) -> None:
+        """Lay the sidebar out for the current workspace and fold state."""
+        collapsed = self._files_panel_collapsed
+        show_roi = self._lane_settings_belong_on_screen()
+        # A rail only when there is nothing else to show in the sidebar.
+        rail = collapsed and not show_roi
+
+        self._param_panel_host.setVisible(show_roi)
+        self._files_title.setVisible(not rail)
+        self._files_list.setVisible(not collapsed)
+        self._files_drop_hint.setVisible(not collapsed)
+        self._export_all_tiffs_btn.setVisible(not collapsed)
+        self._files_bottom_spacer.changeSize(
+            0,
+            0,
+            QSizePolicy.Policy.Minimum,
+            QSizePolicy.Policy.Expanding if collapsed else QSizePolicy.Policy.Minimum,
+        )
+        self._files_panel.layout().invalidate()
+        self._files_toggle_btn.setText("▶" if collapsed else "▼")
+        self._files_toggle_btn.setToolTip(
+            tr(
+                "Expand Uploaded Files panel"
+                if collapsed
+                else "Collapse Uploaded Files panel",
+                self._language,
+            )
+        )
+
+        was_rail = self._files_panel.maximumWidth() <= self._files_panel_collapsed_width
+        if rail:
             self._files_panel.setMinimumWidth(self._files_panel_collapsed_width)
             self._files_panel.setMaximumWidth(self._files_panel_collapsed_width)
-            self._files_toggle_btn.setText("▶")
-            self._files_toggle_btn.setToolTip("Expand Uploaded Files panel")
+            files_width = self._files_panel_collapsed_width
         else:
             self._files_panel.setMinimumWidth(self._files_panel_min_width)
             self._files_panel.setMaximumWidth(self._files_panel_max_width)
-            self._files_title.setVisible(True)
-            self._files_list.setVisible(True)
-            self._files_drop_hint.setVisible(True)
-            self._export_all_tiffs_btn.setVisible(True)
-            restored_width = max(
+            files_width = max(
                 self._files_panel_min_width,
                 min(self._files_panel_last_width, self._files_panel_max_width),
             )
-            self._files_toggle_btn.setText("◀")
-            self._files_toggle_btn.setToolTip("Collapse Uploaded Files panel")
-
-        self._files_panel_collapsed = collapsed
-        self._sync_param_panel_visibility()
-        files_width = (
-            self._files_panel_collapsed_width if collapsed else restored_width
-        )
-        workspace_width = max(200, total - files_width)
-        self._main_splitter.setSizes([files_width, workspace_width])
-        if persist:
-            self._persistence.remember_ui_state(files_panel_collapsed=collapsed)
-
-    def _sync_param_panel_visibility(self) -> None:
-        """Show lane settings under the file list in the Quantify workspace."""
-        show_roi = (
-            not self._files_panel_collapsed
-            and not self._home_mode_active
-            and not self._is_wb_plot_workspace_active()
-        )
-        self._param_panel_host.setVisible(show_roi)
+        if rail != was_rail:
+            total = max(sum(self._main_splitter.sizes()), self._main_splitter.width(), 1)
+            self._main_splitter.setSizes([files_width, max(200, total - files_width)])
 
     def _sync_workspace_tabs(self) -> None:
         """Highlight the top tab of the workspace that is on screen."""
@@ -836,6 +854,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         collapsed = ui.get("sidebar_collapsed")
         if isinstance(collapsed, bool):
             self._set_files_panel_collapsed(collapsed, persist=False)
+        self._sync_param_panel_visibility()
 
     def _set_language(self, language: str, *, persist: bool = True) -> None:
         """Apply the display language while keeping analysis data untouched."""
@@ -1108,7 +1127,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self.param_panel.set_wb_plot_simplified(True)
         self._set_wb_plot_roi_only(True)
         self._figure_mode_window.set_context_controls_widget(None)
-        self._param_panel_host.setVisible(False)
+        self._sync_param_panel_visibility()
 
     def _set_wb_plot_roi_only(self, enabled: bool) -> None:
         for panel in self._image_panels:

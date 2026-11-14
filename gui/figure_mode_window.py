@@ -304,7 +304,9 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         canvas_vbox.addWidget(canvas_scroll, 1)
         root.addWidget(canvas_card, 1)
 
-        # ── Right: fixed-width step panel ─────────────────────────────────
+        # ── Right: fixed-width panel, all three stages on one screen ──────
+        # Each stage needs only a few controls, so they are stacked instead
+        # of paged: nothing to click through and no empty space.
         panel = QFrame()
         panel.setObjectName("workflowStepPanel")
         panel.setFixedWidth(self._SIDEBAR_WIDTH)
@@ -317,127 +319,89 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         panel_outer.setContentsMargins(1, 1, 1, 1)
         panel_outer.setSpacing(0)
 
-        # Tinted header: the step buttons and what the current step is for.
-        header = QFrame()
-        header.setObjectName("workflowStepHeader")
-        header.setStyleSheet(
-            "QFrame#workflowStepHeader { background: #DDE8E2; "
-            "border-top-left-radius: 9px; border-top-right-radius: 9px; }"
-        )
-        header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(10, 10, 10, 10)
-        header_layout.setSpacing(8)
-        panel_outer.addWidget(header)
-
-        body = QWidget()
-        body.setObjectName("workflowStepBody")
-        body.setStyleSheet("QWidget#workflowStepBody { background: transparent; }")
-        panel_layout = QVBoxLayout(body)
-        panel_layout.setContentsMargins(12, 12, 12, 12)
-        panel_layout.setSpacing(10)
-        panel_outer.addWidget(body, 1)
-        self._sidebar_layout = panel_layout
-
-        # Step buttons across the top, as wide as the panel.
-        steps_row = QHBoxLayout()
-        steps_row.setContentsMargins(0, 0, 0, 0)
-        steps_row.setSpacing(6)
-        self._step_buttons: list[QPushButton] = []
-        for number in range(1, len(self._STEP_TITLES) + 1):
-            button = QPushButton(str(number))
-            button.setObjectName("workflowStepButton")
-            button.setCheckable(True)
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setFixedHeight(34)
-            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            button.setStyleSheet(
-                "QPushButton#workflowStepButton { background:#FFFFFF; "
-                "border:1px solid #C3D2CA; border-radius:8px; color:#3B4A43; "
-                "font-size:13px; padding:2px 2px; }"
-                "QPushButton#workflowStepButton:hover { border-color:#1F6B4A; "
-                "color:#134A32; }"
-                "QPushButton#workflowStepButton:checked { background:#1F6B4A; "
-                "border-color:#1F6B4A; color:#FFFFFF; font-weight:600; }"
-            )
-            button.clicked.connect(lambda _checked=False, n=number: self.go_to_step(n))
-            steps_row.addWidget(button, 1)
-            self._step_buttons.append(button)
-        header_layout.addLayout(steps_row)
-
-        self._step_desc_lbl = QLabel("")
-        self._step_desc_lbl.setWordWrap(True)
-        self._step_desc_lbl.setStyleSheet(
-            "font-size:12px; color:#3B4A43; background:transparent;"
-        )
-        header_layout.addWidget(self._step_desc_lbl)
-
-        # One page per step; only the current step's controls are on screen.
         self._grp1 = self._build_step1()
         self._grp4 = self._build_apply_roi_step()
         self._grp5 = self._build_saved_blot_files_step()
         self._grp6 = self._build_step6()
         for grp in (self._grp1, self._grp4, self._grp5, self._grp6):
             grp.set_flat(True)
+        # Saved Blot Files open from a button, like Saved Templates.
+        self._grp5.setParent(self)
+        self._grp5.hide()
 
-        self._step_stack = QStackedWidget()
+        self._saved_blot_files_btn = QPushButton("Saved Blot Files   ›")
+        self._saved_blot_files_btn.setObjectName("step1SavedBlotFilesButton")
+        self._saved_blot_files_btn.setFixedHeight(34)
+        self._saved_blot_files_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._saved_blot_files_btn.setToolTip("Reopen a figure you saved earlier")
+        self._saved_blot_files_btn.setStyleSheet(
+            "QPushButton#step1SavedBlotFilesButton { background:#FFFFFF; "
+            "color:#1C2622; border:1px solid #C9D3CE; border-radius:8px; "
+            "font-size:13px; padding:3px 10px; text-align:left; }"
+            "QPushButton#step1SavedBlotFilesButton:hover { background:#E3EFE8; "
+            "border-color:#1F6B4A; }"
+        )
+        self._saved_blot_files_btn.clicked.connect(self._show_saved_blot_files_dialog)
+
+        self._step_desc_lbl = QLabel("")
+        self._step_desc_lbl.setWordWrap(True)
+        self._step_desc_lbl.setStyleSheet(
+            "font-size:12px; color:#4A5A53; background:transparent;"
+        )
+
+        page = QWidget()
+        page.setObjectName("workflowStepPage")
+        page.setStyleSheet("QWidget#workflowStepPage { background: #FFFFFF; }")
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(12, 12, 12, 12)
+        page_layout.setSpacing(14)
+        self._sidebar_layout = page_layout
+
+        self._step_headings: list[QLabel] = []
         self._step_pages: list[QWidget] = []
-        def _page_heading(text: str) -> QLabel:
-            heading = QLabel(text)
-            heading.setStyleSheet(
-                "font-size:12px; font-weight:600; color:#4A5A53; background:transparent;"
-            )
-            return heading
-
-        page_contents: list[list[QWidget]] = [
-            [self._grp1, _page_heading("Saved Blot Files"), self._grp5],
-            [self._grp4],
+        section_contents: list[list[QWidget]] = [
+            [self._grp1, self._saved_blot_files_btn],
+            [self._step_desc_lbl, self._grp4],
             [self._grp6, self._save_panel],
         ]
-        for widgets in page_contents:
-            page = QWidget()
-            page.setObjectName("workflowStepPage")
-            page.setStyleSheet("QWidget#workflowStepPage { background: #FFFFFF; }")
-            page_layout = QVBoxLayout(page)
-            page_layout.setContentsMargins(0, 0, 0, 0)
-            page_layout.setSpacing(8)
-            for widget in widgets:
-                page_layout.addWidget(widget)
-            page_layout.addStretch(1)
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            scroll.setStyleSheet("QScrollArea { border: none; background: #FFFFFF; }")
-            scroll.viewport().setObjectName("workflowStepViewport")
-            scroll.viewport().setStyleSheet(
-                "QWidget#workflowStepViewport { background: #FFFFFF; }"
+        for widgets in section_contents:
+            section = QWidget()
+            section.setObjectName("workflowStepSection")
+            section.setStyleSheet(
+                "QWidget#workflowStepSection { background: transparent; }"
             )
-            scroll.setWidget(page)
-            self._step_stack.addWidget(scroll)
-            self._step_pages.append(page)
-        panel_layout.addWidget(self._step_stack, 1)
+            section_layout = QVBoxLayout(section)
+            section_layout.setContentsMargins(0, 0, 0, 0)
+            section_layout.setSpacing(8)
+            heading = QLabel("")
+            heading.setObjectName("workflowStepHeading")
+            heading.setFixedHeight(30)
+            heading.setStyleSheet(
+                "QLabel#workflowStepHeading { background:#DDE8E2; color:#134A32; "
+                "font-size:13px; font-weight:600; border-radius:6px; "
+                "padding:0px 10px; }"
+            )
+            section_layout.addWidget(heading)
+            for widget in widgets:
+                section_layout.addWidget(widget)
+            page_layout.addWidget(section)
+            self._step_headings.append(heading)
+            self._step_pages.append(section)
+        page_layout.addStretch(1)
 
-        nav_row = QHBoxLayout()
-        nav_row.setContentsMargins(0, 0, 0, 0)
-        nav_row.setSpacing(8)
-        self._step_prev_btn = QPushButton("Previous")
-        self._step_prev_btn.setObjectName("workflowStepPrevButton")
-        self._step_prev_btn.setFixedHeight(36)
-        self._step_prev_btn.setStyleSheet(_SMALL_BTN_STYLE)
-        self._step_prev_btn.clicked.connect(lambda: self.go_to_step(self._current_step - 1))
-        nav_row.addWidget(self._step_prev_btn, 1)
-        self._step_next_btn = QPushButton("Next")
-        self._step_next_btn.setObjectName("workflowStepNextButton")
-        self._step_next_btn.setFixedHeight(36)
-        self._step_next_btn.setStyleSheet(
-            "QPushButton { background:#FFFFFF; border:1px solid #1F6B4A; "
-            "border-radius:8px; color:#1F6B4A; font-size:12px; font-weight:600; "
-            "padding:4px 12px; }"
-            "QPushButton:hover { background:#E3EFE8; }"
-            "QPushButton:disabled { color:#9AA8A1; border-color:#E4E9E6; }"
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet(
+            "QScrollArea { border: none; background: #FFFFFF; border-radius: 9px; }"
         )
-        self._step_next_btn.clicked.connect(lambda: self.go_to_step(self._current_step + 1))
-        nav_row.addWidget(self._step_next_btn, 1)
-        panel_layout.addLayout(nav_row)
+        scroll.viewport().setObjectName("workflowStepViewport")
+        scroll.viewport().setStyleSheet(
+            "QWidget#workflowStepViewport { background: #FFFFFF; border-radius: 9px; }"
+        )
+        scroll.setWidget(page)
+        self._step_scroll = scroll
+        panel_outer.addWidget(scroll, 1)
         root.addWidget(panel)
 
         # Wire scene selection → font/line controls
@@ -458,35 +422,61 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         return self._current_step
 
     def go_to_step(self, number: int) -> None:
-        """Show one step's controls; steps can be visited in any order."""
+        """Bring one stage into view; all stages stay on screen together."""
         number = max(1, min(int(number), len(self._STEP_TITLES)))
         self._current_step = number
-        self._step_stack.setCurrentIndex(number - 1)
-        for index, button in enumerate(self._step_buttons, start=1):
-            button.setChecked(index == number)
-        self._step_prev_btn.setEnabled(number > 1)
-        self._step_next_btn.setEnabled(number < len(self._STEP_TITLES))
         self._refresh_step_panel_texts()
+        self._step_scroll.ensureWidgetVisible(self._step_pages[number - 1], 0, 12)
 
     def reveal_widget(self, widget: QWidget | None) -> None:
-        """Switch to the step that holds a control (used by the tutorial)."""
+        """Scroll to the stage that holds a control (used by the tutorial)."""
         if widget is None:
             return
-        for index, page in enumerate(self._step_pages, start=1):
-            if page is widget or page.isAncestorOf(widget):
-                if index != self._current_step:
-                    self.go_to_step(index)
+        for index, section in enumerate(self._step_pages, start=1):
+            if section is widget or section.isAncestorOf(widget):
+                self._current_step = index
+                self._step_scroll.ensureWidgetVisible(widget, 0, 12)
                 return
 
     def _refresh_step_panel_texts(self) -> None:
-        for index, button in enumerate(self._step_buttons, start=1):
-            button.setText(f"{index}  {tr(self._STEP_TITLES[index - 1], self._language)}")
-        current = self._current_step
-        hint = self._STEP_DESCRIPTIONS[current - 1]
-        self._step_desc_lbl.setText(tr(hint, self._language) if hint else "")
-        self._step_desc_lbl.setVisible(bool(hint))
-        self._step_prev_btn.setText(tr("Previous", self._language))
-        self._step_next_btn.setText(tr("Next", self._language))
+        for index, heading in enumerate(self._step_headings, start=1):
+            heading.setText(f"{index}   {tr(self._STEP_TITLES[index - 1], self._language)}")
+        self._step_desc_lbl.setText(tr(self._STEP_DESCRIPTIONS[1], self._language))
+
+    def _show_saved_blot_files_dialog(self) -> None:
+        """Pick a saved Blot File from a list, the way Saved Templates works."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(tr("Saved Blot Files", self._language))
+        dialog.setModal(True)
+        dialog.setMinimumSize(380, 420)
+        dialog.setStyleSheet("QDialog { background:#FFFFFF; }")
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 14)
+        layout.setSpacing(10)
+        self._blot_file_list.setMaximumHeight(16777215)
+        self._grp5.setParent(dialog)
+        layout.addWidget(self._grp5, 1)
+        self._grp5.show()
+        self._populate_blot_file_list()
+
+        def close_if_opened() -> None:
+            selected = self._current_blot_file_selection()
+            if selected and self._active_blot_file_id == selected:
+                dialog.accept()
+
+        open_btn = self._blot_file_open_btn
+        open_btn.clicked.connect(close_if_opened)
+        self._blot_file_dialog = dialog
+        self._retranslate_widget_tree(dialog)
+        try:
+            dialog.exec()
+        finally:
+            open_btn.clicked.disconnect(close_if_opened)
+            # Hand the list back before the dialog is destroyed.
+            self._grp5.setParent(self)
+            self._grp5.hide()
+            self._blot_file_dialog = None
+            dialog.deleteLater()
 
     # ── Saved template library ────────────────────────────────────────────
 
@@ -964,9 +954,11 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         bl.addWidget(self._blot_file_list)
 
         open_btn = QPushButton("Open Blot File")
-        open_btn.setStyleSheet(_SMALL_BTN_STYLE)
+        open_btn.setStyleSheet(_APPLY_BTN_STYLE)
+        open_btn.setFixedHeight(36)
         open_btn.clicked.connect(self._on_open_blot_file)
         bl.addWidget(open_btn)
+        self._blot_file_open_btn = open_btn
 
         self._populate_blot_file_list()
         return grp
