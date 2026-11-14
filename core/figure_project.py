@@ -119,6 +119,10 @@ class BlotSlot:
     # render/export use it so reopening cannot reinterpret TIFF polarity or
     # tone controls differently from what the user saved.
     saved_preview_path: str = ""
+    # The crop exactly as it was chosen (Auto-Fit result or manual ROI).
+    # bounding_box may be taller: strips of one panel are shown at one height
+    # by growing shorter crops vertically from this box.
+    fit_box: ImageBBox | None = None
 
     # ── Convenience helpers ───────────────────────────────────────────────
 

@@ -95,6 +95,9 @@ class AutoLaneMixin:
                 "bands": [
                     {
                         "band_rect": QRectF(*band["band_rect"]),
+                        # The figure crop is built from the band itself plus the
+                        # Auto-Fit margins, not from the roomier measuring box.
+                        "signal_rect": QRectF(*band["signal_rect"]),
                         "band_index": band["band_index"],
                         "row_index": band["row_index"],
                     }

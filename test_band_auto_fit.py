@@ -542,6 +542,32 @@ class EqualizeStripHeightsTests(unittest.TestCase):
         self.assertEqual(manual.display_height_pt, 22.0)    # manually filled frames are left alone
         self.assertEqual(manual.bounding_box.h, 10)
 
+    def test_panel_gets_shorter_again_when_the_tallest_strip_is_refitted_tighter(self) -> None:
+        from types import SimpleNamespace
+
+        from core.figure_project import BlotSlot
+        from gui.figure_mode_window import FigureModeWindow
+
+        def slot(fit: ImageBBox, shown: ImageBBox, height_pt: float) -> BlotSlot:
+            return BlotSlot(
+                label="", mw_marker="", source_image_path="blot.tif", bounding_box=shown,
+                preserve_image_aspect=True, display_height_pt=height_pt, fit_box=fit,
+            )
+
+        # Both strips were levelled to 60 pt earlier; the first has now been
+        # re-fitted to a 20 px tall crop, the second was always 20 px tall.
+        refitted = slot(ImageBBox(50, 80, 200, 20), ImageBBox(50, 80, 200, 20), 30.0)
+        other = slot(ImageBBox(50, 160, 200, 20), ImageBBox(50, 150, 200, 40), 60.0)
+        window = SimpleNamespace(
+            _project=SimpleNamespace(panels=[SimpleNamespace(blot_slots=[refitted, other])]),
+            _presentation_image_height=lambda _slot: 260.0,
+        )
+
+        FigureModeWindow._equalize_panel_strip_heights(window, 0, 300.0)
+
+        self.assertEqual((refitted.display_height_pt, other.display_height_pt), (30.0, 30.0))
+        self.assertEqual((other.bounding_box.y, other.bounding_box.h), (160, 20))
+
     def test_single_strip_is_left_alone(self) -> None:
         from core.band_auto_fit import equalize_strip_heights
 

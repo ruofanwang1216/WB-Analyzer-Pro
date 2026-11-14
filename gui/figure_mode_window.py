@@ -1476,6 +1476,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
                 return False
             slot.source_image_path = image_path
             slot.bounding_box = crop
+            slot.fit_box = crop
             slot.image_transform = image_transform
             slot.geometry_transform = geometry_transform
             slot.lane_crops = list(result.lane_crop_boxes)
@@ -1524,11 +1525,13 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             and slot.preserve_image_aspect
             and not slot.lane_crops
         ]
-        if len(slots) < 2:
+        if not slots:
             return
         strips = []
         for slot in slots:
-            box = slot.bounding_box
+            # Always start from the crop as chosen, so the panel can also get
+            # shorter again when its tallest strip is re-fitted more tightly.
+            box = slot.fit_box or slot.bounding_box
             strips.append({
                 "crop": (box.x, box.y, box.w, box.h),
                 "frame_width": float(slot.display_width_pt or default_width_pt),
@@ -1536,7 +1539,11 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             })
         for slot, fitted in zip(slots, equalize_strip_heights(strips)):
             x, y, w, h = fitted["crop"]
-            if abs(h - slot.bounding_box.h) > 1e-6 or abs(y - slot.bounding_box.y) > 1e-6:
+            current = slot.bounding_box
+            if (
+                abs(h - current.h) > 1e-6 or abs(y - current.y) > 1e-6
+                or abs(x - current.x) > 1e-6 or abs(w - current.w) > 1e-6
+            ):
                 slot.bounding_box = ImageBBox(x, y, w, h)
                 slot.saved_preview_path = ""
             if fitted["frame_height"] > 0:
@@ -1662,6 +1669,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         blot_view_state = self._canvas.capture_blot_view_state()
         self._remember_canvas_undo_state()
+        was_auto_fitted = bool(slot.preserve_image_aspect) and not slot.lane_crops
         slot.source_image_path = image_path
         slot.bounding_box = ImageBBox(
             x=roi["x"],
@@ -1669,13 +1677,25 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             w=roi["w"],
             h=roi["h"],
         )
+        slot.fit_box = ImageBBox(x=roi["x"], y=roi["y"], w=roi["w"], h=roi["h"])
         slot.image_transform = image_transform
         slot.geometry_transform = geometry_transform
         slot.lane_crops = []
-        slot.preserve_image_aspect = False
         slot.saved_preview_path = ""
-        # Preserve lane_count, lane_rois, display width/height and all canvas
-        # offsets.  The selected ROI only changes the pixels inside the frame.
+        # Preserve lane_count, lane_rois, display width and all canvas offsets.
+        # A frame that still has its layout size keeps it: the selected ROI only
+        # changes the pixels inside the frame.  A frame whose height was set by
+        # an earlier Auto-Fit no longer has a size the user chose, so stretching
+        # a manual ROI into it would distort the blot; there the height follows
+        # the ROI's proportions, like Auto-Fit, and the panel is re-levelled.
+        frame = self._canvas._blot_frames.get((pi, si, None, None, None, "blot"))
+        if was_auto_fitted and frame is not None and roi["w"] > 0 and roi["h"] > 0:
+            frame_width_pt = scene_to_pt(frame.rect().width())
+            slot.preserve_image_aspect = True
+            slot.display_height_pt = frame_width_pt * roi["h"] / roi["w"]
+            self._equalize_panel_strip_heights(pi, frame_width_pt)
+        else:
+            slot.preserve_image_aspect = False
 
         self._rebuild_step4()
         self._recompute_and_refresh(fit_view=False)

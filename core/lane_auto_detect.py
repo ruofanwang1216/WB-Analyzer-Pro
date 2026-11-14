@@ -175,7 +175,7 @@ def _flank_shoulder(profile: np.ndarray, peak: int, step: int, limit: int) -> tu
     biggest = float(drops.max())
     if biggest <= 0:
         return None
-    steep, flat = 0.6 * biggest, 0.35 * biggest
+    steep, flat = 0.6 * biggest, 0.45 * biggest
     # The main band's own fall...
     j = 0
     while j < len(drops) and drops[j] < steep:
@@ -224,73 +224,80 @@ def _resolve_adjacent_bands(
 ) -> None:
     """Look for a second band touching each row's main band.
 
-    Bands in neighbouring lanes rarely sit at exactly the same height, so the
-    pooled row profile blurs two touching bands into one.  Here every lane's
-    own vertical profile is first slid into register with the others; the
-    averaged, aligned profile is sharp enough to show a second band as a
-    shoulder or small hump next to the main peak.
+    Bands in neighbouring lanes rarely sit at exactly the same height, so a
+    profile pooled across lanes blurs two touching bands into one.  Each lane
+    is therefore examined on its own, measured from its own peak: a second
+    band shows up as a shoulder or small hump on one flank.  The lanes then
+    vote, and the row gets an adjacent band only when at least half of the
+    lanes that carry signal agree on the side.
 
     Sets ``row["adjacent"]`` (side, main extent, extent with the nearest
-    adjacent band) and ``row["lane_shifts"]`` (per-lane vertical offsets) on
-    rows where one is found.
+    adjacent band) and ``row["lane_shifts"]`` (each lane's vertical offset
+    from the row's reference position) on rows where one is found.
     """
     from scipy.ndimage import gaussian_filter1d
 
     h, w = signal.shape
     half = max(2, int(round(0.3 * pitch)))
+    # ``signal`` is already lightly smoothed; more would hide the shoulder.
     columns = [
         signal[:, max(0, int(round(c)) - half): min(w, int(round(c)) + half + 1)].mean(axis=1)
         for c in centres
     ]
     for index, row in enumerate(rows):
-        row_h = max(3, row["bottom"] - row["top"] + 1)
-        max_shift = max(1, int(round(0.6 * row_h)))
         # Never look past the neighbouring rows: their bands are not ours.
         lo_limit = rows[index - 1]["bottom"] + 1 if index > 0 else 0
         hi_limit = rows[index + 1]["top"] - 1 if index < len(rows) - 1 else h - 1
-        lo = max(lo_limit, row["top"] - row_h)
-        hi = min(hi_limit + 1, row["bottom"] + row_h + 1)
-        if hi - lo < 5:
+        if hi_limit - lo_limit < 5:
             continue
         strengths = [float(col[row["top"]: row["bottom"] + 1].max()) for col in columns]
         top_strength = max(strengths) if strengths else 0.0
         if top_strength <= 0:
             continue
         strong = [i for i, value in enumerate(strengths) if value >= 0.15 * top_strength]
-        shifts = {i: 0 for i in strong}
-        template = np.mean([columns[i] / strengths[i] for i in strong], axis=0)
-        for _ in range(2):
-            for i in strong:
-                best_shift, best_value = 0, -np.inf
-                for shift in sorted(range(-max_shift, max_shift + 1), key=abs):
-                    value = float(np.dot(_shifted(columns[i], shift)[lo:hi], template[lo:hi]))
-                    if value > best_value * (1.0 + 1e-9) + 1e-12:
-                        best_shift, best_value = shift, value
-                shifts[i] = best_shift
-            template = np.mean(
-                [_shifted(columns[i], shifts[i]) / strengths[i] for i in strong], axis=0
-            )
-        aligned = gaussian_filter1d(template, 0.7)
-        peak = row["top"] + int(np.argmax(aligned[row["top"]: row["bottom"] + 1]))
-        above = _flank_shoulder(aligned, peak, -1, lo_limit)
-        below = _flank_shoulder(aligned, peak, +1, hi_limit)
-        if (above is None) == (below is None):
-            # None, or both sides (a diffuse halo around a strong band): one band.
+        peaks: dict[int, int] = {}
+        votes: dict[str, list[tuple[int, int]]] = {"above": [], "below": []}
+        tops: list[int] = []
+        bottoms: list[int] = []
+        for i in strong:
+            col = columns[i]
+            peak = row["top"] + int(np.argmax(col[row["top"]: row["bottom"] + 1]))
+            peaks[i] = peak
+            top_i, bottom_i = _row_extent(col, peak)
+            tops.append(max(top_i, lo_limit) - peak)
+            bottoms.append(min(bottom_i, hi_limit) - peak)
+            above = _flank_shoulder(col, peak, -1, lo_limit)
+            below = _flank_shoulder(col, peak, +1, hi_limit)
+            if (above is None) == (below is None):
+                # None, or both sides (a diffuse halo around a strong band).
+                continue
+            if below is not None:
+                votes["below"].append((below[0] - peak, below[1] - peak))
+            else:
+                votes["above"].append((above[0] - peak, above[1] - peak))
+        needed = max(1, (len(strong) + 1) // 2)
+        side = "below" if len(votes["below"]) >= len(votes["above"]) else "above"
+        if len(votes[side]) < needed or len(votes[side]) == len(votes["above" if side == "below" else "below"]):
             continue
-        top0, bottom0 = _row_extent(aligned, peak)
-        top0, bottom0 = max(top0, lo_limit), min(bottom0, hi_limit)
-        if below is not None:
-            main_edge, far_edge = below
+        reference = int(round(float(np.median(list(peaks.values())))))
+        main_rel = int(round(float(np.median([vote[0] for vote in votes[side]]))))
+        far_rel = int(round(float(np.median([vote[1] for vote in votes[side]]))))
+        top0 = max(lo_limit, reference + int(round(float(np.median(tops)))))
+        bottom0 = min(hi_limit, reference + int(round(float(np.median(bottoms)))))
+        if side == "below":
+            main_edge = min(hi_limit, reference + main_rel)
+            far_edge = min(hi_limit, reference + far_rel)
             adjacent = {
                 "side": "below",
-                "main": (top0, max(peak, min(bottom0, main_edge))),
+                "main": (top0, max(reference, main_edge)),
                 "full": (top0, max(main_edge, far_edge)),
             }
         else:
-            main_edge, far_edge = above
+            main_edge = max(lo_limit, reference + main_rel)
+            far_edge = max(lo_limit, reference + far_rel)
             adjacent = {
                 "side": "above",
-                "main": (min(peak, max(top0, main_edge)), bottom0),
+                "main": (min(reference, main_edge), bottom0),
                 "full": (min(main_edge, far_edge), bottom0),
             }
         if adjacent["main"][1] - adjacent["main"][0] + 1 < 3:
@@ -302,10 +309,8 @@ def _resolve_adjacent_bands(
             # Next to a much stronger row, a "band" on that side is its tail.
             continue
         row["adjacent"] = adjacent
-        row["center"] = peak
-        known = sorted(shifts.values())
-        fallback = known[len(known) // 2] if known else 0
-        row["lane_shifts"] = [shifts.get(i, fallback) for i in range(len(columns))]
+        row["center"] = reference
+        row["lane_shifts"] = [peaks.get(i, reference) - reference for i in range(len(columns))]
     # Two neighbouring rows may claim the same stretch between them.  When
     # both do, it belongs to the stronger row; the weaker row's "adjacent
     # band" is only the stronger row's tail.
@@ -656,6 +661,13 @@ def detect_lanes_in_roi(
             bx = box_left
             lane["bands"].append({
                 "band_rect": (x1 + bx, float(y1 + top), float(row_box_w), float(min(box_h, h))),
+                # The band itself, without the vertical margin of the box.
+                "signal_rect": (
+                    x1 + bx,
+                    float(y1 + min(h - 1, top + pad_top)),
+                    float(row_box_w),
+                    float(max(1, min(row_h, h - (top + pad_top)))),
+                ),
                 "row_index": row_index,
                 "empty": off is None or strength < 0.05 * row_peak,
             })

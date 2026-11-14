@@ -4036,6 +4036,36 @@ class FigureModeStructureTests(unittest.TestCase):
         self.assertEqual(many_panels.canvas_width_pt, few_panels.canvas_width_pt)
         self.assertGreater(many_panels.canvas_height_pt, few_panels.canvas_height_pt)
 
+    def test_manual_roi_into_an_auto_fitted_frame_is_not_stretched(self) -> None:
+        window = FigureModeWindow()
+        window._manual_detect_radio.setChecked(True)
+        window._on_apply_template()
+        window._recompute_and_refresh(fit_view=False)
+        key, frame = next(iter(window._canvas._blot_frames.items()))
+        window._canvas._select_blot_frame(frame, additive=False)
+        slot = window._project.panels[0].blot_slots[0]
+        from gui.figure_mode_window import scene_to_pt
+
+        frame_width_pt = scene_to_pt(frame.rect().width())
+        # An earlier Auto-Fit left this frame tall.
+        slot.preserve_image_aspect = True
+        slot.display_height_pt = frame_width_pt / 2.0
+
+        with TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "manual_roi.png")
+            Image.fromarray(np.full((40, 80), 120, dtype=np.uint8)).save(path)
+            window.set_active_image_provider(
+                lambda: {"image_path": path, "roi": QRectF(2.0, 3.0, 60.0, 6.0)}
+            )
+            self.assertTrue(window.apply_roi_to_selected_slot())
+            self._app.processEvents()
+
+        self.assertEqual(slot.bounding_box, ImageBBox(2.0, 3.0, 60.0, 6.0))
+        self.assertTrue(slot.preserve_image_aspect)
+        # Height follows the ROI's 10:1 shape instead of the old 2:1 frame.
+        self.assertAlmostEqual(slot.display_height_pt, frame_width_pt / 10.0, places=4)
+        window.close()
+
     def test_apply_roi_to_selected_slot_can_rerender_repeatedly(self) -> None:
         window = FigureModeWindow()
         window._manual_detect_radio.setChecked(True)
