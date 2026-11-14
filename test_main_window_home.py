@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 from PIL import Image
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QApplication
 
 from gui.main_window import MainWindow
@@ -106,6 +106,9 @@ class MainWindowHomePageTests(unittest.TestCase):
 
     def test_lane_settings_sit_under_the_file_list(self) -> None:
         window = self._make_window()
+        window.resize(1200, 800)
+        window.show()
+        self._app.processEvents()
         window._on_densitometry_mode()
 
         self.assertIs(window._main_splitter.widget(0), window._files_panel)
@@ -116,10 +119,46 @@ class MainWindowHomePageTests(unittest.TestCase):
         self.assertFalse(window._files_list.isHidden())
         self.assertFalse(window._param_panel_host.isHidden())
         self.assertFalse(hasattr(window.param_panel, "_rotate_group"))
+        full_width = window._files_panel.width()
 
         window._set_files_panel_collapsed(True)
+        self._app.processEvents()
 
+        # Folding the file list keeps the lane tools: only the list goes.
         self.assertTrue(window._files_list.isHidden())
+        self.assertTrue(window._files_drop_hint.isHidden())
+        self.assertFalse(window._param_panel_host.isHidden())
+        self.assertFalse(window._files_title.isHidden())
+        self.assertEqual(window._files_panel.width(), full_width)
+        self.assertEqual(window._files_toggle_btn.text(), "▶")
+        # With the list gone the lane settings move up under the header.
+        self.assertLess(
+            window._param_panel_host.mapTo(window._files_panel, QPoint()).y(), 80
+        )
+
+        window._set_files_panel_collapsed(False)
+        self.assertFalse(window._files_list.isHidden())
+        self.assertEqual(window._files_toggle_btn.text(), "▼")
+
+    def test_collapsed_sidebar_is_a_rail_only_where_it_holds_just_files(self) -> None:
+        window = self._make_window()
+        window.resize(1200, 800)
+        window.show()
+        self._app.processEvents()
+        rail = window._files_panel_collapsed_width
+
+        window._set_files_panel_collapsed(True)
+        self._app.processEvents()
+        self.assertEqual(window._files_panel.width(), rail)  # Home
+
+        window._on_densitometry_mode()
+        self._app.processEvents()
+        self.assertGreater(window._files_panel.width(), rail)
+        self.assertFalse(window._param_panel_host.isHidden())
+
+        window._on_wb_plot_mode()
+        self._app.processEvents()
+        self.assertEqual(window._files_panel.width(), rail)
         self.assertTrue(window._param_panel_host.isHidden())
 
     def test_tool_switches_preserve_sidebar_state(self) -> None:
