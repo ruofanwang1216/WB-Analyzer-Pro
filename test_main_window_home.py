@@ -253,7 +253,7 @@ class MainWindowHomePageTests(unittest.TestCase):
         figure = before_entry._figure_mode_window
         self.assertEqual(figure._grp1.title_text(), "步骤 1：选择布局")
         self.assertEqual(figure._grp4.title_text(), "步骤 2：填充印迹图框")
-        self.assertEqual(figure._saved_templates_btn.text(), "已保存模板   ›")
+        self.assertEqual(figure._saved_templates_btn.text(), "模板")
         self.assertEqual(figure._annot_undo_btn.text(), "撤销")
         self.assertEqual(figure._fit_center_btn.text(), "适应")
 
@@ -284,7 +284,7 @@ class MainWindowHomePageTests(unittest.TestCase):
         figure = window._figure_mode_window
         self.assertEqual(figure._language, LANG_ZH_CN)
         self.assertEqual(figure._grp1.title_text(), "步骤 1：选择布局")
-        self.assertEqual(figure._saved_templates_btn.text(), "已保存模板   ›")
+        self.assertEqual(figure._saved_templates_btn.text(), "模板")
         self.assertEqual(figure._annot_undo_btn.text(), "撤销")
 
     def test_language_switch_refreshes_all_created_tools_in_both_directions(self) -> None:

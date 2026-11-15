@@ -63,102 +63,84 @@ class TemplateLibraryMixin:
         self._template_list.setParent(self)
         self._template_list.hide()
 
-        # Three plain actions, top to bottom: start a layout, add its
-        # condition labels, or reuse a saved one.  No numbering or nested
-        # cards, so the order reads at a glance.
+        # Five short buttons in two columns.  One word each; the tooltip
+        # says the rest.  Top row starts a layout, second row reuses one.
         actions = QWidget()
         actions.setObjectName("step1Flow")
         actions.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         actions.setStyleSheet("QWidget#step1Flow { background:transparent; }")
-        actions_layout = QVBoxLayout(actions)
+        actions_layout = QGridLayout(actions)
         actions_layout.setContentsMargins(0, 0, 0, 0)
-        actions_layout.setSpacing(8)
+        actions_layout.setHorizontalSpacing(6)
+        actions_layout.setVerticalSpacing(6)
+        actions_layout.setColumnStretch(0, 1)
+        actions_layout.setColumnStretch(1, 1)
+        button_height = 32
 
-        create_btn = QPushButton("New Blot Frames")
-        create_btn.setObjectName("step1PrimaryButton")
-        create_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        create_btn.setToolTip("Choose how many blot frames and lanes the figure has")
-        create_btn.setStyleSheet(
-            "QPushButton#step1PrimaryButton { background:#1F6B4A; color:#FFFFFF; "
-            "border:1px solid #1F6B4A; border-radius:8px; font-size:13px; "
-            "font-weight:600; padding:3px 8px; }"
-            "QPushButton#step1PrimaryButton:hover { background:#134A32; "
-            "border-color:#134A32; }"
-            "QPushButton#step1PrimaryButton:pressed { background:#0E3A27; }"
-        )
-        create_btn.setFixedHeight(38)
-        create_btn.setSizePolicy(
-            QSizePolicy.Policy.Ignored,
-            QSizePolicy.Policy.Fixed,
+        def styled(button: QPushButton, name: str, kind: str, tooltip: str) -> QPushButton:
+            button.setObjectName(name)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setToolTip(tooltip)
+            button.setFixedHeight(button_height)
+            button.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+            if kind == "primary":
+                sheet = (
+                    f"QPushButton#{name} {{ background:#1F6B4A; color:#FFFFFF; "
+                    "border:1px solid #1F6B4A; border-radius:7px; font-size:13px; "
+                    "font-weight:600; padding:2px 4px; }}"
+                    f"QPushButton#{name}:hover {{ background:#134A32; border-color:#134A32; }}"
+                )
+            elif kind == "outline":
+                sheet = (
+                    f"QPushButton#{name} {{ background:#FFFFFF; color:#1F6B4A; "
+                    "border:1px solid #1F6B4A; border-radius:7px; font-size:13px; "
+                    "font-weight:600; padding:2px 4px; }}"
+                    f"QPushButton#{name}:hover {{ background:#E3EFE8; }}"
+                )
+            else:
+                sheet = (
+                    f"QPushButton#{name} {{ background:#FFFFFF; color:#1C2622; "
+                    "border:1px solid #C9D3CE; border-radius:7px; font-size:13px; "
+                    "padding:2px 4px; }}"
+                    f"QPushButton#{name}:hover {{ background:#E3EFE8; border-color:#1F6B4A; }}"
+                )
+            button.setStyleSheet(sheet.replace("{{", "{").replace("}}", "}"))
+            return button
+
+        create_btn = styled(
+            QPushButton("Frames"), "step1PrimaryButton", "primary",
+            "New layout: choose how many blot frames and lanes",
         )
         create_btn.clicked.connect(self._on_create_template)
-        actions_layout.addWidget(create_btn)
+        actions_layout.addWidget(create_btn, 0, 0)
 
-        outline_style = (
-            "QPushButton#{name} {{ background:#FFFFFF; color:#1F6B4A; "
-            "border:1px solid #1F6B4A; border-radius:8px; font-size:13px; "
-            "font-weight:600; padding:3px 8px; }}"
-            "QPushButton#{name}:hover {{ background:#E3EFE8; }}"
-            "QPushButton#{name}:pressed {{ background:#CFE3D8; }}"
-        )
-
-        create_condition_btn = QPushButton("Add Conditions")
-        create_condition_btn.setObjectName("step1SecondaryButton")
-        create_condition_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        create_condition_btn.setToolTip("Add the +/− condition labels above the lanes")
-        create_condition_btn.setStyleSheet(outline_style.format(name="step1SecondaryButton"))
-        create_condition_btn.setFixedHeight(38)
-        create_condition_btn.setSizePolicy(
-            QSizePolicy.Policy.Ignored,
-            QSizePolicy.Policy.Fixed,
+        create_condition_btn = styled(
+            QPushButton("Conditions"), "step1SecondaryButton", "outline",
+            "Add the +/− condition labels above the lanes",
         )
         create_condition_btn.clicked.connect(self._on_create_condition_template)
-        actions_layout.addWidget(create_condition_btn)
+        actions_layout.addWidget(create_condition_btn, 0, 1)
 
-        plain_style = (
-            "QPushButton#{name} {{ background:#FFFFFF; color:#1C2622; "
-            "border:1px solid #C9D3CE; border-radius:8px; font-size:13px; "
-            "padding:3px 10px; text-align:left; }}"
-            "QPushButton#{name}:hover {{ background:#E3EFE8; border-color:#1F6B4A; }}"
-        )
-
-        add_blot_btn = QPushButton("+ Extra Frame")
-        add_blot_btn.setObjectName("step1TextButton")
-        add_blot_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        add_blot_btn.setStyleSheet(plain_style.format(name="step1TextButton"))
-        add_blot_btn.setFixedHeight(34)
-        add_blot_btn.setSizePolicy(
-            QSizePolicy.Policy.Ignored,
-            QSizePolicy.Policy.Fixed,
-        )
-        add_blot_btn.setToolTip(
-            "Add a free-position Blot Frame. Select it, draw a WB ROI, then press Enter/Return to fill it."
-        )
-        add_blot_btn.clicked.connect(self._on_add_blot_frame)
-
-        self._saved_templates_btn = QPushButton("Saved Templates   ›")
-        self._saved_templates_btn.setObjectName("step1SavedTemplatesButton")
-        self._saved_templates_btn.setFixedHeight(34)
-        self._saved_templates_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._saved_templates_btn.setToolTip("Reuse a previous layout")
-        self._saved_templates_btn.setStyleSheet(
-            plain_style.format(name="step1SavedTemplatesButton")
-        )
-        self._saved_templates_btn.setSizePolicy(
-            QSizePolicy.Policy.Ignored,
-            QSizePolicy.Policy.Fixed,
+        self._saved_templates_btn = styled(
+            QPushButton("Templates"), "step1SavedTemplatesButton", "plain",
+            "Reuse a saved layout",
         )
         self._saved_templates_btn.clicked.connect(self._show_saved_templates_dialog)
+        actions_layout.addWidget(self._saved_templates_btn, 1, 0)
 
-        divider = QFrame()
-        divider.setObjectName("step1Divider")
-        divider.setFixedHeight(1)
-        divider.setStyleSheet("QFrame#step1Divider { background:#E4E9E6; border:none; }")
-        actions_layout.addSpacing(2)
-        actions_layout.addWidget(divider)
-        actions_layout.addSpacing(2)
-        actions_layout.addWidget(self._saved_templates_btn)
-        actions_layout.addWidget(add_blot_btn)
+        self._saved_blot_files_btn = styled(
+            QPushButton("Blot Files"), "step1SavedBlotFilesButton", "plain",
+            "Reopen a figure you saved earlier",
+        )
+        self._saved_blot_files_btn.clicked.connect(self._show_saved_blot_files_dialog)
+        actions_layout.addWidget(self._saved_blot_files_btn, 1, 1)
+
+        add_blot_btn = styled(
+            QPushButton("+ Frame"), "step1TextButton", "plain",
+            "Add a free-position Blot Frame. Select it, draw a WB ROI, then press Enter/Return to fill it.",
+        )
+        add_blot_btn.clicked.connect(self._on_add_blot_frame)
+        actions_layout.addWidget(add_blot_btn, 2, 0)
         bl.addWidget(actions)
 
         # Hidden state controls keep structure values in sync with loaded or
