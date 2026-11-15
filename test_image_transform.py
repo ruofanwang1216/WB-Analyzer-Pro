@@ -73,7 +73,8 @@ class ImageTransformTests(unittest.TestCase):
 
         low, high = auto_scale_range_16(pixels, trim_fraction=0.1)
 
-        self.assertEqual((low, high), (102, 197))
+        # Image Lab rule: n = 12 pixels; the 12th darkest and 12th brightest.
+        self.assertEqual((low, high), (101, 198))
 
     def test_8bit_luminance_expands_to_16bit_slider_range(self) -> None:
         arr = np.array([[0, 128, 255]], dtype=np.uint8)

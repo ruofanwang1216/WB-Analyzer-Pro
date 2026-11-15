@@ -73,7 +73,7 @@ ZH_CN_REDESIGN: dict[str, str] = {
     "Fixed ROI size captured. Select its saved size, drag it on any WB image, then press Return/Enter to apply.": "固定 ROI 尺寸已记录。选中它，在任意图像上拖动放置，然后按回车应用。",
     "Fixed lane & band ROI saved. Select it on another image to place both ROIs and analyze directly.": "固定的泳道和条带 ROI 已保存。在另一张图像上选用即可同时放置并直接分析。",
     "Fixed lane & band ROI selected. Click/drag on the active image to place both ROIs.": "已选用固定的泳道和条带 ROI。在当前图像上点击或拖动来放置。",
-    "Image Transform reset to full 16-bit range.": "对比度已恢复为完整的 16 位范围。",
+    "Image Transform reset to the settings the image opened with.": "显示设置已恢复为图像打开时的状态。",
     "Image load failed — see error dialog.": "图像载入失败，详情见弹出的提示。",
     "Image removed. Returned to single-image mode.": "已移除图像，回到单图模式。",
     "Image removed.": "已移除图像。",
