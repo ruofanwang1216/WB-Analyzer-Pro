@@ -486,6 +486,11 @@ class EditableBandRectItem(QGraphicsRectItem):
         return [QRectF(point.x() - half, point.y() - half, size, size) for point in points]
 
 
+# A rotated preview is rendered up to 3x finer than the source so straightened
+# bands stay crisp; this caps the longest side of that render.
+_MAX_SUPERSAMPLED_PREVIEW_SIDE = 2400
+
+
 class ImageCanvas(QGraphicsView):
     """
     Displays a WB image with zoom/pan and dual ROI drawing.
@@ -855,7 +860,7 @@ class ImageCanvas(QGraphicsView):
         """Compatibility API: display transforms are never quantitative."""
         return False
 
-    def current_display_pixels(self) -> np.ndarray | None:
+    def current_display_pixels(self, *, supersample: int = 1) -> np.ndarray | None:
         if self._display_source_pixels is None:
             return None
         preview_source = self._display_source_pixels[
@@ -867,7 +872,23 @@ class ImageCanvas(QGraphicsView):
             preview_source,
             self._image_transform_params,
         )
-        return apply_geometry_to_display(toned, self._geometry_transform)
+        return apply_geometry_to_display(
+            toned, self._geometry_transform, scale=supersample
+        )
+
+    def _rotation_supersample(self) -> int:
+        """Finer render grid for a rotated preview, bounded by its size."""
+        if self._raw_image_shape is None or self._geometry_transform.is_axis_aligned():
+            return 1
+        longest = max(self._raw_image_shape) / max(1, self._display_preview_stride)
+        for factor in (3, 2):
+            if longest * factor <= _MAX_SUPERSAMPLED_PREVIEW_SIDE:
+                return factor
+        return 1
+
+    def raw_pixels_for_estimation(self) -> np.ndarray | None:
+        """Read-only view of the raw pixels for measurements that copy nothing."""
+        return self._raw_quantification_pixels
 
     def current_analysis_pixels(self) -> np.ndarray | None:
         """Return a safe copy of native-depth raw quantification pixels."""
@@ -982,7 +1003,9 @@ class ImageCanvas(QGraphicsView):
         return params
 
     def _make_display_pixmap(self) -> QPixmap:
-        display = self.current_display_pixels()
+        display = self.current_display_pixels(
+            supersample=self._rotation_supersample()
+        )
         if display is None:
             return QPixmap()
         return self._pixmap_from_display_pixels(display)

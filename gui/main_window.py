@@ -67,6 +67,7 @@ from gui.workers import (
     UploadConversionWorker,
 )
 from gui.image_panel_widgets import (
+    AUTO_STRAIGHTEN_TOOLTIP,
     _ImagePanelWidget,
 )
 from gui.main_window_upload import UploadMixin
@@ -1001,7 +1002,11 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
 
         for panel in self._image_panels:
             panel.transform_btn.setToolTip(tr("Image Transform: Low / High / Gamma", language))
-            panel.rotate_btn.setToolTip(tr("Rotate Image", language))
+            panel.rotate_btn.setToolTip(tr(AUTO_STRAIGHTEN_TOOLTIP, language))
+            panel.auto_straighten_action.setText(tr("Auto Straighten", language))
+            panel.auto_straighten_action.setToolTip(
+                tr("Detect how tilted the bands are and level them", language)
+            )
             panel.select_checkbox.setToolTip(tr("Select this image", language))
             panel.zoom_out_btn.setToolTip(tr("Zoom out image", language))
             panel.zoom_in_btn.setToolTip(tr("Zoom in image", language))
@@ -1799,6 +1804,12 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._set_active_slot_from_interaction(slot_index)
         self._image_panels[slot_index].canvas.reset_zoom()
 
+    def _on_panel_auto_straighten_requested(self, slot_index: int) -> None:
+        if slot_index not in self._loaded_slot_indices():
+            return
+        self._set_active_slot_from_interaction(slot_index)
+        self._on_auto_straighten_requested()
+
     def _on_panel_custom_rotate_requested(self, slot_index: int) -> None:
         if slot_index not in self._loaded_slot_indices():
             return
@@ -2285,6 +2296,12 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             )
             panel.remove_btn.clicked.connect(lambda _, i=idx: self._on_panel_remove_requested(i))
             panel.transform_btn.clicked.connect(lambda _, i=idx: self._on_panel_transform_requested(i))
+            panel.rotate_btn.clicked.connect(
+                lambda _=False, i=idx: self._on_panel_auto_straighten_requested(i)
+            )
+            panel.auto_straighten_action.triggered.connect(
+                lambda _=False, i=idx: self._on_panel_auto_straighten_requested(i)
+            )
             panel.rotate_custom_action.triggered.connect(
                 lambda _=False, i=idx: self._on_panel_custom_rotate_requested(i)
             )

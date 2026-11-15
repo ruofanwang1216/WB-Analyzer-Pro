@@ -25,6 +25,11 @@ from gui.icons import _image_operation_icon, _zoom_icon
 from gui.image_canvas import ImageCanvas
 
 
+AUTO_STRAIGHTEN_TOOLTIP = (
+    "Auto-straighten: level tilted bands in one click (arrow: more rotate options)"
+)
+
+
 class _ElidedLabel(QLabel):
     """Label that shortens text that does not fit with "…" in the middle.
 
@@ -180,7 +185,7 @@ class _ImagePanelWidget(QFrame):
                 max-width: 30px;
                 min-height: 26px;
                 max-height: 26px;
-                padding: 0px;
+                padding: 0px 13px 0px 0px;
                 font-size: 15px;
                 font-weight: 700;
             }}
@@ -189,9 +194,22 @@ class _ImagePanelWidget(QFrame):
                 border-color: #1F6B4A;
                 color: {COLOR_ACCENT_TEXT};
             }}
-            QToolButton#panel_rotate_btn::menu-indicator {{
-                image: none;
-                width: 0px;
+            QToolButton#panel_rotate_btn::menu-button {{
+                subcontrol-origin: border;
+                subcontrol-position: center right;
+                width: 13px;
+                border: none;
+                border-left: 1px solid #C9D3CE;
+                border-top-right-radius: 7px;
+                border-bottom-right-radius: 7px;
+                background: transparent;
+            }}
+            QToolButton#panel_rotate_btn::menu-button:hover {{
+                background-color: #C9D3CE;
+            }}
+            QToolButton#panel_rotate_btn::menu-arrow {{
+                width: 7px;
+                height: 7px;
             }}
             QToolButton#panel_zoom_btn {{
                 background-color: #FFFFFF;
@@ -252,10 +270,19 @@ class _ImagePanelWidget(QFrame):
         self.rotate_btn = QToolButton()
         self.rotate_btn.setObjectName("panel_rotate_btn")
         self.rotate_btn.setText("↻")
-        self.rotate_btn.setToolTip("Rotate Image")
-        self.rotate_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.rotate_btn.setToolTip(AUTO_STRAIGHTEN_TOOLTIP)
+        # Split button: the main part straightens the blot in one click, the
+        # narrow arrow opens the other rotate / flip / undo choices.
+        self.rotate_btn.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self.rotate_menu = QMenu(self.rotate_btn)
         self.rotate_menu.setToolTipsVisible(True)
+        self.auto_straighten_action = self.rotate_menu.addAction(
+            _image_operation_icon("auto-straighten"), "Auto Straighten"
+        )
+        self.auto_straighten_action.setToolTip(
+            "Detect how tilted the bands are and level them"
+        )
+        self.rotate_menu.addSeparator()
         self.flip_horizontal_action = self.rotate_menu.addAction(
             _image_operation_icon("flip-horizontal"), "Horizontal"
         )
@@ -345,6 +372,7 @@ class _ImagePanelWidget(QFrame):
         self.canvas.panel_interacted.emit()
 
     def _refresh_theme_icons(self) -> None:
+        self.auto_straighten_action.setIcon(_image_operation_icon("auto-straighten"))
         self.flip_horizontal_action.setIcon(_image_operation_icon("flip-horizontal"))
         self.flip_vertical_action.setIcon(_image_operation_icon("flip-vertical"))
         self.rotate_custom_action.setIcon(_image_operation_icon("custom-rotate"))
