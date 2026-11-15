@@ -1709,7 +1709,7 @@ _BTN_PRIMARY_STYLE = (
     f"background-color: {COLOR_ACCENT};"
     f"border: 1px solid {COLOR_ACCENT};"
     "border-radius: 8px;"
-    "color: #FFFFFF;"
+    "color: #FEFEFE;"
     "padding: 6px 14px;"
     "font-size: 12px;"
     "font-weight: 600;"
@@ -1729,6 +1729,9 @@ _SIZE_SPIN_STYLE = (
     "min-width: 34px;"
     "max-width: 46px;"
     "}"
+    # A plain number pill: type, scroll or use the arrow keys to change it.
+    "QSpinBox::up-button { subcontrol-origin: border; width: 0px; }"
+    "QSpinBox::down-button { subcontrol-origin: border; width: 0px; }"
 )
 
 
@@ -2103,6 +2106,15 @@ class ColumnTableWindow(QMainWindow):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.clicked.connect(lambda: self.panelFocusRequested.emit("figure"))
+        # The well matches the image well; the figure page itself stays white
+        # because that page is exactly what gets exported.
+        scroll.setObjectName("figure_preview_well")
+        scroll.setFrameShape(scroll.Shape.NoFrame)
+        scroll.setStyleSheet(
+            "QScrollArea#figure_preview_well {"
+            f" background-color: {theming.WELL_SOURCE}; border: none; border-radius: 12px; }}"
+        )
+        scroll.viewport().setStyleSheet("background: transparent;")
         plot = _PrismBarPlotWidget(
             group_names=[self._display_group_name(name) for name in self._group_names],
             grouped_values=grouped_values,

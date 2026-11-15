@@ -1,16 +1,19 @@
-"""Light / dark theme switch for the whole application.
+"""Light / dark "Mist teal glass" themes for the whole application.
 
-The interface is styled by many small Qt stylesheets written against the
-light (green) palette.  Rather than maintain a second copy of every sheet,
-the dark theme is derived: each colour that appears in a stylesheet is
-translated to its dark counterpart just before Qt receives it.
+The interface is styled by many small Qt stylesheets written against one
+source palette (the original light green one in ``config.settings``).  Rather
+than maintain a copy of every sheet per theme, both themes are derived: each
+colour that appears in a stylesheet is translated to its themed counterpart
+just before Qt receives it, and corner radii are enlarged to the glass shapes.
 
 * ``install()`` wraps ``QWidget.setStyleSheet`` so every sheet is recorded in
-  its original (light) form and applied in the form of the active theme.
+  its source form and applied in the form of the active theme.
 * ``set_theme()`` re-applies every recorded sheet, the application sheet and
   the palette, then tells registered listeners to repaint anything they draw
   by hand.
-* ``color()`` gives painters the themed version of a light-palette colour.
+* ``color()`` gives painters the themed version of a source-palette colour.
+* ``mark_backdrop()`` makes a grouping container see-through so the window
+  gradient shows between the cards.
 
 Content that must look the same in both themes (blot images, the figure
 preview page, plots and every export) is painted with plain ``QColor`` and is
@@ -21,6 +24,7 @@ from __future__ import annotations
 import colorsys
 import re
 import weakref
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Callable
 
@@ -35,67 +39,208 @@ THEMES = (THEME_LIGHT, THEME_DARK)
 _CSS_PROP = "_theme_css"
 _STATIC_PROP = "_theme_static"
 
-# Dark palette (graphite with a muted "Morandi" blue accent).
-DARK_BG = "#161618"
-DARK_PANEL = "#242426"
-DARK_CONTROL = "#2C2C2E"
-DARK_INSET = "#1C1C1E"
-DARK_SELECTED = "#3A3A3C"
-DARK_BORDER = "#3F3F42"
-DARK_TEXT = "#F5F5F7"
-DARK_TEXT_MUTED = "#D1D1D6"
-DARK_TEXT_HINT = "#A1A1A6"
-DARK_ACCENT = "#8FA6BA"
-DARK_ACCENT_TEXT = "#A9BDCE"
-DARK_ON_ACCENT = "#1C1C1E"
+# Both themes are the "Mist teal glass" look: a soft teal gradient behind
+# frosted cards.  Qt cannot blur what is behind a widget, so each glass layer
+# is the colour that layer has once it is composited over the backdrop.
+ON_ACCENT_SOURCE = "#FEFEFE"   # write this for text / icons on accent fills
+WELL_SOURCE = "#EEF2EF"        # write this for the well behind an image or figure
 
-# Light colour -> dark colour for the tokens that define the look.
-_EXPLICIT: dict[str, str] = {
-    "#E7ECE9": DARK_BG,           # window background
-    "#FFFFFF": DARK_PANEL,        # surfaces (and text on accent buttons)
-    "#F3F6F5": DARK_PANEL,        # toolbar
-    "#F3F5F4": DARK_CONTROL,      # table / section headers
-    "#F7F9F8": "#29292B",         # alternate rows
-    "#F7FAF8": "#29292B",
-    "#F5F8F6": "#29292B",
-    "#C9D3CE": DARK_BORDER,       # borders
-    "#E4E9E6": "#323235",         # light borders
-    "#D9E0DC": "#38383B",
-    "#D3DDD8": "#3A3A3D",
-    "#1C2622": DARK_TEXT,
-    "#3B4A43": DARK_TEXT_MUTED,
-    "#4A5A53": "#C4C4C9",
-    "#5A6B63": DARK_TEXT_HINT,
-    "#9AA8A1": "#77777D",
-    "#1F6B4A": DARK_ACCENT,       # accent
-    "#1B6B4D": DARK_ACCENT,
-    "#134A32": DARK_ACCENT_TEXT,  # accent text / pressed accent
-    "#E3EFE8": "#343C44",         # accent tint (hover / selected)
-    "#8AAEC4": "#4F6F8C",         # band ROI stroke
-}
+
+@dataclass(frozen=True)
+class _Spec:
+    name: str
+    dark: bool
+    explicit: dict
+    curve: tuple          # source lightness -> themed lightness (neutrals)
+    grey_hue: float
+    grey_saturation: float
+    accent_hue: float
+    accent_saturation_cap: float
+    tint_saturation_cap: float
+    solid_saturation_cap: float
+    backdrop: str         # the window gradient (Qt stylesheet value)
+    bg: str
+    panel: str
+    control: str
+    inset: str
+    selected: str
+    border: str
+    text: str
+    text_muted: str
+    text_hint: str
+    text_disabled: str
+    accent: str
+    accent_text: str
+    on_accent: str
+
+
+def _spec(name: str, dark: bool, tokens: dict, **kwargs) -> _Spec:
+    t = tokens
+    explicit = {
+        "#E7ECE9": t["bg"],            # window background
+        "#FFFFFF": t["panel"],         # surfaces
+        ON_ACCENT_SOURCE: t["on_accent"],
+        "#F3F6F5": t["panel"],         # toolbar
+        "#F3F5F4": t["header"],        # table / section headers
+        "#F7F9F8": t["alt"],           # alternate rows
+        "#F7FAF8": t["alt"],
+        "#F5F8F6": t["alt"],
+        "#E9EEEB": t["inset"],         # segmented-control track, disabled fill
+        WELL_SOURCE: t["well"],        # image / figure wells inside a card
+        "#C9D3CE": t["border"],        # borders
+        "#E4E9E6": t["border_light"],  # light borders
+        "#D9E0DC": t["border_card"],
+        "#D3DDD8": t["border_card"],
+        "#B5C2BC": t["border_dash"],
+        "#1C2622": t["text"],
+        "#3B4A43": t["text_muted"],
+        "#4A5A53": t["text_muted2"],
+        "#5A6B63": t["text_hint"],
+        "#9AA8A1": t["text_disabled"],
+        "#8A9891": t["text_disabled"],
+        "#1F6B4A": t["accent"],        # accent
+        "#1B6B4D": t["accent"],
+        "#134A32": t["accent_text"],   # accent text / pressed accent
+        "#E3EFE8": t["selected"],      # accent tint (hover / selected)
+        "#9DBBAD": t["accent_disabled"],
+        "#8AAEC4": t["band_roi"],      # band ROI stroke
+    }
+    fields = {k: t[k] for k in (
+        "bg", "panel", "control", "inset", "selected", "border", "text",
+        "text_muted", "text_hint", "text_disabled", "accent", "accent_text",
+        "on_accent",
+    )}
+    return _Spec(name=name, dark=dark, explicit=explicit, **fields, **kwargs)
+
+
+_LIGHT = _spec(
+    THEME_LIGHT,
+    False,
+    {
+        "bg": "#B9CCCC",
+        "panel": "#DCE6E6",
+        "control": "#EDF3F3",
+        "inset": "#CEDBDB",
+        "well": "#E8EFEF",
+        "header": "#E8EEEE",
+        "alt": "#E3EBEB",
+        "selected": "#C5D5D5",
+        "border": "#F6FAFA",
+        "border_light": "#EAF1F1",
+        "border_card": "#F1F6F6",
+        "border_dash": "#9FB3B4",
+        "text": "#232724",
+        "text_muted": "#424543",
+        "text_muted2": "#4E5856",
+        "text_hint": "#667373",
+        "text_disabled": "#9AA9A9",
+        "accent": "#5B8182",
+        "accent_text": "#405A5B",
+        "accent_disabled": "#A9BEBE",
+        "on_accent": "#FFFFFF",
+        "band_roi": "#7C92B0",
+    },
+    curve=(
+        (0.00, 0.00),
+        (0.55, 0.55),
+        (0.80, 0.74),
+        (0.90, 0.81),
+        (0.95, 0.85),
+        (1.00, 0.88),
+    ),
+    grey_hue=180 / 360,
+    grey_saturation=0.14,
+    accent_hue=181 / 360,
+    accent_saturation_cap=0.24,
+    tint_saturation_cap=0.45,
+    solid_saturation_cap=0.60,
+    backdrop=(
+        "qlineargradient(x1:0, y1:0, x2:0.35, y2:1, "
+        "stop:0 #B4CACA, stop:0.48 #A7BCBE, stop:1 #D8E4E3)"
+    ),
+)
+
+_DARK = _spec(
+    THEME_DARK,
+    True,
+    {
+        "bg": "#3E4446",
+        "panel": "#50575A",
+        "control": "#5F6669",
+        "inset": "#444A4C",
+        "well": "#3F4547",
+        "header": "#474D50",
+        "alt": "#4B5255",
+        "selected": "#647173",
+        "border": "#757C7E",
+        "border_light": "#5E6568",
+        "border_card": "#676E70",
+        "border_dash": "#899294",
+        "text": "#F4F2F1",
+        "text_muted": "#D9D5D3",
+        "text_muted2": "#CDD3D3",
+        "text_hint": "#B4C6C8",
+        "text_disabled": "#8B9496",
+        "accent": "#99B1B2",
+        "accent_text": "#CBD7D7",
+        "accent_disabled": "#6E7B7C",
+        "on_accent": "#1B1B19",
+        "band_roi": "#AAB5CB",
+    },
+    curve=(
+        (0.00, 0.95),
+        (0.13, 0.94),
+        (0.30, 0.84),
+        (0.45, 0.74),
+        (0.60, 0.60),
+        (0.80, 0.46),
+        (0.90, 0.39),
+        (0.95, 0.355),
+        (1.00, 0.335),
+    ),
+    grey_hue=192 / 360,
+    grey_saturation=0.06,
+    accent_hue=182 / 360,
+    accent_saturation_cap=0.16,
+    tint_saturation_cap=0.24,
+    solid_saturation_cap=0.45,
+    backdrop=(
+        "qlineargradient(x1:0, y1:0, x2:0.35, y2:1, "
+        "stop:0 #535C5D, stop:0.48 #333739, stop:1 #515556)"
+    ),
+)
+
+_SPECS = {THEME_LIGHT: _LIGHT, THEME_DARK: _DARK}
+
+# Kept for callers that want the dark tokens directly.
+DARK_BG = _DARK.bg
+DARK_PANEL = _DARK.panel
+DARK_CONTROL = _DARK.control
+DARK_INSET = _DARK.inset
+DARK_SELECTED = _DARK.selected
+DARK_BORDER = _DARK.border
+DARK_TEXT = _DARK.text
+DARK_TEXT_MUTED = _DARK.text_muted
+DARK_TEXT_HINT = _DARK.text_hint
+DARK_ACCENT = _DARK.accent
+DARK_ACCENT_TEXT = _DARK.accent_text
+DARK_ON_ACCENT = _DARK.on_accent
 
 _HEX_RE = re.compile(r"#([0-9A-Fa-f]{6})\b")
 _RGBA_RE = re.compile(
     r"rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(,\s*[0-9.]+\s*)?\)"
 )
+_RADIUS_RE = re.compile(r"(?<![-\w])border-radius:\s*(\d+)px(?!;?\s*/\* exact)")
 
-# Lightness of a light-theme colour -> lightness of its dark counterpart.
-_LIGHTNESS_CURVE = (
-    (0.00, 0.98),
-    (0.13, 0.95),
-    (0.30, 0.80),
-    (0.45, 0.64),
-    (0.60, 0.46),
-    (0.80, 0.27),
-    (0.90, 0.21),
-    (0.95, 0.17),
-    (1.00, 0.145),
-)
+# Object name of the window that paints the gradient backdrop.
+WINDOW_NAME = "wb_main_window"
+
+# Marks a container that only groups cards, so the backdrop shows through.
+BACKDROP_PROP = "glassBackdrop"
 
 _theme = THEME_LIGHT
 _installed = False
 _app_css: str | None = None
-_light_palette: QPalette | None = None
 _listeners: list = []
 _reverse: dict[tuple[int, int, int], tuple[int, int, int]] = {}
 _orig_set_style_sheet = QWidget.setStyleSheet
@@ -110,8 +255,12 @@ def is_dark() -> bool:
     return _theme == THEME_DARK
 
 
-def _curve(lightness: float) -> float:
-    points = _LIGHTNESS_CURVE
+def spec(theme: str | None = None) -> _Spec:
+    """Return the colour tokens of *theme* (the active theme by default)."""
+    return _SPECS.get(theme or _theme, _LIGHT)
+
+
+def _curve(points: tuple, lightness: float) -> float:
     for (x0, y0), (x1, y1) in zip(points, points[1:]):
         if lightness <= x1:
             span = (x1 - x0) or 1.0
@@ -119,70 +268,145 @@ def _curve(lightness: float) -> float:
     return points[-1][1]
 
 
-@lru_cache(maxsize=1024)
-def _dark_rgb(r: int, g: int, b: int) -> tuple[int, int, int]:
+@lru_cache(maxsize=4096)
+def _themed_rgb(theme: str, r: int, g: int, b: int) -> tuple[int, int, int]:
+    sp = _SPECS[theme]
     key = f"#{r:02X}{g:02X}{b:02X}"
-    mapped = _EXPLICIT.get(key)
+    mapped = sp.explicit.get(key)
     if mapped is not None:
         return int(mapped[1:3], 16), int(mapped[3:5], 16), int(mapped[5:7], 16)
 
     hue, lightness, saturation = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
-    new_lightness = _curve(lightness)
+    new_lightness = _curve(sp.curve, lightness)
     degrees = hue * 360.0
     if saturation < 0.16:
-        # Grey (usually with a green cast in the light theme) -> graphite.
-        hue, saturation = 240 / 360, 0.03
+        # Grey (with a green cast in the source palette) -> teal-grey.
+        hue = sp.grey_hue
+        saturation = sp.grey_saturation if 0.12 < lightness < 0.97 else 0.04
     elif 95.0 <= degrees <= 185.0:
-        # The green family becomes the muted blue accent family.
-        hue = 208 / 360
-        saturation = min(saturation * 0.6, 0.30)
+        # The green family becomes the muted teal accent family.
+        hue = sp.accent_hue
+        saturation = min(saturation * 0.6, sp.accent_saturation_cap)
         if lightness < 0.5:
-            new_lightness = min(new_lightness, 0.74)
+            if sp.dark:
+                new_lightness = min(new_lightness, 0.74)
+            else:
+                new_lightness = min(0.5, lightness + 0.12)
     else:
-        # Pale tints stay quiet on the dark surface; solid colours keep more.
-        saturation = min(saturation * 0.6, 0.28 if lightness > 0.75 else 0.5)
+        # Pale tints stay quiet on the surface; solid colours keep more.
+        cap = sp.tint_saturation_cap if lightness > 0.75 else sp.solid_saturation_cap
+        saturation = min(saturation * (0.6 if sp.dark else 0.8), cap)
     nr, ng, nb = colorsys.hls_to_rgb(hue, new_lightness, saturation)
     return round(nr * 255), round(ng * 255), round(nb * 255)
 
 
 def translate_hex(value: str) -> str:
-    """Return the active-theme version of a ``#RRGGBB`` light-theme colour."""
-    if _theme != THEME_DARK:
-        return value
-    r, g, b = _dark_rgb(int(value[1:3], 16), int(value[3:5], 16), int(value[5:7], 16))
+    """Return the active-theme version of a ``#RRGGBB`` source colour."""
+    r, g, b = _themed_rgb(
+        _theme, int(value[1:3], 16), int(value[3:5], 16), int(value[5:7], 16)
+    )
     return f"#{r:02X}{g:02X}{b:02X}"
 
 
+def _radius(match: re.Match) -> str:
+    # Glass shapes: pill-like controls, generously rounded cards.  Qt drops
+    # a radius larger than half the widget, so the values stay within the
+    # smallest controls that use each source radius (22 px and 26 px tall).
+    # Write "border-radius: 8px /* exact */" to opt a rule out.
+    value = int(match.group(1))
+    if 5 <= value <= 7:
+        value = 11
+    elif value == 8:
+        value = 13
+    elif 9 <= value <= 15:
+        value = 18
+    return f"border-radius: {value}px"
+
+
+@lru_cache(maxsize=4096)
 def _css_for(theme: str, css: str) -> str:
-    if theme != THEME_DARK or not css:
+    if not css:
         return css
 
     def _hex(match: re.Match) -> str:
         text = match.group(1)
-        r, g, b = _dark_rgb(int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16))
+        r, g, b = _themed_rgb(
+            theme, int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16)
+        )
         return f"#{r:02X}{g:02X}{b:02X}"
 
     def _rgba(match: re.Match) -> str:
-        r, g, b = _dark_rgb(*(min(255, int(match.group(i))) for i in (1, 2, 3)))
+        r, g, b = _themed_rgb(
+            theme, *(min(255, int(match.group(i))) for i in (1, 2, 3))
+        )
         alpha = match.group(4)
         if alpha:
             return f"rgba({r}, {g}, {b}{alpha})"
         return f"rgb({r}, {g}, {b})"
 
-    return _RGBA_RE.sub(_rgba, _HEX_RE.sub(_hex, css))
+    themed = _RGBA_RE.sub(_rgba, _HEX_RE.sub(_hex, css))
+    themed = _RADIUS_RE.sub(_radius, themed)
+    if _CHEVRON_TOKEN in themed:
+        themed = themed.replace(_CHEVRON_TOKEN, f"url({_chevron_path(theme)})")
+    return themed
+
+
+_CHEVRON_TOKEN = "url(theme:chevron-down)"
+
+
+def _chevron_path(theme: str) -> str:
+    """A small down-chevron image in the theme's text colour (made once)."""
+    import tempfile
+    from pathlib import Path
+
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QImage, QPainter, QPen
+
+    folder = Path(tempfile.gettempdir()) / "wb_analyzer_pro_theme"
+    path = folder / f"chevron-down-{theme}.png"
+    if not path.exists():
+        folder.mkdir(parents=True, exist_ok=True)
+        image = QImage(44, 44, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        pen = QPen(QColor(_SPECS[theme].text_muted), 5.0)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.drawPolyline([QPointF(10, 16), QPointF(22, 28), QPointF(34, 16)])
+        painter.end()
+        image.save(str(path))
+    return path.as_posix()
+
+
+def _app_css_for(theme: str, css: str) -> str:
+    sp = _SPECS[theme]
+    return _css_for(theme, css) + f"""
+QMainWindow#{WINDOW_NAME} {{ background: {sp.backdrop}; }}
+QWidget[{BACKDROP_PROP}="true"] {{ background: transparent; }}
+"""
 
 
 def translate_css(css: str) -> str:
-    """Return *css* (written for the light theme) in the active theme."""
+    """Return *css* (written in the source palette) in the active theme."""
     return _css_for(_theme, css)
 
 
+def mark_backdrop(*widgets: QWidget) -> None:
+    """Let the window backdrop show through container *widgets*."""
+    for widget in widgets:
+        widget.setProperty(BACKDROP_PROP, True)
+        # A property set after the first polish needs the rules re-evaluated.
+        style = widget.style()
+        style.unpolish(widget)
+        style.polish(widget)
+
+
 def color(value) -> QColor:
-    """Return the active-theme ``QColor`` for a light-theme colour."""
+    """Return the active-theme ``QColor`` for a source-palette colour."""
     source = QColor(value)
-    if _theme != THEME_DARK:
-        return source
-    r, g, b = _dark_rgb(source.red(), source.green(), source.blue())
+    r, g, b = _themed_rgb(_theme, source.red(), source.green(), source.blue())
     _reverse[(r, g, b)] = (source.red(), source.green(), source.blue())
     themed = QColor(r, g, b)
     themed.setAlpha(source.alpha())
@@ -192,8 +416,8 @@ def color(value) -> QColor:
 def retint_items(table) -> None:
     """Re-colour the item backgrounds / foregrounds of a table for the theme.
 
-    Items coloured through ``color()`` are found again by value: going dark
-    translates them, going light looks the original colour back up.
+    Items coloured through ``color()`` are found again by value: the source
+    colour is looked back up and translated for the theme that is now active.
     """
     from PySide6.QtGui import QBrush
 
@@ -204,15 +428,13 @@ def retint_items(table) -> None:
         if isinstance(brush, QBrush) and brush.style() == Qt.BrushStyle.NoBrush:
             return None
         key = (source.red(), source.green(), source.blue())
-        if _theme == THEME_DARK:
-            if key in _reverse:
-                return None  # already dark
-            return color(source)
-        light = _reverse.get(key)
-        if light is None:
-            return None
-        themed = QColor(*light)
+        original = _reverse.get(key)
+        if original is None:
+            return None  # never themed: leave it alone
+        themed = color(QColor(*original))
         themed.setAlpha(source.alpha())
+        if themed == source:
+            return None
         return themed
 
     roles = (Qt.ItemDataRole.BackgroundRole, Qt.ItemDataRole.ForegroundRole)
@@ -256,7 +478,7 @@ def _themed_style_sheet(self: QWidget) -> str:
 
 def install(app_stylesheet: str | None = None) -> None:
     """Start routing widget stylesheets through the theme (idempotent)."""
-    global _installed, _app_css, _light_palette
+    global _installed, _app_css
     app = QApplication.instance()
     if not _installed:
         QWidget.setStyleSheet = _themed_set_style_sheet
@@ -264,11 +486,10 @@ def install(app_stylesheet: str | None = None) -> None:
         _installed = True
     if app is None:
         return
-    if _light_palette is None:
-        _light_palette = QPalette(app.palette())
     if app_stylesheet is not None:
         _app_css = app_stylesheet
-        app.setStyleSheet(_css_for(_theme, app_stylesheet))
+        app.setStyleSheet(_app_css_for(_theme, app_stylesheet))
+        app.setPalette(_palette(_theme))
 
 
 def on_change(callback: Callable[[], None]) -> None:
@@ -280,34 +501,35 @@ def on_change(callback: Callable[[], None]) -> None:
     _listeners.append(ref)
 
 
-def _dark_palette() -> QPalette:
+def _palette(theme: str) -> QPalette:
+    sp = _SPECS[theme]
     palette = QPalette()
     roles = QPalette.ColorRole
     pairs = {
-        roles.Window: DARK_BG,
-        roles.WindowText: DARK_TEXT,
-        roles.Base: DARK_PANEL,
-        roles.AlternateBase: "#29292B",
-        roles.Text: DARK_TEXT,
-        roles.Button: DARK_CONTROL,
-        roles.ButtonText: DARK_TEXT,
-        roles.ToolTipBase: DARK_SELECTED,
-        roles.ToolTipText: DARK_TEXT,
-        roles.Highlight: DARK_ACCENT,
-        roles.HighlightedText: DARK_ON_ACCENT,
-        roles.PlaceholderText: "#77777D",
-        roles.Link: DARK_ACCENT_TEXT,
-        roles.Light: "#48484A",
-        roles.Midlight: DARK_SELECTED,
-        roles.Mid: DARK_BORDER,
-        roles.Dark: DARK_INSET,
-        roles.Shadow: "#000000",
+        roles.Window: sp.bg,
+        roles.WindowText: sp.text,
+        roles.Base: sp.panel,
+        roles.AlternateBase: sp.explicit["#F7F9F8"],
+        roles.Text: sp.text,
+        roles.Button: sp.control,
+        roles.ButtonText: sp.text,
+        roles.ToolTipBase: sp.selected,
+        roles.ToolTipText: sp.text,
+        roles.Highlight: sp.accent,
+        roles.HighlightedText: sp.on_accent,
+        roles.PlaceholderText: sp.text_disabled,
+        roles.Link: sp.accent_text,
+        roles.Light: sp.control,
+        roles.Midlight: sp.selected,
+        roles.Mid: sp.border,
+        roles.Dark: sp.inset,
+        roles.Shadow: "#000000" if sp.dark else "#3B5454",
     }
     for role, value in pairs.items():
         palette.setColor(role, QColor(value))
     disabled = QPalette.ColorGroup.Disabled
     for role in (roles.WindowText, roles.Text, roles.ButtonText):
-        palette.setColor(disabled, role, QColor("#6C6C70"))
+        palette.setColor(disabled, role, QColor(sp.text_disabled))
     return palette
 
 
@@ -330,12 +552,9 @@ def set_theme(theme: str) -> str:
             )
         except Exception:
             pass
-    if theme == THEME_DARK:
-        app.setPalette(_dark_palette())
-    elif _light_palette is not None:
-        app.setPalette(_light_palette)
+    app.setPalette(_palette(theme))
     if _app_css is not None:
-        app.setStyleSheet(_css_for(theme, _app_css))
+        app.setStyleSheet(_app_css_for(theme, _app_css))
 
     for widget in app.allWidgets():
         try:

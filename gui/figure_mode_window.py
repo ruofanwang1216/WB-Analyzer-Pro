@@ -298,10 +298,18 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         canvas_vbox = QVBoxLayout(canvas_card)
         canvas_vbox.setContentsMargins(1, 1, 1, 1)
         canvas_vbox.setSpacing(0)
+        # The white page sits inside the card with a margin, like the image well.
+        canvas_scroll.setContentsMargins(0, 0, 0, 0)
+        page_holder = QWidget()
+        page_holder.setObjectName("figurePageHolder")
+        page_holder.setStyleSheet("QWidget#figurePageHolder { background: transparent; }")
+        page_holder_box = QVBoxLayout(page_holder)
+        page_holder_box.setContentsMargins(2, 0, 2, 2)
+        page_holder_box.addWidget(canvas_scroll)
         # The bar carries the annotation tools; building it also creates
         # the save panel that is placed on the last step page below.
         canvas_vbox.addWidget(self._build_canvas_toolbar())
-        canvas_vbox.addWidget(canvas_scroll, 1)
+        canvas_vbox.addWidget(page_holder, 1)
         root.addWidget(canvas_card, 1)
 
         # ── Right: fixed-width panel, all three stages on one screen ──────
@@ -368,9 +376,8 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             heading.setObjectName("workflowStepHeading")
             heading.setFixedHeight(26)
             heading.setStyleSheet(
-                "QLabel#workflowStepHeading { background:#DDE8E2; color:#134A32; "
-                "font-size:12px; font-weight:600; border-radius:6px; "
-                "padding:0px 8px; }"
+                "QLabel#workflowStepHeading { background:transparent; color:#1C2622; "
+                "font-size:13px; font-weight:700; padding:0px 2px; }"
             )
             section_layout.addWidget(heading)
             for widget in widgets:

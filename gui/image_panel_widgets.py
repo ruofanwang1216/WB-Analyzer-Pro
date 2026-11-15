@@ -121,7 +121,7 @@ class _ImagePanelWidget(QFrame):
                 background-color: #1F6B4A;
                 border: 1px solid #1F6B4A;
                 border-radius: 7px;
-                color: #FFFFFF;
+                color: #FEFEFE;
                 font-size: 12px;
                 font-weight: 600;
                 padding: 0px 14px;
@@ -369,7 +369,7 @@ class _UploadedFileListRow(QWidget):
             QPushButton#uploaded_file_remove_btn {
                 background-color: #FFFFFF;
                 border: 1px solid #AFC1CC;
-                border-radius: 7px;
+                border-radius: 9px; /* exact */
                 color: #6D7F8B;
                 min-width: 18px;
                 max-width: 18px;

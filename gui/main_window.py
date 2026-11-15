@@ -292,71 +292,79 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
     # ── UI construction ────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
+        self.setObjectName(theming.WINDOW_NAME)
         # ── Top bar: Import · workspace tabs · tutorial · language ────────────
         tb = QToolBar("Main", self)
         tb.setMovable(False)
         tb.setFloatable(False)
         tb.setStyleSheet(f"""
             QToolBar {{
-                background-color: {COLOR_SURFACE};
+                background: transparent;
                 border: none;
-                border-bottom: 1px solid #D9E0DC;
-                spacing: 10px;
-                padding: 8px 12px;
             }}
             QToolButton#tb_open_btn {{
-                background-color: {COLOR_ACCENT};
-                border: 1px solid {COLOR_ACCENT};
-                border-radius: 8px;
-                color: #FFFFFF;
-                padding: 8px 16px;
+                background-color: {COLOR_TEXT};
+                border: 1px solid {COLOR_TEXT};
+                border-radius: 17px; /* exact */
+                color: #FEFEFE;
+                padding: 0px 20px;
                 font-size: 14px;
                 font-weight: 600;
             }}
             QToolButton#tb_open_btn:hover {{
-                background-color: {COLOR_ACCENT_DARK};
+                background-color: #3B4A43;
+                border-color: #3B4A43;
             }}
             QToolButton#tb_open_btn:disabled {{
-                background-color: #9DBBAD;
-                border-color: #9DBBAD;
+                background-color: #9AA8A1;
+                border-color: #9AA8A1;
             }}
             QFrame#section2_group {{
                 background-color: #E9EEEB;
-                border: none;
-                border-radius: 10px;
+                border: 1px solid {COLOR_BORDER};
+                border-radius: 18px; /* exact */
             }}
             QPushButton#figure_generation_btn, QPushButton#wb_plot_generation_btn {{
                 background-color: transparent;
-                border: 1px solid transparent;
-                border-radius: 7px;
+                border: none;
+                border-radius: 14px; /* exact */
                 color: #3B4A43;
-                padding: 7px 16px;
-                font-size: 14px;
+                padding: 0px 16px;
+                font-size: 13px;
             }}
             QPushButton#figure_generation_btn:hover, QPushButton#wb_plot_generation_btn:hover {{
                 background-color: rgba(255, 255, 255, 0.6);
             }}
             QPushButton#figure_generation_btn:checked, QPushButton#wb_plot_generation_btn:checked {{
-                background-color: {COLOR_SURFACE};
-                border-color: {COLOR_BORDER};
-                color: {COLOR_ACCENT_TEXT};
+                background-color: {COLOR_ACCENT};
+                color: #FEFEFE;
                 font-weight: 600;
             }}
             QComboBox#language_selector {{
                 background-color: {COLOR_SURFACE};
                 border: 1px solid {COLOR_BORDER};
-                border-radius: 8px;
+                border-radius: 15px; /* exact */
                 color: #3B4A43;
-                padding: 7px 10px;
-                min-width: 92px;
+                padding: 0px 12px;
+                min-width: 80px;
                 font-size: 13px;
+            }}
+            QComboBox#language_selector::drop-down {{
+                border: none;
+                width: 24px;
+            }}
+            QComboBox#language_selector::down-arrow {{
+                image: url(theme:chevron-down);
+                width: 11px;
+                height: 11px;
+                margin-right: 8px;
             }}
             QPushButton#tutorial_btn {{
                 background-color: {COLOR_SURFACE};
                 border: 1px solid {COLOR_BORDER};
-                border-radius: 8px;
+                border-radius: 15px; /* exact */
                 color: #3B4A43;
-                padding: 7px 14px;
+                padding: 0px 14px;
                 font-size: 13px;
             }}
             QPushButton#tutorial_btn:hover {{
@@ -366,7 +374,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             QToolBar QToolButton#theme_toggle_btn {{
                 background-color: {COLOR_SURFACE};
                 border: 1px solid {COLOR_BORDER};
-                border-radius: 8px;
+                border-radius: 15px; /* exact */
                 padding: 0px;
             }}
             QToolBar QToolButton#theme_toggle_btn:hover {{
@@ -397,6 +405,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         open_btn = _make_action_button(self._act_open, "tb_open_btn")
         self._open_toolbar_btn = open_btn
         open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_btn.setFixedHeight(34)
         self._open_toolbar_action = tb.addWidget(open_btn)
 
         # The two workspaces as a segmented control.  The attribute names are
@@ -405,16 +414,19 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._workspace_toolbar_group.setObjectName("section2_group")
         workspace_layout = QHBoxLayout(self._workspace_toolbar_group)
         workspace_layout.setContentsMargins(4, 4, 4, 4)
-        workspace_layout.setSpacing(4)
+        workspace_layout.setSpacing(2)
+        self._workspace_toolbar_group.setFixedHeight(36)
         self._figure_generation_btn = QPushButton("① Quantify && Plot")
         self._figure_generation_btn.setObjectName("figure_generation_btn")
         self._figure_generation_btn.setCheckable(True)
+        self._figure_generation_btn.setFixedHeight(28)
         self._figure_generation_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._figure_generation_btn.clicked.connect(self._on_figure_generation_clicked)
         workspace_layout.addWidget(self._figure_generation_btn)
         self._wb_plot_generation_btn = QPushButton("② Figure Layout")
         self._wb_plot_generation_btn.setObjectName("wb_plot_generation_btn")
         self._wb_plot_generation_btn.setCheckable(True)
+        self._wb_plot_generation_btn.setFixedHeight(28)
         self._wb_plot_generation_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._wb_plot_generation_btn.clicked.connect(self._on_wb_plot_mode)
         workspace_layout.addWidget(self._wb_plot_generation_btn)
@@ -432,17 +444,19 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._theme_toggle_btn.setObjectName("theme_toggle_btn")
         self._theme_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._theme_toggle_btn.setIconSize(QSize(20, 20))
-        self._theme_toggle_btn.setFixedSize(34, 34)
+        self._theme_toggle_btn.setFixedSize(30, 30)
         self._theme_toggle_btn.clicked.connect(self._toggle_theme)
         self._theme_toolbar_action = tb.addWidget(self._theme_toggle_btn)
         self._refresh_theme_toggle()
 
         self._tutorial_btn = QPushButton("New User Tutorial")
         self._tutorial_btn.setObjectName("tutorial_btn")
+        self._tutorial_btn.setFixedHeight(30)
         self._tutorial_toolbar_action = tb.addWidget(self._tutorial_btn)
 
         self._language_combo = QComboBox()
         self._language_combo.setObjectName("language_selector")
+        self._language_combo.setFixedHeight(30)
         self._language_combo.addItem("English", LANG_EN)
         self._language_combo.addItem("中文", LANG_ZH_CN)
         self._language_combo.setToolTip("Language")
@@ -684,21 +698,23 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
 
         self._figure_table_host = QWidget()
         self._figure_table_host.setObjectName("workspace_table_panel")
+        self._figure_table_host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._figure_table_host_layout = QVBoxLayout(self._figure_table_host)
         self._figure_table_host_layout.setContentsMargins(0, 0, 0, 0)
         self._figure_table_host_layout.setSpacing(0)
         self._figure_table_placeholder = QLabel("Figure Generation table will appear here.")
-        self._figure_table_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px; padding: 10px;")
+        self._figure_table_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px; padding: 10px; background: transparent;")
         self._figure_table_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._figure_table_host_layout.addWidget(self._figure_table_placeholder)
 
         self._figure_preview_host = QWidget()
         self._figure_preview_host.setObjectName("workspace_figure_panel")
+        self._figure_preview_host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._figure_preview_host_layout = QVBoxLayout(self._figure_preview_host)
         self._figure_preview_host_layout.setContentsMargins(0, 0, 0, 0)
         self._figure_preview_host_layout.setSpacing(0)
         self._figure_preview_placeholder = QLabel("Generated figure preview will appear here.")
-        self._figure_preview_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px; padding: 10px;")
+        self._figure_preview_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px; padding: 10px; background: transparent;")
         self._figure_preview_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._figure_preview_host_layout.addWidget(self._figure_preview_placeholder)
 
@@ -720,7 +736,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._wb_plot_workspace_layout.setContentsMargins(0, 0, 0, 0)
         self._wb_plot_workspace_layout.setSpacing(0)
         self._wb_plot_placeholder = QLabel("WB Plot Figure Generation will appear here.")
-        self._wb_plot_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px; padding: 10px;")
+        self._wb_plot_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px; padding: 10px; background: transparent;")
         self._wb_plot_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._wb_plot_workspace_layout.addWidget(self._wb_plot_placeholder)
 
@@ -750,6 +766,23 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._mode_container.addWidget(self._main_splitter)
         self._mode_container.setCurrentWidget(self._main_splitter)
         self.setCentralWidget(self._mode_container)
+        # Containers that only group cards let the window gradient through.
+        theming.mark_backdrop(
+            self._mode_container,
+            self._main_splitter,
+            self._files_panel,
+            self._workspace_splitter,
+            self._center_splitter,
+            self._viewer_column,
+            self._viewer_container,
+            self._results_dock,
+            self._figure_workspace,
+            self._figure_right_splitter,
+            self._figure_workspace_stack,
+            self._densitometry_figure_page,
+            self._wb_plot_workspace_host,
+            stretch,
+        )
         self.setAcceptDrops(True)
 
         # Home: sidebar with the file list, empty-state canvas, no analysis
@@ -890,6 +923,18 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             self._set_files_panel_collapsed(collapsed, persist=False)
         self._sync_param_panel_visibility()
 
+    def _refresh_empty_state_text(self) -> None:
+        language = getattr(self, "_language", LANG_EN)
+        heading_color = theming.translate_hex(COLOR_TEXT)
+        self._empty_state.setText(
+            f"<div style='font-size:16px; font-weight:600; color:{heading_color};'>"
+            + tr("Drop .scn or .tif files here, or click Import Images", language)
+            + "</div><br>"
+            + tr("1. Import images", language) + "<br>"
+            + tr("2. Draw the lanes and the band", language) + "<br>"
+            + tr("3. Analyze — the table and bar chart fill in automatically", language)
+        )
+
     def _refresh_theme_toggle(self) -> None:
         dark = self._theme == theming.THEME_DARK
         language = getattr(self, "_language", LANG_EN)
@@ -909,6 +954,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._theme = theming.set_theme(theme)
         self._act_open.setIcon(_folder_open_icon())
         self._refresh_theme_toggle()
+        self._refresh_empty_state_text()
         if persist:
             self._persistence.remember_ui_state(theme=self._theme)
 
@@ -935,14 +981,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._wb_plot_generation_btn.setText(tr("② Figure Layout", language))
         self._fit_workspace_tab_widths()
         self._files_drop_hint.setText(tr("Drop .scn / .tif", language))
-        self._empty_state.setText(
-            "<div style='font-size:16px; font-weight:600; color:#1C2622;'>"
-            + tr("Drop .scn or .tif files here, or click Import Images", language)
-            + "</div><br>"
-            + tr("1. Import images", language) + "<br>"
-            + tr("2. Draw the lanes and the band", language) + "<br>"
-            + tr("3. Analyze — the table and bar chart fill in automatically", language)
-        )
+        self._refresh_empty_state_text()
         self._tutorial_btn.setText(tr("New User Tutorial", language))
         self._files_title.setText(tr("Uploaded Files", language))
         self._export_all_tiffs_btn.setText(tr("Export All TIFFs", language))
@@ -1391,7 +1430,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._embedded_preview_placeholder = QLabel(
             tr("Generated figure preview will appear here.", self._language)
         )
-        self._embedded_preview_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px; padding: 10px;")
+        self._embedded_preview_placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px; padding: 10px; background: transparent;")
         self._embedded_preview_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._figure_preview_host_layout.addWidget(self._embedded_preview_placeholder)
 

@@ -11,7 +11,7 @@ _APPLY_BTN_STYLE = (
     "  background-color: #1F6B4A;"
     "  border: 1px solid #1F6B4A;"
     "  border-radius: 8px;"
-    "  color: #FFFFFF;"
+    "  color: #FEFEFE;"
     "  padding: 6px 12px;"
     "  font-size: 13px;"
     "  font-weight: 600;"

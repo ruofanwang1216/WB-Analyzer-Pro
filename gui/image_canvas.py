@@ -587,12 +587,13 @@ class ImageCanvas(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
-        self.setBackgroundBrush(theming.color(COLOR_BG))
+        self.setBackgroundBrush(theming.color(theming.WELL_SOURCE))
         theming.on_change(self._apply_theme_background)
         self.setMouseTracking(True)
+        self.setFrameShape(QGraphicsView.Shape.NoFrame)
 
     def _apply_theme_background(self) -> None:
-        self.setBackgroundBrush(theming.color(COLOR_BG))
+        self.setBackgroundBrush(theming.color(theming.WELL_SOURCE))
         self.viewport().update()
 
     # ── Public API ─────────────────────────────────────────────────────────────

@@ -81,7 +81,7 @@ PARAM_PANEL_STYLESHEET = f"""
     }}
     QPushButton#lane_dec:pressed, QPushButton#lane_inc:pressed {{
         background-color: {COLOR_ACCENT};
-        color: #FFFFFF;
+        color: #FEFEFE;
     }}
     QGroupBox {{
         border: none;
@@ -105,7 +105,7 @@ PARAM_PANEL_STYLESHEET = f"""
     QToolButton#roi_help_btn {{
         background: transparent;
         border: 1px solid {COLOR_BORDER};
-        border-radius: 8px;
+        border-radius: 8px; /* exact */
         color: {COLOR_TEXT_HINT};
         font-size: 10px;
         font-weight: 600;
@@ -139,7 +139,7 @@ PARAM_PANEL_STYLESHEET = f"""
         background-color: {COLOR_ACCENT};
         border: 1px solid {COLOR_ACCENT};
         border-radius: 7px;
-        color: #FFFFFF;
+        color: #FEFEFE;
         font-size: 12px;
         font-weight: 600;
         padding: 0px 8px;
@@ -147,7 +147,7 @@ PARAM_PANEL_STYLESHEET = f"""
     QPushButton#auto_lane_btn:hover {{
         background-color: {COLOR_ACCENT_TEXT};
         border-color: {COLOR_ACCENT_TEXT};
-        color: #FFFFFF;
+        color: #FEFEFE;
     }}
     QPushButton#auto_lane_btn:disabled {{
         background-color: #E9EEEB;
