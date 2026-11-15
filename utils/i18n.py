@@ -340,7 +340,7 @@ _ZH_CN = {
     "Select Group A as the control": "选择 Group A 作为 control",
     "Click the Group A column header. It will become the negative-control baseline for normalization.": "点击 Group A 列标题；它将成为归一化所用的阴性对照基线。",
     "Generate the densitometry figure": "生成灰度定量图",
-    "Click Figures Generation. The completed table will be normalized to Group A and the figure preview will be generated.": "点击 Figures Generation；完整数据表将以 Group A 归一化并生成图形预览。",
+    "Click Plot. The completed table will be normalized to Group A and the figure preview will be generated.": "点击“作图”；完整数据表将以 Group A 归一化并生成图形预览。",
     "All four analysis runs have been entered, Group A was selected as the control, and the normalized figure was generated. Click Done to return to the fresh Home page.": "四次分析结果均已填写，Group A 已设为 control，并已生成归一化图形。点击“完成”返回软件初始主页面。",
     "Create the column table": "创建列式数据表",
     "Click Densitometry Figure Generation, choose Column, and continue. During this tutorial only, Column Setup starts with Samples = 3 and Replicates = 2.": "点击“灰度定量图生成”，选择“列式表”并继续。仅在本教程中，列式表设置默认为样本数 3、重复数 2。",

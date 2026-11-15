@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QGraphicsPathItem,
 )
 
+from gui import theming
 from config.settings import (
     COLOR_ACCENT,
     COLOR_ACCENT_LIGHT,
@@ -586,8 +587,13 @@ class ImageCanvas(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
-        self.setBackgroundBrush(QColor(COLOR_BG))
+        self.setBackgroundBrush(theming.color(COLOR_BG))
+        theming.on_change(self._apply_theme_background)
         self.setMouseTracking(True)
+
+    def _apply_theme_background(self) -> None:
+        self.setBackgroundBrush(theming.color(COLOR_BG))
+        self.viewport().update()
 
     # ── Public API ─────────────────────────────────────────────────────────────
 

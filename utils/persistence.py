@@ -145,6 +145,7 @@ class AppPersistence:
         mode: str | None = None,
         files_panel_collapsed: bool | None = None,
         language: str | None = None,
+        theme: str | None = None,
     ) -> None:
         ui_payload: dict[str, Any] = {}
         if mode is not None:
@@ -155,6 +156,8 @@ class AppPersistence:
             ui_payload["sidebar_collapsed"] = bool(files_panel_collapsed)
         if language in {"en", "zh_CN"}:
             ui_payload["language"] = language
+        if theme in {"light", "dark"}:
+            ui_payload["theme"] = theme
         if ui_payload:
             self.update_config(ui=ui_payload)
 

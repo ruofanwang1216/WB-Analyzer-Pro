@@ -51,7 +51,7 @@ class MainWindowHomePageTests(unittest.TestCase):
         self.assertTrue(window._results_dock.isHidden())
         self.assertTrue(window._open_toolbar_action.isVisible())
         self.assertTrue(window._workspace_toolbar_action.isVisible())
-        self.assertTrue(window._analyze_toolbar_group.isHidden())
+        self.assertTrue(window._image_panels[0].analyze_btn.isHidden())
         self.assertFalse(window._figure_generation_btn.isChecked())
         self.assertFalse(window._wb_plot_generation_btn.isChecked())
         self.assertLess(
@@ -85,7 +85,7 @@ class MainWindowHomePageTests(unittest.TestCase):
         self.assertFalse(densitometry._figure_workspace.isHidden())
         self.assertFalse(densitometry._param_panel_host.isHidden())
         self.assertFalse(densitometry._results_dock.isHidden())
-        self.assertFalse(densitometry._analyze_toolbar_group.isHidden())
+        self.assertFalse(densitometry._image_panels[0].analyze_btn.isHidden())
         self.assertIsNotNone(densitometry._embedded_column_table)
         self.assertEqual(
             densitometry._embedded_column_table.table_dimensions(), (3, 3)
@@ -208,7 +208,7 @@ class MainWindowHomePageTests(unittest.TestCase):
         self.assertFalse(window._param_panel_host.isHidden())
         self.assertFalse(window._figure_workspace.isHidden())
         self.assertFalse(window._results_dock.isHidden())
-        self.assertFalse(window._analyze_toolbar_group.isHidden())
+        self.assertFalse(window._image_panels[0].analyze_btn.isHidden())
         self.assertIsNotNone(window._embedded_column_table)
         self.assertTrue(window._figure_generation_btn.isChecked())
 

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QIcon, QPainter, QPainterPath, QPen, QPixmap
+
+from gui import theming
 
 
 def _folder_open_icon(size: int = 22) -> QIcon:
@@ -13,7 +15,7 @@ def _folder_open_icon(size: int = 22) -> QIcon:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.scale(size / 24.0, size / 24.0)
-    pen = QPen(QColor("#29483B"), 1.8)
+    pen = QPen(theming.color("#29483B"), 1.8)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     painter.setPen(pen)
@@ -53,7 +55,7 @@ def _zoom_icon(*, zoom_in: bool, size: int = 18) -> QIcon:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.scale(size / 18.0, size / 18.0)
-    pen = QPen(QColor("#405967"), 1.6)
+    pen = QPen(theming.color("#405967"), 1.6)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     painter.setPen(pen)
@@ -75,7 +77,7 @@ def _image_operation_icon(operation: str, size: int = 18) -> QIcon:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.scale(size / 18.0, size / 18.0)
-    pen = QPen(QColor("#26322D"), 1.65)
+    pen = QPen(theming.color("#26322D"), 1.65)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     painter.setPen(pen)
@@ -110,5 +112,41 @@ def _image_operation_icon(operation: str, size: int = 18) -> QIcon:
         painter.drawLine(QPointF(5.0, 6.0), QPointF(8.2, 3.8))
         painter.drawLine(QPointF(5.0, 6.0), QPointF(7.7, 8.7))
 
+    painter.end()
+    return QIcon(pixmap)
+
+
+def _theme_toggle_icon(*, dark: bool, size: int = 20) -> QIcon:
+    """Sun while the dark theme is on, moon while the light theme is on."""
+    pixmap = QPixmap(size * 2, size * 2)
+    pixmap.setDevicePixelRatio(2.0)
+    pixmap.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.scale(size / 20.0, size / 20.0)
+    pen = QPen(theming.color("#3B4A43"), 1.6)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    if dark:
+        import math
+
+        painter.drawEllipse(QRectF(6.6, 6.6, 6.8, 6.8))
+        for step in range(8):
+            angle = math.radians(step * 45.0)
+            dx, dy = math.cos(angle), math.sin(angle)
+            painter.drawLine(
+                QPointF(10.0 + dx * 5.6, 10.0 + dy * 5.6),
+                QPointF(10.0 + dx * 7.6, 10.0 + dy * 7.6),
+            )
+    else:
+        moon = QPainterPath()
+        moon.moveTo(16.2, 12.2)
+        moon.cubicTo(11.6, 13.6, 6.6, 9.6, 8.4, 3.8)
+        moon.cubicTo(3.2, 5.4, 2.2, 12.4, 6.6, 15.8)
+        moon.cubicTo(10.2, 18.6, 15.0, 16.6, 16.2, 12.2)
+        painter.drawPath(moon)
     painter.end()
     return QIcon(pixmap)

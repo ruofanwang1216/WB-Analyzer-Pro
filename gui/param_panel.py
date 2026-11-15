@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QGroupBox,
     QSpinBox, QAbstractSpinBox, QPushButton,
     QHBoxLayout, QLabel, QSizePolicy,
-    QListWidget, QListWidgetItem, QInputDialog, QToolButton, QCheckBox,
+    QListWidget, QListWidgetItem, QInputDialog, QToolButton, QCheckBox, QToolTip,
 )
 from config.settings import (
     COLOR_ACCENT,
@@ -168,59 +168,72 @@ class ParamPanel(QWidget):
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(10)
+        root.setSpacing(6)
 
-        # ── ROI Settings ────────────────────────────────────────────────────────
+        # ── ROI card ────────────────────────────────────────────────────────────
+        # The group keeps its title for accessibility; the visible heading is
+        # the compact "ROI ? … Lanes [− n +]" row below.
         self._roi_group = QGroupBox("ROI Settings")
+        self._roi_group.setFlat(True)
         roi_layout = QVBoxLayout(self._roi_group)
-        roi_layout.setContentsMargins(8, 4, 8, 8)
-        roi_layout.setSpacing(8)
+        roi_layout.setContentsMargins(0, 0, 0, 0)
+        roi_layout.setSpacing(0)
 
-        # ── Manual ROI controls ────────────────────────────────────────────────
         self._manual_widget = QWidget()
         manual_layout = QVBoxLayout(self._manual_widget)
         manual_layout.setContentsMargins(0, 0, 0, 0)
-        manual_layout.setSpacing(6)
+        manual_layout.setSpacing(7)
 
-        # Lane Settings sub-section
+        # Kept (hidden) so the wording stays available to translations.
         self._lane_section_label = QLabel("Lane Settings")
-        lane_section_label = self._lane_section_label
-        lane_section_label.setStyleSheet(
-            f"color: {COLOR_TEXT_HINT}; font-size: 9px; font-weight: bold; letter-spacing: 0.5px;"
-        )
-        manual_layout.addWidget(lane_section_label)
-
-        lane_form = QFormLayout()
-        lane_form.setSpacing(6)
+        self._lane_section_label.setVisible(False)
 
         self.lane_count = QSpinBox()
+        self.lane_count.setObjectName("lane_count")
         self.lane_count.setRange(1, 24)
         self.lane_count.setValue(3)
         self.lane_count.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.lane_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lane_count.setFixedSize(34, 24)
         self.lane_count.valueChanged.connect(self.params_changed)
 
-        lane_dec = QPushButton("-")
+        lane_dec = QPushButton("−")
         lane_dec.setObjectName("lane_dec")
-        lane_dec.setFixedSize(28, 28)
+        lane_dec.setFixedSize(24, 24)
         lane_dec.clicked.connect(lambda: self.lane_count.setValue(self.lane_count.value() - 1))
 
         lane_inc = QPushButton("+")
         lane_inc.setObjectName("lane_inc")
-        lane_inc.setFixedSize(28, 28)
+        lane_inc.setFixedSize(24, 24)
         lane_inc.clicked.connect(lambda: self.lane_count.setValue(self.lane_count.value() + 1))
 
-        lane_row = QHBoxLayout()
-        lane_row.setSpacing(4)
-        lane_row.addWidget(self.lane_count)
-        lane_row.addWidget(lane_dec)
-        lane_row.addWidget(lane_inc)
-        self._lanes_label = QLabel("Lanes:")
-        lane_form.addRow(self._lanes_label)
-        lane_form.addRow(lane_row)
+        self._roi_title = QLabel("ROI")
+        self._roi_title.setObjectName("roi_card_title")
+        self._help_btn = QToolButton()
+        self._help_btn.setObjectName("roi_help_btn")
+        self._help_btn.setText("?")
+        self._help_btn.setFixedSize(16, 16)
+        self._help_btn.clicked.connect(self._show_help_tooltip)
+        self._lanes_label = QLabel("Lanes")
+        self._lanes_label.setObjectName("lanes_label")
 
-        manual_layout.addLayout(lane_form)
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(4)
+        header_row.addWidget(self._roi_title)
+        header_row.addWidget(self._help_btn)
+        header_row.addStretch(1)
+        header_row.addWidget(self._lanes_label)
+        header_row.addSpacing(2)
+        header_row.addWidget(lane_dec)
+        header_row.addWidget(self.lane_count)
+        header_row.addWidget(lane_inc)
+        manual_layout.addLayout(header_row)
 
         self._auto_lane_btn = QPushButton("Auto-detect lanes")
+        self._auto_lane_btn.setObjectName("auto_lane_btn")
+        self._auto_lane_btn.setFixedHeight(26)
+        self._auto_lane_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._auto_lane_btn.setToolTip(
             "Draw one large ROI around the bands, set the lane count, then click to "
             "find every lane and band automatically. Drag boxes to adjust, Delete to "
@@ -233,7 +246,7 @@ class ParamPanel(QWidget):
         # band.  Off: boxes wrap the main band only.  On: both bands together.
         self._adjacent_band_check = QCheckBox("Include adjacent band")
         self._adjacent_band_check.setStyleSheet(
-            f"QCheckBox {{ color: {COLOR_TEXT}; font-size: 10px; background: transparent; }}"
+            f"QCheckBox {{ color: {COLOR_TEXT}; font-size: 12px; background: transparent; }}"
         )
         self._adjacent_band_check.setToolTip(
             "A faint second band was found right next to the main band. "
@@ -245,29 +258,32 @@ class ParamPanel(QWidget):
         manual_layout.addWidget(self._adjacent_band_check)
 
         self._fixed_label = QLabel("Fixed ROI")
-        fixed_label = self._fixed_label
-        fixed_label.setStyleSheet(
-            f"color: {COLOR_TEXT_HINT}; font-size: 9px; font-weight: bold; letter-spacing: 0.5px;"
-        )
-        manual_layout.addWidget(fixed_label)
+        self._fixed_label.setObjectName("fixed_roi_label")
 
-        fixed_row = QVBoxLayout()
-        fixed_row.setContentsMargins(0, 0, 0, 0)
-        fixed_row.setSpacing(6)
-
-        self._fix_btn = QPushButton("Fix ROI")
+        self._fix_btn = QPushButton("Fix")
         fix_btn = self._fix_btn
+        fix_btn.setObjectName("fix_roi_btn")
+        fix_btn.setFixedHeight(24)
         fix_btn.setToolTip("Capture the current lane ROI size, or arm the next drawn ROI as the fixed size.")
         fix_btn.clicked.connect(self._on_add_fixed_roi_clicked)
-        fixed_row.addWidget(fix_btn)
 
-        self._cancel_fixed_btn = QPushButton("Cancel fixed ROI")
+        self._cancel_fixed_btn = QPushButton("Cancel")
         cancel_btn = self._cancel_fixed_btn
+        cancel_btn.setObjectName("cancel_fixed_roi_btn")
+        cancel_btn.setFixedHeight(24)
         cancel_btn.setToolTip("Return Manual mode to freehand ROI drawing.")
         cancel_btn.clicked.connect(self._on_cancel_fixed_roi_clicked)
+
+        fixed_row = QHBoxLayout()
+        fixed_row.setContentsMargins(0, 0, 0, 0)
+        fixed_row.setSpacing(4)
+        fixed_row.addWidget(self._fixed_label)
+        fixed_row.addStretch(1)
+        fixed_row.addWidget(fix_btn)
         fixed_row.addWidget(cancel_btn)
         manual_layout.addLayout(fixed_row)
 
+        # Saved sizes; takes no room until the first size is fixed.
         self._fixed_roi_list = QListWidget()
         self._fixed_roi_list.setMaximumHeight(58)
         self._fixed_roi_list.setStyleSheet(
@@ -277,6 +293,7 @@ class ParamPanel(QWidget):
         )
         self._fixed_roi_list.itemClicked.connect(self._on_fixed_roi_item_selected)
         self._fixed_roi_list.itemDoubleClicked.connect(self._on_fixed_roi_item_double_clicked)
+        self._fixed_roi_list.setVisible(False)
         manual_layout.addWidget(self._fixed_roi_list)
 
         roi_layout.addWidget(self._manual_widget)
@@ -284,15 +301,25 @@ class ParamPanel(QWidget):
         root.addWidget(self._roi_group)
         root.addStretch()
 
-        # ── Help note ──────────────────────────────────────────────────────────
+        # ── Help ───────────────────────────────────────────────────────────────
+        # The how-to lives in the "?" tooltip; the label only holds the text.
         self._help_note = QLabel(
             "Manual: draw lane ROI → draw band ROI → Analyze\n"
             "Auto: draw one large ROI → set Lanes → Auto-detect lanes → adjust → Analyze\n"
             "Hold Space + drag to pan. Scroll to zoom."
         )
-        self._help_note.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 9px;")
-        self._help_note.setWordWrap(True)
-        root.addWidget(self._help_note)
+        self._help_note.setVisible(False)
+        self._help_btn.setToolTip(self._help_note.text())
+
+    def _show_help_tooltip(self) -> None:
+        QToolTip.showText(
+            self._help_btn.mapToGlobal(self._help_btn.rect().bottomLeft()),
+            self._help_btn.toolTip(),
+            self._help_btn,
+        )
+
+    def _sync_fixed_roi_list_visibility(self) -> None:
+        self._fixed_roi_list.setVisible(self._fixed_roi_list.count() > 0)
 
     # ── Validation ─────────────────────────────────────────────────────────────
 
@@ -301,9 +328,9 @@ class ParamPanel(QWidget):
         self._language = language
         self._roi_group.setTitle(tr("ROI Settings", language))
         self._lane_section_label.setText(tr("Lane Settings", language))
-        self._lanes_label.setText(tr("Lanes:", language))
+        self._lanes_label.setText(tr("Lanes", language))
         self._fixed_label.setText(tr("Fixed ROI", language))
-        self._fix_btn.setText(tr("Fix ROI", language))
+        self._fix_btn.setText(tr("Fix", language))
         self._auto_lane_btn.setText(tr("Auto-detect lanes", language))
         self._adjacent_band_check.setText(tr("Include adjacent band", language))
         self._adjacent_band_check.setToolTip(tr(
@@ -317,7 +344,7 @@ class ParamPanel(QWidget):
             "remove, drag on empty space to add.",
             language,
         ))
-        self._cancel_fixed_btn.setText(tr("Cancel fixed ROI", language))
+        self._cancel_fixed_btn.setText(tr("Cancel", language))
         self._fix_btn.setToolTip(tr("Capture the current lane ROI size, or arm the next drawn ROI as the fixed size.", language))
         self._cancel_fixed_btn.setToolTip(tr("Return Manual mode to freehand ROI drawing.", language))
         self._help_note.setText(tr(
@@ -326,6 +353,7 @@ class ParamPanel(QWidget):
             "Hold Space + drag to pan. Scroll to zoom.",
             language,
         ))
+        self._help_btn.setToolTip(self._help_note.text())
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -368,6 +396,7 @@ class ParamPanel(QWidget):
             item.setToolTip(f"{lane_size.width():.0f} x {lane_size.height():.0f} px")
         self._fixed_roi_list.addItem(item)
         self._install_fixed_roi_item_widget(item)
+        self._sync_fixed_roi_list_visibility()
         self._fixed_roi_list.setCurrentItem(item)
         self._on_fixed_roi_item_selected(item)
 
@@ -409,7 +438,7 @@ class ParamPanel(QWidget):
         layout.setContentsMargins(5, 0, 2, 0)
         layout.setSpacing(3)
         label = QLabel(str(item.data(_FIXED_ROI_NAME_ROLE) or item.text()))
-        label.setStyleSheet("font-size:10px; color:#2C4A3D;")
+        label.setStyleSheet("font-size:12px; color:#2C4A3D; background: transparent;")
         layout.addWidget(label, 1)
         delete_btn = QToolButton()
         delete_btn.setText("x")
@@ -431,6 +460,7 @@ class ParamPanel(QWidget):
         if 0 <= row < len(self._fixed_roi_profiles):
             self._fixed_roi_profiles.pop(row)
         self._fixed_roi_list.takeItem(row)
+        self._sync_fixed_roi_list_visibility()
         if was_current and self._fixed_roi_cancel_requested is not None:
             self._fixed_roi_cancel_requested()
 
@@ -444,7 +474,6 @@ class ParamPanel(QWidget):
     def set_wb_plot_simplified(self, enabled: bool) -> None:
         """Hide densitometry-only controls while WB Plot mode is active."""
         self._roi_group.setVisible(not enabled)
-        self._help_note.setVisible(not enabled)
 
     def set_detect_enabled(self, enabled: bool) -> None:
         """Manual panel no longer has a Detect Bands button."""

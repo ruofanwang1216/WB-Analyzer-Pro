@@ -119,7 +119,7 @@ class ChineseLocalizationTests(unittest.TestCase):
         self.assertEqual(setup.windowTitle(), "列式表设置")
         self.assertEqual(table.windowTitle(), "数据表")
         self.assertEqual(table._table.horizontalHeaderItem(0).text(), "重复")
-        self.assertEqual(table._table.item(0, 1).text(), "目的蛋白条带")
+        self.assertEqual(table._table.item(0, 1).text(), "目的蛋白")
 
 
 if __name__ == "__main__":

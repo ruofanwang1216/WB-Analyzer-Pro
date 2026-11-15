@@ -83,6 +83,82 @@ PARAM_PANEL_STYLESHEET = f"""
         background-color: {COLOR_ACCENT};
         color: #FFFFFF;
     }}
+    QGroupBox {{
+        border: none;
+        margin-top: 0px;
+        padding-top: 0px;
+    }}
+    QGroupBox::title {{
+        color: transparent;
+        font-size: 1px;
+        max-height: 0px;
+    }}
+    QLabel#roi_card_title {{
+        color: {COLOR_TEXT};
+        font-size: 13px;
+        font-weight: 700;
+    }}
+    QLabel#lanes_label, QLabel#fixed_roi_label {{
+        color: {COLOR_TEXT_MUTED};
+        font-size: 12px;
+    }}
+    QToolButton#roi_help_btn {{
+        background: transparent;
+        border: 1px solid {COLOR_BORDER};
+        border-radius: 8px;
+        color: {COLOR_TEXT_HINT};
+        font-size: 10px;
+        font-weight: 600;
+        padding: 0px;
+    }}
+    QToolButton#roi_help_btn:hover {{
+        border-color: {COLOR_ACCENT};
+        color: {COLOR_ACCENT_TEXT};
+    }}
+    QSpinBox#lane_count {{
+        padding: 0px 2px;
+        font-size: 13px;
+        font-weight: 600;
+        min-height: 0px;
+        border-radius: 6px;
+    }}
+    QSpinBox#lane_count::up-button {{
+        subcontrol-origin: border;
+        width: 0px;
+    }}
+    QSpinBox#lane_count::down-button {{
+        subcontrol-origin: border;
+        width: 0px;
+    }}
+    QPushButton#lane_dec, QPushButton#lane_inc {{
+        font-size: 14px;
+        padding: 0px;
+        border-radius: 6px;
+    }}
+    QPushButton#auto_lane_btn {{
+        background-color: {COLOR_ACCENT};
+        border: 1px solid {COLOR_ACCENT};
+        border-radius: 7px;
+        color: #FFFFFF;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 0px 8px;
+    }}
+    QPushButton#auto_lane_btn:hover {{
+        background-color: {COLOR_ACCENT_TEXT};
+        border-color: {COLOR_ACCENT_TEXT};
+        color: #FFFFFF;
+    }}
+    QPushButton#auto_lane_btn:disabled {{
+        background-color: #E9EEEB;
+        border-color: #D9E0DC;
+        color: #8A9891;
+    }}
+    QPushButton#fix_roi_btn, QPushButton#cancel_fixed_roi_btn {{
+        font-size: 12px;
+        padding: 0px 10px;
+        border-radius: 6px;
+    }}
     QListWidget {{
         background: {COLOR_SURFACE};
         border: 1px solid {COLOR_BORDER_LIGHT};
@@ -108,29 +184,7 @@ def restyle_param_panel(panel: QWidget) -> None:
     layout = panel.layout()
     if layout is not None:
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-    section_style = (
-        f"color: {COLOR_TEXT_MUTED}; font-size: 12px; font-weight: 600;"
-    )
-    for name in ("_lane_section_label", "_fixed_label"):
-        label = getattr(panel, name, None)
-        if label is not None:
-            label.setStyleSheet(section_style)
-    lanes_label = getattr(panel, "_lanes_label", None)
-    if lanes_label is not None:
-        lanes_label.setStyleSheet(f"color: {COLOR_TEXT}; font-size: 13px;")
-    help_note = getattr(panel, "_help_note", None)
-    if help_note is not None:
-        help_note.setStyleSheet(
-            f"color: {COLOR_TEXT_HINT}; font-size: 12px;"
-        )
+        layout.setSpacing(6)
     fixed_list = getattr(panel, "_fixed_roi_list", None)
     if fixed_list is not None:
         fixed_list.setStyleSheet("")
-    # The outlined primary look marks the one-click helper when it exists.
-    auto_btn = getattr(panel, "_auto_lane_btn", None)
-    if auto_btn is not None:
-        auto_btn.setStyleSheet(
-            f"QPushButton {{ border-color: {COLOR_ACCENT}; color: {COLOR_ACCENT}; "
-            "font-weight: 600; }"
-        )

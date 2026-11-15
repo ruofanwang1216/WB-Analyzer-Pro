@@ -24,6 +24,7 @@ from config.settings import (
     COLOR_TEXT_HINT,
     COLOR_TEXT_MUTED,
 )
+from gui import theming
 from utils.i18n import LANG_EN, tr
 
 _COLS = ["Run", "Band", "Lane", "Area", "Mean", "Min", "Max", "IntDen", "RawIntDen"]
@@ -134,12 +135,12 @@ class _BandHeaderView(QHeaderView):
         delete_rect = self._delete_icon_rect(rect)
 
         # Checkbox: small white box with subtle border.
-        painter.setPen(QPen(QColor("#8FA1AE"), 1))
-        painter.setBrush(QColor("#FFFFFF"))
+        painter.setPen(QPen(theming.color(QColor("#8FA1AE")), 1))
+        painter.setBrush(theming.color(QColor("#FFFFFF")))
         painter.drawRect(checkbox_rect)
 
         if logicalIndex in self._checked_sections:
-            painter.setPen(QPen(QColor(COLOR_ACCENT_TEXT), 1.6))
+            painter.setPen(QPen(theming.color(QColor(COLOR_ACCENT_TEXT)), 1.6))
             painter.drawLine(
                 checkbox_rect.left() + 2,
                 checkbox_rect.center().y(),
@@ -154,10 +155,10 @@ class _BandHeaderView(QHeaderView):
             )
 
         # Delete icon: gray x in subtle circle (ⓧ style).
-        painter.setPen(QPen(QColor("#9AA9B4"), 1))
-        painter.setBrush(QColor(245, 248, 250, 235))
+        painter.setPen(QPen(theming.color(QColor("#9AA9B4")), 1))
+        painter.setBrush(theming.color(QColor(245, 248, 250, 235)))
         painter.drawEllipse(delete_rect)
-        painter.setPen(QPen(QColor("#8A98A3"), 1.3))
+        painter.setPen(QPen(theming.color(QColor("#8A98A3")), 1.3))
         painter.drawLine(delete_rect.left() + 4, delete_rect.top() + 4, delete_rect.right() - 4, delete_rect.bottom() - 4)
         painter.drawLine(delete_rect.right() - 4, delete_rect.top() + 4, delete_rect.left() + 4, delete_rect.bottom() - 4)
 
@@ -169,7 +170,7 @@ class _BandHeaderView(QHeaderView):
             max(0, delete_rect.left() - checkbox_rect.right() - 12),
             rect.height(),
         )
-        painter.setPen(QColor("#5C6F7D"))
+        painter.setPen(theming.color(QColor("#5C6F7D")))
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter, text)
         painter.restore()
 
@@ -206,11 +207,22 @@ class ResultsPanel(QWidget):
         self._run_column_ranges: dict[int, tuple[int, int]] = {}
         self._checked_entry_ids: set[int] = set()
         self._build_ui()
+        theming.on_change(self._refresh_table)
 
     def _build_ui(self) -> None:
+        # The whole panel is one rounded card (it used to paint only its children).
+        self.setObjectName("results_panel_card")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"""
             QWidget {{
                 background-color: {COLOR_SURFACE};
+            }}
+            QWidget#results_panel_card {{
+                border: 1px solid #D9E0DC;
+                border-radius: 10px;
+            }}
+            QLabel {{
+                background: transparent;
             }}
             QTableWidget {{
                 background-color: {COLOR_SURFACE};
@@ -376,8 +388,8 @@ class ResultsPanel(QWidget):
         # Keep each run's color fixed by run order so older groups do not change
         # when a new analysis is appended.
         if run_index % 2 == 0:
-            return _EVEN_RUN_BG, _EVEN_RUN_HEADER_TINT
-        return _ODD_RUN_BG, _ODD_RUN_HEADER_TINT
+            return theming.color(_EVEN_RUN_BG), theming.color(_EVEN_RUN_HEADER_TINT)
+        return theming.color(_ODD_RUN_BG), theming.color(_ODD_RUN_HEADER_TINT)
 
     def _refresh_table(self) -> None:
         self._table.clear()

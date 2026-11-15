@@ -49,6 +49,7 @@ from config.settings import (
     COLOR_TEXT,
     COLOR_TEXT_MUTED,
 )
+from gui import theming
 from utils.i18n import LANG_EN, LANG_ZH_CN, tr, tr_display
 
 
@@ -1813,9 +1814,9 @@ class ColumnTableWindow(QMainWindow):
             top_row = rep_index * self._ROWS_PER_REPLICATE
             labels = (
                 (top_row, 0, tr("Replicate {number}", self._language, number=rep_index + 1)),
-                (top_row, 1, tr("Target band", self._language)),
-                (top_row + 1, 1, tr("Loading control", self._language)),
-                (top_row + 2, 1, tr("Normalized result", self._language)),
+                (top_row, 1, tr("Target", self._language)),
+                (top_row + 1, 1, tr("Loading", self._language)),
+                (top_row + 2, 1, tr("Ratio", self._language)),
             )
             for row, column, text in labels:
                 item = self._table.item(row, column)
@@ -1926,25 +1927,25 @@ class ColumnTableWindow(QMainWindow):
             replicate_item = QTableWidgetItem(f"Replicate {rep_index + 1}")
             replicate_item.setFlags(replicate_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             replicate_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            replicate_item.setBackground(Qt.GlobalColor.white)
+            replicate_item.setBackground(theming.color("#FFFFFF"))
             table.setItem(top_row, 0, replicate_item)
 
-            target_item = QTableWidgetItem("Target band")
+            target_item = QTableWidgetItem("Target")
             target_item.setFlags(target_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             target_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            target_item.setBackground(Qt.GlobalColor.white)
+            target_item.setBackground(theming.color("#FFFFFF"))
             table.setItem(top_row, 1, target_item)
 
-            control_item = QTableWidgetItem("Loading control")
+            control_item = QTableWidgetItem("Loading")
             control_item.setFlags(control_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             control_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            control_item.setBackground(Qt.GlobalColor.white)
+            control_item.setBackground(theming.color("#FFFFFF"))
             table.setItem(bottom_row, 1, control_item)
 
-            normalized_item = QTableWidgetItem("Normalized result")
+            normalized_item = QTableWidgetItem("Ratio")
             normalized_item.setFlags(normalized_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             normalized_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            normalized_item.setBackground(QColor("#EEF5F0"))
+            normalized_item.setBackground(theming.color("#EEF5F0"))
             table.setItem(normalized_row, 1, normalized_item)
 
             for c in range(2, total_cols):
@@ -1959,7 +1960,7 @@ class ColumnTableWindow(QMainWindow):
                 normalized_data = QTableWidgetItem("")
                 normalized_data.setFlags(normalized_data.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 normalized_data.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                normalized_data.setBackground(QColor("#EEF5F0"))
+                normalized_data.setBackground(theming.color("#EEF5F0"))
                 table.setItem(normalized_row, c, normalized_data)
 
             # Keep the pair visually grouped.
@@ -1974,6 +1975,7 @@ class ColumnTableWindow(QMainWindow):
         table.deleteRequested.connect(self._on_delete_requested)
         root.addWidget(table, 1)
         self._table = table
+        theming.on_change(self._retint_table_for_theme)
         self._apply_table_zoom()
 
         table.itemChanged.connect(self._on_table_item_changed)
@@ -2004,11 +2006,11 @@ class ColumnTableWindow(QMainWindow):
         reset_btn.setStyleSheet(_BTN_SECONDARY_STYLE)
         reset_btn.clicked.connect(self._on_reset_table_clicked)
         bottom_row.addWidget(reset_btn)
-        export_table_btn = QPushButton("Export Table")
+        export_table_btn = QPushButton("Export")
         export_table_btn.setStyleSheet(_BTN_SECONDARY_STYLE)
         export_table_btn.clicked.connect(self._on_export_table_clicked)
         bottom_row.addWidget(export_table_btn)
-        figures_btn = QPushButton("Figures Generation")
+        figures_btn = QPushButton("Plot")
         figures_btn.setObjectName("figuresGenerationButton")
         self._figures_btn = figures_btn
         figures_btn.setStyleSheet(_BTN_PRIMARY_STYLE)
@@ -2315,9 +2317,9 @@ class ColumnTableWindow(QMainWindow):
             normalized_row = top_row + 2
             rep_name = f"Replicate {rep_index + 1}"
             for row_idx in (top_row, bottom_row, normalized_row):
-                band_item = self._table.item(row_idx, 1) if self._table is not None else None
                 default_type = "Target band" if row_idx == top_row else ("Loading control" if row_idx == bottom_row else "Normalized result")
-                band_type = band_item.text() if band_item is not None else default_type
+                # The table shows short row labels; exports keep the full wording.
+                band_type = tr(default_type, self._language)
                 row_data: dict[str, str] = {
                     "Replicate": rep_name,
                     "Band Type": band_type,
@@ -2637,8 +2639,8 @@ class ColumnTableWindow(QMainWindow):
                 self._table.setHorizontalHeaderItem(col, item)
             item.setText(self._display_group_name(self._group_names[group_index]))
             if group_index == self._negative_control_group_index:
-                item.setData(Qt.ItemDataRole.BackgroundRole, QColor(250, 222, 230))
-                item.setData(Qt.ItemDataRole.ForegroundRole, QColor("#743448"))
+                item.setData(Qt.ItemDataRole.BackgroundRole, theming.color(QColor(250, 222, 230)))
+                item.setData(Qt.ItemDataRole.ForegroundRole, theming.color("#743448"))
             else:
                 item.setData(Qt.ItemDataRole.BackgroundRole, None)
                 item.setData(Qt.ItemDataRole.ForegroundRole, None)
@@ -2698,6 +2700,10 @@ class ColumnTableWindow(QMainWindow):
             self.set_active_target_row(row)
             self._clear_row_data_cells(row)
 
+    def _retint_table_for_theme(self) -> None:
+        if self._table is not None:
+            theming.retint_items(self._table)
+
     def _set_cell_background(self, row: int, col: int, color: QColor | None) -> None:
         if self._table is None:
             return
@@ -2709,9 +2715,9 @@ class ColumnTableWindow(QMainWindow):
     def _refresh_row_and_column_highlights(self) -> None:
         if self._table is None:
             return
-        row_color = QColor(220, 235, 226)
-        col_color = QColor(253, 236, 240)
-        both_color = QColor(248, 221, 229)
+        row_color = theming.color(QColor(220, 235, 226))
+        col_color = theming.color(QColor(253, 236, 240))
+        both_color = theming.color(QColor(248, 221, 229))
         neg_col = None if self._negative_control_group_index is None else 2 + self._negative_control_group_index
         for row in range(self._table.rowCount()):
             for col in range(1, self._table.columnCount()):

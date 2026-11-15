@@ -1213,7 +1213,7 @@ class TutorialController(QObject):
                 _Step(
                     "generate_figure",
                     "Generate the densitometry figure",
-                    "Click Figures Generation. The completed table will be normalized to Group A and the figure preview will be generated.",
+                    "Click Plot. The completed table will be normalized to Group A and the figure preview will be generated.",
                     lambda: (
                         None
                         if host._embedded_column_table is None

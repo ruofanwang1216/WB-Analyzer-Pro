@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 
 from config.paths import migrate_legacy_data
 from config.settings import APP_NAME, VERSION
+from gui import theming
 from gui.theme import APP_STYLESHEET
 from utils.logger import get_logger
 
@@ -26,7 +27,8 @@ def main() -> None:
     app.setApplicationVersion(VERSION)
     app.setOrganizationName("WB-Lab")
 
-    app.setStyleSheet(APP_STYLESHEET)
+    # Stylesheets are routed through the theme so dark / light can be switched.
+    theming.install(APP_STYLESHEET)
 
     # Import here so Qt app exists before any widget is constructed
     from gui.main_window import MainWindow

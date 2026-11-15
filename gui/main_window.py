@@ -57,8 +57,10 @@ from gui.tutorial import TutorialController, TutorialModeDialog
 from utils.logger import get_logger
 from utils.persistence import AppPersistence
 from utils.i18n import LANG_EN, LANG_ZH_CN, tr
+from gui import theming
 from gui.icons import (
     _folder_open_icon,
+    _theme_toggle_icon,
 )
 from gui.workers import (
     MeasurementWorker,
@@ -238,6 +240,12 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._persistence.update_config()
         saved_language = self._persistence.read_config().get("ui", {}).get("language", LANG_EN)
         self._language = saved_language if saved_language in {LANG_EN, LANG_ZH_CN} else LANG_EN
+        # Set the theme before any widget is built so each one starts in it.
+        saved_theme = self._persistence.read_config().get("ui", {}).get("theme")
+        theming.install()
+        self._theme = theming.set_theme(
+            saved_theme if saved_theme in theming.THEMES else theming.THEME_LIGHT
+        )
 
         # Worker thread references (kept to avoid GC)
         self._worker: MeasurementWorker | None = None
@@ -355,6 +363,16 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
                 background-color: {COLOR_ACCENT_LIGHT};
                 border-color: {COLOR_ACCENT};
             }}
+            QToolBar QToolButton#theme_toggle_btn {{
+                background-color: {COLOR_SURFACE};
+                border: 1px solid {COLOR_BORDER};
+                border-radius: 8px;
+                padding: 0px;
+            }}
+            QToolBar QToolButton#theme_toggle_btn:hover {{
+                background-color: {COLOR_ACCENT_LIGHT};
+                border-color: {COLOR_ACCENT};
+            }}
         """)
         self.addToolBar(tb)
 
@@ -409,6 +427,16 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         stretch.setStyleSheet("background: transparent;")
         tb.addWidget(stretch)
 
+        # Sun while dark (click for light), moon while light (click for dark).
+        self._theme_toggle_btn = QToolButton()
+        self._theme_toggle_btn.setObjectName("theme_toggle_btn")
+        self._theme_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._theme_toggle_btn.setIconSize(QSize(20, 20))
+        self._theme_toggle_btn.setFixedSize(34, 34)
+        self._theme_toggle_btn.clicked.connect(self._toggle_theme)
+        self._theme_toolbar_action = tb.addWidget(self._theme_toggle_btn)
+        self._refresh_theme_toggle()
+
         self._tutorial_btn = QPushButton("New User Tutorial")
         self._tutorial_btn.setObjectName("tutorial_btn")
         self._tutorial_toolbar_action = tb.addWidget(self._tutorial_btn)
@@ -429,9 +457,13 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._files_panel.setObjectName("uploaded_files_panel")
         self._files_panel.setStyleSheet(f"""
             QFrame#uploaded_files_panel {{
-                background-color: {COLOR_SURFACE};
+                background-color: transparent;
                 border: none;
-                border-right: 1px solid #D9E0DC;
+            }}
+            QFrame#files_card, QWidget#param_panel_host {{
+                background-color: {COLOR_SURFACE};
+                border: 1px solid #D9E0DC;
+                border-radius: 10px;
             }}
             QLabel#files_panel_title {{
                 background: transparent;
@@ -477,16 +509,16 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
                 border: 1px dashed #B5C2BC;
                 border-radius: 6px;
                 color: {COLOR_TEXT_HINT};
-                font-size: 12px;
-                padding: 8px;
+                font-size: 11px;
+                padding: 0px 4px;
             }}
             QPushButton#export_all_tiffs_btn {{
                 background-color: {COLOR_SURFACE};
                 border: 1px solid {COLOR_BORDER};
-                border-radius: 8px;
+                border-radius: 6px;
                 color: #3B4A43;
-                padding: 7px 10px;
-                font-size: 12px;
+                padding: 0px 6px;
+                font-size: 11px;
             }}
             QPushButton#export_all_tiffs_btn:hover {{
                 background-color: {COLOR_ACCENT_LIGHT};
@@ -497,9 +529,15 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
                 border-color: {COLOR_BORDER_LIGHT};
             }}
         """)
+        # Sidebar = two separate cards: files on top, ROI settings below.
         files_layout = QVBoxLayout(self._files_panel)
-        files_layout.setContentsMargins(10, 10, 10, 10)
+        files_layout.setContentsMargins(8, 8, 2, 8)
         files_layout.setSpacing(8)
+        self._files_card = QFrame()
+        self._files_card.setObjectName("files_card")
+        self._files_card_layout = QVBoxLayout(self._files_card)
+        self._files_card_layout.setContentsMargins(8, 8, 8, 8)
+        self._files_card_layout.setSpacing(6)
         files_header = QHBoxLayout()
         files_header.setContentsMargins(0, 0, 0, 0)
         files_header.setSpacing(6)
@@ -511,32 +549,40 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._files_title.setObjectName("files_panel_title")
         files_header.addWidget(self._files_title)
         files_header.addStretch(1)
-        files_layout.addLayout(files_header)
+        self._files_card_layout.addLayout(files_header)
         self._files_list = QListWidget()
         self._files_list.setObjectName("uploaded_files_list")
         self._files_list.setMinimumHeight(72)
-        files_layout.addWidget(self._files_list, 1)
-        self._files_drop_hint = QLabel("Drop .scn / .tif files here")
+        self._files_card_layout.addWidget(self._files_list, 1)
+        # Drop target and TIFF export share one slim row.
+        files_actions = QHBoxLayout()
+        files_actions.setContentsMargins(0, 0, 0, 0)
+        files_actions.setSpacing(6)
+        self._files_drop_hint = QLabel("Drop .scn / .tif")
         self._files_drop_hint.setObjectName("files_drop_hint")
         self._files_drop_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._files_drop_hint.setWordWrap(True)
-        files_layout.addWidget(self._files_drop_hint)
+        self._files_drop_hint.setFixedHeight(24)
+        files_actions.addWidget(self._files_drop_hint, 1)
         self._export_all_tiffs_btn = QPushButton("Export All TIFFs")
         self._export_all_tiffs_btn.setObjectName("export_all_tiffs_btn")
+        self._export_all_tiffs_btn.setFixedHeight(24)
         self._export_all_tiffs_btn.setEnabled(False)
-        files_layout.addWidget(self._export_all_tiffs_btn)
+        files_actions.addWidget(self._export_all_tiffs_btn, 1)
+        self._files_card_layout.addLayout(files_actions)
+        files_layout.addWidget(self._files_card, 1)
 
-        # Lane settings live under the file list so both stay on screen.
+        # ROI settings are their own card under the files card.
         self.param_panel = ParamPanel()
         restyle_param_panel(self.param_panel)
         self._param_panel_host = QWidget()
         self._param_panel_host.setObjectName("param_panel_host")
-        self._param_panel_host.setStyleSheet(
-            "QWidget#param_panel_host { background: transparent; "
-            "border-top: 1px solid #E4E9E6; }"
+        self._param_panel_host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # The ROI card keeps its natural height; the files card takes the rest.
+        self._param_panel_host.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
         )
         self._param_panel_layout = QVBoxLayout(self._param_panel_host)
-        self._param_panel_layout.setContentsMargins(0, 6, 0, 0)
+        self._param_panel_layout.setContentsMargins(10, 9, 10, 10)
         self._param_panel_layout.setSpacing(0)
         self._param_panel_layout.addWidget(self.param_panel)
         files_layout.addWidget(self._param_panel_host)
@@ -565,50 +611,6 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         viewer_column_layout.setContentsMargins(8, 8, 4, 4)
         viewer_column_layout.setSpacing(6)
 
-        # Analyze sits right above the image it measures.
-        self._analyze_toolbar_group = QFrame()
-        self._analyze_toolbar_group.setObjectName("analyze_bar")
-        self._analyze_toolbar_group.setStyleSheet(f"""
-            QFrame#analyze_bar {{ background: transparent; border: none; }}
-            QLabel#analyze_hint {{
-                background: transparent;
-                color: {COLOR_TEXT_MUTED};
-                font-size: 12px;
-            }}
-            QToolButton#analyze_btn {{
-                background-color: {COLOR_ACCENT};
-                border: 1px solid {COLOR_ACCENT};
-                border-radius: 8px;
-                color: #FFFFFF;
-                font-size: 14px;
-                font-weight: 600;
-                padding: 7px 20px;
-            }}
-            QToolButton#analyze_btn:hover {{
-                background-color: {COLOR_ACCENT_DARK};
-            }}
-            QToolButton#analyze_btn:disabled {{
-                background-color: #E9EEEB;
-                color: #8A9891;
-                border-color: #D9E0DC;
-            }}
-        """)
-        analyze_layout = QHBoxLayout(self._analyze_toolbar_group)
-        analyze_layout.setContentsMargins(0, 0, 0, 0)
-        analyze_layout.setSpacing(8)
-        self._analyze_hint = QLabel(
-            "Draw the lane ROI, then the band ROI, then press Enter."
-        )
-        self._analyze_hint.setObjectName("analyze_hint")
-        analyze_layout.addWidget(self._analyze_hint, 1)
-        self._analyze_toolbar_btn = _make_action_button(
-            self._act_analyze,
-            "analyze_btn",
-        )
-        self._analyze_toolbar_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        analyze_layout.addWidget(self._analyze_toolbar_btn)
-        self._analyze_toolbar_group.setVisible(False)
-        viewer_column_layout.addWidget(self._analyze_toolbar_group)
 
         self._viewer_container = QWidget()
         self._viewer_container.setObjectName("workspace_viewer_panel")
@@ -618,6 +620,8 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._image_panels = [_ImagePanelWidget() for _ in range(_MAX_IMAGE_PANELS)]
         for panel in self._image_panels:
             panel.setVisible(False)
+            # Analyze lives in each image's own toolbar (one shared action).
+            panel.analyze_btn.setDefaultAction(self._act_analyze)
         viewer_column_layout.addWidget(self._viewer_container, 1)
         # Keep `self.canvas` alias for backward compatibility with existing methods.
         self.canvas = self._image_panels[0].canvas
@@ -807,7 +811,19 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             QSizePolicy.Policy.Minimum,
             QSizePolicy.Policy.Expanding if collapsed else QSizePolicy.Policy.Minimum,
         )
-        self._files_panel.layout().invalidate()
+        sidebar_layout = self._files_panel.layout()
+        sidebar_layout.setStretchFactor(self._files_card, 0 if collapsed else 1)
+        self._files_card.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Maximum if collapsed else QSizePolicy.Policy.Expanding,
+        )
+        if rail:
+            sidebar_layout.setContentsMargins(4, 8, 0, 8)
+            self._files_card_layout.setContentsMargins(4, 6, 4, 6)
+        else:
+            sidebar_layout.setContentsMargins(8, 8, 2, 8)
+            self._files_card_layout.setContentsMargins(8, 8, 8, 8)
+        sidebar_layout.invalidate()
         self._files_toggle_btn.setText("▶" if collapsed else "▼")
         self._files_toggle_btn.setToolTip(
             tr(
@@ -874,6 +890,28 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             self._set_files_panel_collapsed(collapsed, persist=False)
         self._sync_param_panel_visibility()
 
+    def _refresh_theme_toggle(self) -> None:
+        dark = self._theme == theming.THEME_DARK
+        language = getattr(self, "_language", LANG_EN)
+        self._theme_toggle_btn.setIcon(_theme_toggle_icon(dark=dark))
+        self._theme_toggle_btn.setToolTip(
+            tr("Switch to light theme" if dark else "Switch to dark theme", language)
+        )
+        self._theme_toggle_btn.setAccessibleName(self._theme_toggle_btn.toolTip())
+
+    def _toggle_theme(self) -> None:
+        self._set_theme(
+            theming.THEME_LIGHT if self._theme == theming.THEME_DARK else theming.THEME_DARK
+        )
+
+    def _set_theme(self, theme: str, *, persist: bool = True) -> None:
+        """Switch between the light and dark themes; layout stays the same."""
+        self._theme = theming.set_theme(theme)
+        self._act_open.setIcon(_folder_open_icon())
+        self._refresh_theme_toggle()
+        if persist:
+            self._persistence.remember_ui_state(theme=self._theme)
+
     def _set_language(self, language: str, *, persist: bool = True) -> None:
         """Apply the display language while keeping analysis data untouched."""
         if language not in {LANG_EN, LANG_ZH_CN}:
@@ -886,6 +924,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             self._language_combo.blockSignals(False)
 
         self._language_combo.setToolTip(tr("Language", language))
+        self._refresh_theme_toggle()
         self._act_open.setText(tr("Import Images", language))
         self._act_image_transform.setText(tr("Image Transform", language))
         self._act_analyze.setText(tr("Analyze", language))
@@ -895,10 +934,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         )
         self._wb_plot_generation_btn.setText(tr("② Figure Layout", language))
         self._fit_workspace_tab_widths()
-        self._files_drop_hint.setText(tr("Drop .scn / .tif files here", language))
-        self._analyze_hint.setText(
-            tr("Draw the lane ROI, then the band ROI, then press Enter.", language)
-        )
+        self._files_drop_hint.setText(tr("Drop .scn / .tif", language))
         self._empty_state.setText(
             "<div style='font-size:16px; font-weight:600; color:#1C2622;'>"
             + tr("Drop .scn or .tif files here, or click Import Images", language)
@@ -1154,7 +1190,17 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
 
     def _set_analyze_toolbar_visible(self, visible: bool) -> None:
         """Show Analyze only while the densitometry workspace is selected."""
-        self._analyze_toolbar_group.setVisible(visible)
+        self._analyze_visible = bool(visible)
+        for panel in self._image_panels:
+            panel.analyze_btn.setVisible(self._analyze_visible)
+
+    @property
+    def _analyze_toolbar_btn(self) -> QToolButton:
+        """The Analyze button of the active image (used by the tutorial)."""
+        index = self._active_slot_index
+        if index is None or not (0 <= index < len(self._image_panels)):
+            index = 0
+        return self._image_panels[index].analyze_btn
 
     def _set_import_toolbar_visible(self, visible: bool) -> None:
         """Expose image import only inside a selected workspace."""

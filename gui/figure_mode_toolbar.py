@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.layout_engine import LayoutResult
+from gui import theming
 from gui.figure_mode_widgets import _FlowLayout
 from gui.figure_mode_styles import (
     _PANEL_BTN_H,
@@ -238,10 +239,14 @@ class CanvasToolbarMixin:
         self._underline_btn.setEnabled(False)
         flow.addWidget(self._underline_btn)
 
+        self._content_align_buttons = {}
+        theming.on_change(self._refresh_text_align_icons)
+
         def _content_align_btn(align: str, tip: str) -> QToolButton:
             btn = QToolButton()
             btn.setFixedSize(_RIBBON_H + 2, _RIBBON_H)
             btn.setIcon(self._make_text_align_icon(align))
+            self._content_align_buttons[align] = btn
             btn.setIconSize(QSize(18, 18))
             btn.setToolTip(tip)
             btn.setStyleSheet(_RIBBON_TOOL_BTN_STYLE)
@@ -342,12 +347,16 @@ class CanvasToolbarMixin:
     def _on_add_overlay_line(self) -> None:
         self._canvas.enter_place_mode("line")
 
+    def _refresh_text_align_icons(self) -> None:
+        for align, btn in getattr(self, "_content_align_buttons", {}).items():
+            btn.setIcon(self._make_text_align_icon(align))
+
     def _make_text_align_icon(self, align: str) -> QIcon:
         pm = QPixmap(24, 24)
         pm.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pm)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        pen = QPen(QColor("#2D3B38"), 1.8)
+        pen = QPen(theming.color("#2D3B38"), 1.8)
         pen.setCapStyle(Qt.PenCapStyle.SquareCap)
         painter.setPen(pen)
         widths = [15, 21, 12, 18]

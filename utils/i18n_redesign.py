@@ -2,6 +2,15 @@
 from __future__ import annotations
 
 ZH_CN_REDESIGN: dict[str, str] = {
+    "Target": "目的蛋白",
+    "Loading": "内参",
+    "Ratio": "比值",
+    "Plot": "作图",
+    "Lanes": "泳道",
+    "Fix": "固定",
+    "Drop .scn / .tif": "拖入 .scn / .tif",
+    "Switch to light theme": "切换到浅色",
+    "Switch to dark theme": "切换到深色",
     "① Quantify & Plot": "① 定量与作图",
     "② Figure Layout": "② 图像排版",
     "Uploaded Files": "文件",

@@ -20,6 +20,7 @@ from config.settings import COLOR_ACCENT_LIGHT, COLOR_ACCENT_TEXT
 
 # Clear without being loud: a mid green between the accent and its tint.
 SELECTED_PANEL_BORDER = "#4FA683"
+from gui import theming
 from gui.icons import _image_operation_icon, _zoom_icon
 from gui.image_canvas import ImageCanvas
 
@@ -115,6 +116,26 @@ class _ImagePanelWidget(QFrame):
                 background: transparent;
                 color: #4A5A53;
                 font-size: 12px;
+            }}
+            QToolButton#analyze_btn {{
+                background-color: #1F6B4A;
+                border: 1px solid #1F6B4A;
+                border-radius: 7px;
+                color: #FFFFFF;
+                font-size: 12px;
+                font-weight: 600;
+                padding: 0px 14px;
+                min-height: 22px;
+                max-height: 22px;
+            }}
+            QToolButton#analyze_btn:hover {{
+                background-color: #134A32;
+                border-color: #134A32;
+            }}
+            QToolButton#analyze_btn:disabled {{
+                background-color: #E9EEEB;
+                color: #8A9891;
+                border-color: #D9E0DC;
             }}
             QPushButton#panel_remove_btn {{
                 background-color: #FFFFFF;
@@ -252,6 +273,7 @@ class _ImagePanelWidget(QFrame):
         )
         self.rotate_btn.setMenu(self.rotate_menu)
         top_row.addWidget(self.rotate_btn)
+        theming.on_change(self._refresh_theme_icons)
         self.zoom_out_btn = QToolButton()
         self.zoom_out_btn.setObjectName("panel_zoom_btn")
         self.zoom_out_btn.setIcon(_zoom_icon(zoom_in=False))
@@ -275,6 +297,15 @@ class _ImagePanelWidget(QFrame):
         self.filename_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.filename_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         top_row.addWidget(self.filename_label)
+        # Analyze sits in the toolbar of the image it measures, so the blot
+        # gets the full height of the panel.  The main window binds the action.
+        self.analyze_btn = QToolButton()
+        self.analyze_btn.setObjectName("analyze_btn")
+        self.analyze_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.analyze_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.analyze_btn.pressed.connect(self.canvas_interacted)
+        self.analyze_btn.hide()
+        top_row.addWidget(self.analyze_btn)
         self.remove_btn = QPushButton("ⓧ")
         self.remove_btn.setObjectName("panel_remove_btn")
         self.remove_btn.setToolTip("Remove image")
@@ -307,6 +338,19 @@ class _ImagePanelWidget(QFrame):
         if event.button() == Qt.MouseButton.LeftButton:
             self.canvas.panel_interacted.emit()
         super().mousePressEvent(event)
+
+
+    def canvas_interacted(self) -> None:
+        """Make this panel the active one (same as clicking its header)."""
+        self.canvas.panel_interacted.emit()
+
+    def _refresh_theme_icons(self) -> None:
+        self.flip_horizontal_action.setIcon(_image_operation_icon("flip-horizontal"))
+        self.flip_vertical_action.setIcon(_image_operation_icon("flip-vertical"))
+        self.rotate_custom_action.setIcon(_image_operation_icon("custom-rotate"))
+        self.undo_image_operation_action.setIcon(_image_operation_icon("undo"))
+        self.zoom_out_btn.setIcon(_zoom_icon(zoom_in=False))
+        self.zoom_in_btn.setIcon(_zoom_icon(zoom_in=True))
 
 
 class _UploadedFileListRow(QWidget):
