@@ -30,7 +30,7 @@ from gui.figure_mode_styles import (
     _PANEL_BTN_H,
     _PANEL_BTN_STYLE,
     _PANEL_HEADING_STYLE,
-    _SMALL_BTN_STYLE,
+    _SAVE_BTN_STYLE,
 )
 from utils.i18n import tr
 
@@ -127,23 +127,24 @@ class CanvasToolbarMixin:
         save_box = QHBoxLayout(self._save_panel)
         save_box.setContentsMargins(0, 0, 0, 0)
         save_box.setSpacing(6)
+        self._save_panel.setObjectName("savePanel")
 
-        save_blot_btn = QPushButton("Save File")
-        save_blot_btn.setStyleSheet(_SMALL_BTN_STYLE)
+        save_blot_btn = QPushButton("Save Blot")
+        save_blot_btn.setStyleSheet(_SAVE_BTN_STYLE)
         save_blot_btn.setToolTip(
             "Save current layout, annotations, blot images, ROIs, and editable state"
         )
-        save_blot_btn.setFixedHeight(32)
+        save_blot_btn.setFixedHeight(30)
         save_blot_btn.clicked.connect(self._on_save_blot_file)
         save_box.addWidget(save_blot_btn, 1)
 
         save_tmpl_btn = QPushButton("Save Template")
-        save_tmpl_btn.setStyleSheet(_SMALL_BTN_STYLE)
+        save_tmpl_btn.setStyleSheet(_SAVE_BTN_STYLE)
         save_tmpl_btn.setToolTip(
             "Save current layout (structure, labels, annotations)\n"
             "as a reusable Figure Template in Saved Templates"
         )
-        save_tmpl_btn.setFixedHeight(32)
+        save_tmpl_btn.setFixedHeight(30)
         save_tmpl_btn.clicked.connect(self._on_save_template)
         save_box.addWidget(save_tmpl_btn, 1)
 

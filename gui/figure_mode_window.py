@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (
     QFileDialog,  # noqa: F401 - used by the mixins; kept importable from here
     QInputDialog, QListWidget, QListWidgetItem,
     QComboBox, QRadioButton, QScrollArea, QSizePolicy, QSpinBox, QDoubleSpinBox, QStackedWidget,
-    QToolButton, QVBoxLayout, QWidget,
+    QToolButton, QToolTip, QVBoxLayout, QWidget,
 )
 
 from config.paths import blot_files_dir
@@ -61,6 +61,7 @@ from core.layout_engine import (
     scene_to_pt,
 )
 from core.template_engine import TemplateEngine
+from gui import theming
 from gui.condition_template_dialog import (
     ConditionPreviewWidget as _ConditionPreviewWidget,
     ConditionTemplateDialogController,
@@ -100,7 +101,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
     # The workflow panel needs enough room for the two-column detection and
     # template controls without clipping.  It remains substantially narrower
     # than the source-image and figure-canvas workspaces around it.
-    _SIDEBAR_WIDTH = 236
+    _SIDEBAR_WIDTH = 248
 
     def __init__(self, parent=None, *, language: str = LANG_EN) -> None:
         super().__init__(parent)
@@ -337,11 +338,23 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         self._grp5.setParent(self)
         self._grp5.hide()
 
+        # The Fill how-to lives behind a "?" next to the heading, like the
+        # ROI card in Quantify & Plot.  The hidden label only holds the text.
         self._step_desc_lbl = QLabel("")
-        self._step_desc_lbl.setWordWrap(True)
-        self._step_desc_lbl.setStyleSheet(
-            "font-size:11px; font-weight:600; color:#1F6B4A; background:transparent;"
+        self._step_desc_lbl.setParent(self)
+        self._step_desc_lbl.hide()
+        self._fill_help_btn = QToolButton()
+        self._fill_help_btn.setObjectName("fill_help_btn")
+        self._fill_help_btn.setText("?")
+        self._fill_help_btn.setFixedSize(16, 16)
+        self._fill_help_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._fill_help_btn.setStyleSheet(
+            "QToolButton#fill_help_btn { background:transparent; "
+            "border:1px solid #C9D3CE; border-radius:8px; /* exact */ "
+            "color:#5A6B63; font-size:10px; font-weight:600; padding:0px; }"
+            "QToolButton#fill_help_btn:hover { border-color:#1F6B4A; color:#134A32; }"
         )
+        self._fill_help_btn.clicked.connect(self._show_fill_help)
         # The hint above already says it; drop the repeated wording.
         for label in self._grp4.findChildren(QLabel):
             if label.text() in {"Detection", "select then hit Enter/Return"}:
@@ -350,20 +363,21 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         page = QWidget()
         page.setObjectName("workflowStepPage")
-        page.setStyleSheet("QWidget#workflowStepPage { background: #FFFFFF; }")
+        page.setStyleSheet("QWidget#workflowStepPage { background: transparent; }")
         page_layout = QVBoxLayout(page)
-        page_layout.setContentsMargins(10, 10, 10, 10)
-        page_layout.setSpacing(12)
+        page_layout.setContentsMargins(12, 12, 12, 12)
+        page_layout.setSpacing(16)
         self._sidebar_layout = page_layout
 
         self._step_headings: list[QLabel] = []
+        self._step_badges: list[QLabel] = []
         self._step_pages: list[QWidget] = []
         section_contents: list[list[QWidget]] = [
             [self._grp1],
-            [self._step_desc_lbl, self._grp4],
+            [self._grp4],
             [self._grp6, self._save_panel],
         ]
-        for widgets in section_contents:
+        for number, widgets in enumerate(section_contents, start=1):
             section = QWidget()
             section.setObjectName("workflowStepSection")
             section.setStyleSheet(
@@ -371,19 +385,36 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             )
             section_layout = QVBoxLayout(section)
             section_layout.setContentsMargins(0, 0, 0, 0)
-            section_layout.setSpacing(6)
+            section_layout.setSpacing(8)
+            heading_row = QHBoxLayout()
+            heading_row.setContentsMargins(0, 0, 0, 0)
+            heading_row.setSpacing(8)
+            badge = QLabel(str(number))
+            badge.setObjectName("workflowStepBadge")
+            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            badge.setFixedSize(20, 20)
+            badge.setStyleSheet(
+                "QLabel#workflowStepBadge { background:#1F6B4A; color:#FEFEFE; "
+                "border-radius:10px; /* exact */ font-size:11px; font-weight:700; }"
+            )
             heading = QLabel("")
             heading.setObjectName("workflowStepHeading")
-            heading.setFixedHeight(26)
+            heading.setFixedHeight(22)
             heading.setStyleSheet(
                 "QLabel#workflowStepHeading { background:transparent; color:#1C2622; "
-                "font-size:13px; font-weight:700; padding:0px 2px; }"
+                "font-size:13px; font-weight:700; }"
             )
-            section_layout.addWidget(heading)
+            heading_row.addWidget(badge)
+            heading_row.addWidget(heading)
+            if number == 2:
+                heading_row.addWidget(self._fill_help_btn)
+            heading_row.addStretch(1)
+            section_layout.addLayout(heading_row)
             for widget in widgets:
                 section_layout.addWidget(widget)
             page_layout.addWidget(section)
             self._step_headings.append(heading)
+            self._step_badges.append(badge)
             self._step_pages.append(section)
         page_layout.addStretch(1)
 
@@ -391,11 +422,11 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet(
-            "QScrollArea { border: none; background: #FFFFFF; border-radius: 9px; }"
+            "QScrollArea { border: none; background: transparent; }"
         )
         scroll.viewport().setObjectName("workflowStepViewport")
         scroll.viewport().setStyleSheet(
-            "QWidget#workflowStepViewport { background: #FFFFFF; border-radius: 9px; }"
+            "QWidget#workflowStepViewport { background: transparent; }"
         )
         scroll.setWidget(page)
         self._step_scroll = scroll
@@ -412,7 +443,10 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
     _STEP_TITLES = ("Layout", "Fill", "Export")
     _STEP_DESCRIPTIONS = (
         "",
-        "Click frame → draw → Enter",
+        "How to fill a blot frame:\n"
+        "1. Click a blot frame in the Figure Preview\n"
+        "2. Draw a box around the band on the image\n"
+        "3. Press Enter/Return to fill the frame",
         "",
     )
 
@@ -438,8 +472,20 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
     def _refresh_step_panel_texts(self) -> None:
         for index, heading in enumerate(self._step_headings, start=1):
-            heading.setText(f"{index}   {tr(self._STEP_TITLES[index - 1], self._language)}")
+            heading.setText(tr(self._STEP_TITLES[index - 1], self._language))
         self._step_desc_lbl.setText(tr(self._STEP_DESCRIPTIONS[1], self._language))
+        self._fill_help_btn.setToolTip(self._step_desc_lbl.text())
+        # "Blots" alone already means something else in Chinese.
+        self._saved_blot_files_btn.setText(
+            "Blots" if self._language != "zh_CN" else tr("Blot Files", self._language)
+        )
+
+    def _show_fill_help(self) -> None:
+        QToolTip.showText(
+            self._fill_help_btn.mapToGlobal(self._fill_help_btn.rect().bottomLeft()),
+            self._fill_help_btn.toolTip(),
+            self._fill_help_btn,
+        )
 
     def _show_saved_blot_files_dialog(self) -> None:
         """Pick a saved Blot File from a list, the way Saved Templates works."""
@@ -709,24 +755,41 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         )
         grp.body_layout().addWidget(detection_lbl)
 
-        mode_row = QHBoxLayout()
-        mode_row.setContentsMargins(0, 0, 0, 0)
-        mode_row.setSpacing(9)
+        # Auto | Manual as one segmented pill.
+        mode_track = QFrame()
+        mode_track.setObjectName("fillModeTrack")
+        mode_track.setFixedHeight(36)
+        mode_track.setStyleSheet(
+            "QFrame#fillModeTrack { background:#E9EEEB; border:none; "
+            "border-radius:18px; /* exact */ }"
+        )
+        mode_row = QHBoxLayout(mode_track)
+        mode_row.setContentsMargins(3, 3, 3, 3)
+        mode_row.setSpacing(2)
         self._roi_mode_group = QButtonGroup(self)
         self._roi_mode_group.setExclusive(True)
-        self._auto_detect_radio = QRadioButton("Auto Detect")
-        self._manual_detect_radio = QRadioButton("Manual")
+        # Checkable buttons (not radio buttons) so the text can be centred.
+        self._auto_detect_radio = QPushButton("Auto")
+        self._manual_detect_radio = QPushButton("Manual")
+        for button in (self._auto_detect_radio, self._manual_detect_radio):
+            button.setCheckable(True)
         self._auto_detect_radio.setChecked(True)
         for button in (self._auto_detect_radio, self._manual_detect_radio):
+            button.setObjectName("fillModeSegment")
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setFixedHeight(30)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             button.setStyleSheet(
-                "QRadioButton { font-size:12px; color:#2F3D36; spacing:4px; }"
-                "QRadioButton::indicator { width:13px; height:13px; }"
+                "QPushButton#fillModeSegment { background:transparent; color:#3B4A43; "
+                "border:none; border-radius:15px; /* exact */ font-size:13px; "
+                "padding:0px; }"
+                f"QPushButton#fillModeSegment:checked {{ background:{theming.SEGMENT_SOURCE}; "
+                f"color:{theming.SEGMENT_TEXT_SOURCE}; font-weight:600; }}"
             )
             self._roi_mode_group.addButton(button)
-            mode_row.addWidget(button)
-        mode_row.addStretch(1)
+            mode_row.addWidget(button, 1)
         self._auto_detect_radio.toggled.connect(self._on_roi_fill_mode_changed)
-        grp.body_layout().addLayout(mode_row)
+        grp.body_layout().addWidget(mode_track)
 
         enter_hint = QLabel("select then hit Enter/Return")
         enter_hint.setStyleSheet(
@@ -1741,6 +1804,9 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             note.setStyleSheet("color:#A66; font-size:12px;")
             bl.addWidget(note)
 
+        for button in (self._export_pdf_btn, self._export_tiff_btn, self._export_pptx_btn):
+            button.setFixedHeight(34)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
         return grp
 
     # ── Canvas annotation toolbar ─────────────────────────────────────────

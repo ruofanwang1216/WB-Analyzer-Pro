@@ -1488,8 +1488,8 @@ class FigureModeStructureTests(unittest.TestCase):
 
         self.assertEqual(window._grp1.title_text(), "Step 1: Choose Layout")
         self.assertEqual(window._grp4.title_text(), "Step 2: Fill Blot Frames")
-        self.assertEqual(window._SIDEBAR_WIDTH, 236)
-        self.assertEqual(window._step_panel.width(), 236)
+        self.assertEqual(window._SIDEBAR_WIDTH, 248)
+        self.assertEqual(window._step_panel.width(), 248)
         self.assertTrue(window._auto_detect_radio.isChecked())
         self.assertEqual(window._auto_fit_h_margin.value(), 4)
         self.assertEqual(window._auto_fit_v_margin.value(), 4)
@@ -1504,7 +1504,10 @@ class FigureModeStructureTests(unittest.TestCase):
         self.assertEqual(len(sections), 3)
         self.assertEqual(
             [heading.text() for heading in window._step_headings],
-            ["1   Layout", "2   Fill", "3   Export"],
+            ["Layout", "Fill", "Export"],
+        )
+        self.assertEqual(
+            [badge.text() for badge in window._step_badges], ["1", "2", "3"]
         )
         self.assertTrue(sections[0].isAncestorOf(window._grp1))
         self.assertTrue(sections[0].isAncestorOf(window._saved_blot_files_btn))
@@ -1517,7 +1520,7 @@ class FigureModeStructureTests(unittest.TestCase):
         self.assertFalse(hasattr(window, "_step_next_btn"))
         # Saved Blot Files open from a button, not an always-on list.
         self.assertFalse(window._step_panel.isAncestorOf(window._blot_file_list))
-        self.assertEqual(window._saved_blot_files_btn.text(), "Blot Files")
+        self.assertEqual(window._saved_blot_files_btn.text(), "Blots")
         # Annotation tools sit above the preview, outside the panel.
         self.assertFalse(window._step_panel.isAncestorOf(window._bold_btn))
         self.assertTrue(window._annotation_panel.isAncestorOf(window._bold_btn))
@@ -1531,10 +1534,10 @@ class FigureModeStructureTests(unittest.TestCase):
         button_texts = [
             button.text() for button in window._grp1.findChildren(QPushButton)
         ]
-        # Step 1 is five one-word buttons in two columns and nothing else.
+        # Step 1: two full-width buttons, then three small ones in a row.
         self.assertEqual(
             button_texts,
-            ["Frames", "Conditions", "Templates", "Blot Files", "+ Frame"],
+            ["New Blot Frames", "Add Conditions", "Templates", "+ Frame", "Blots"],
         )
         self.assertNotIn("Apply Template", button_texts)
         self.assertNotIn("Apply Structure", button_texts)
@@ -1555,7 +1558,7 @@ class FigureModeStructureTests(unittest.TestCase):
                 window._export_tiff_btn.height(),
                 window._export_pptx_btn.height(),
             },
-            {32},
+            {34},
         )
         self.assertEqual(
             {
@@ -1586,28 +1589,35 @@ class FigureModeStructureTests(unittest.TestCase):
         )
         create_frame = next(
             button for button in window._grp1.findChildren(QPushButton)
-            if button.text() == "Frames"
+            if button.text() == "New Blot Frames"
         )
         add_extra = next(
             button for button in window._grp1.findChildren(QPushButton)
             if button.text() == "+ Frame"
         )
-        self.assertEqual(create_frame.height(), 32)
-        self.assertEqual(window._saved_templates_btn.height(), 32)
-        self.assertEqual(add_extra.height(), 32)
-        # Two columns: the first two buttons share a row.
+        self.assertEqual(create_frame.height(), 36)
+        self.assertEqual(window._saved_templates_btn.height(), 30)
+        self.assertEqual(add_extra.height(), 30)
+        # The first two buttons span the row; the small three share one.
         conditions = next(
             button for button in window._grp1.findChildren(QPushButton)
-            if button.text() == "Conditions"
+            if button.text() == "Add Conditions"
         )
         grid = create_frame.parentWidget().layout()
-        self.assertEqual(grid.getItemPosition(grid.indexOf(create_frame))[:2], (0, 0))
-        self.assertEqual(grid.getItemPosition(grid.indexOf(conditions))[:2], (0, 1))
+        self.assertEqual(grid.getItemPosition(grid.indexOf(create_frame)), (0, 0, 1, 3))
+        self.assertEqual(grid.getItemPosition(grid.indexOf(conditions)), (1, 0, 1, 3))
+        self.assertEqual(
+            [
+                grid.getItemPosition(grid.indexOf(button))[:2]
+                for button in (window._saved_templates_btn, add_extra, window._saved_blot_files_btn)
+            ],
+            [(2, 0), (2, 1), (2, 2)],
+        )
         self.assertEqual(create_frame.objectName(), "step1PrimaryButton")
         self.assertEqual(add_extra.objectName(), "step1TextButton")
         create_condition = next(
             button for button in window._grp1.findChildren(QPushButton)
-            if button.text() == "Conditions"
+            if button.text() == "Add Conditions"
         )
         self.assertEqual(create_condition.objectName(), "step1SecondaryButton")
         self.assertLessEqual(
@@ -1626,11 +1636,16 @@ class FigureModeStructureTests(unittest.TestCase):
         self.assertTrue(window._selected_slot_lbl.isHidden())
         self.assertTrue(window._auto_fit_alignment.isHidden())
         self.assertEqual(window._auto_fit_alignment.currentData(), "auto")
-        # One short hint replaces the "Detection" label and its sub-line.
+        # The how-to sits behind a "?" next to the Fill heading, not as text.
         fill_labels = [label.text() for label in window._grp4.findChildren(QLabel)]
         self.assertNotIn("select then hit Enter/Return", fill_labels)
         self.assertNotIn("Detection", fill_labels)
-        self.assertEqual(window._step_desc_lbl.text(), "Click frame → draw → Enter")
+        self.assertTrue(window._step_desc_lbl.isHidden())
+        self.assertFalse(window._step_pages[1].isAncestorOf(window._step_desc_lbl))
+        self.assertTrue(window._step_pages[1].isAncestorOf(window._fill_help_btn))
+        self.assertEqual(window._fill_help_btn.text(), "?")
+        self.assertIn("Press Enter/Return", window._fill_help_btn.toolTip())
+        self.assertEqual(window._auto_detect_radio.text(), "Auto")
 
         window._manual_detect_radio.setChecked(True)
 
@@ -3187,16 +3202,17 @@ class FigureModeStructureTests(unittest.TestCase):
         window.set_language("zh_CN")
         self.assertEqual(
             [heading.text() for heading in window._step_headings],
-            ["1   布局", "2   填充", "3   导出"],
+            ["布局", "填充", "导出"],
         )
-        self.assertEqual(window._step_desc_lbl.text(), "点图框 → 框选 → 回车")
+        self.assertIn("按 Enter/Return", window._fill_help_btn.toolTip())
         self.assertEqual(window._saved_blot_files_btn.text(), "已存文件")
         window.set_language("en")
         self.assertEqual(
             [heading.text() for heading in window._step_headings],
-            ["1   Layout", "2   Fill", "3   Export"],
+            ["Layout", "Fill", "Export"],
         )
-        self.assertEqual(window._step_desc_lbl.text(), "Click frame → draw → Enter")
+        self.assertEqual(window._saved_blot_files_btn.text(), "Blots")
+        self.assertIn("Press Enter/Return", window._fill_help_btn.toolTip())
 
     def test_saved_blot_files_open_in_a_dialog_and_return_the_list(self) -> None:
         window = FigureModeWindow()

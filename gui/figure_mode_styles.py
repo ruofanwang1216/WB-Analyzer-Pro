@@ -26,12 +26,27 @@ _SMALL_BTN_STYLE = (
     "  background-color: #FFFFFF;"
     "  border: 1px solid #C9D3CE;"
     "  border-radius: 8px;"
+    "  font-weight: 500;"
     "  color: #3B4A43;"
     "  padding: 4px 12px;"
     "  font-size: 12px;"
     "}"
     "QPushButton:hover { background-color: #E3EFE8; border-color: #1F6B4A; }"
     "QPushButton:disabled { color: #9AA8A1; border-color: #E4E9E6; }"
+)
+
+
+_SAVE_BTN_STYLE = (
+    "QPushButton {"
+    "  background-color: #FFFFFF;"
+    "  border: 1px solid #C9D3CE;"
+    "  border-radius: 15px; /* exact */"
+    "  color: #1C2622;"
+    "  padding: 0px 4px;"
+    "  font-size: 12px;"
+    "  font-weight: 500;"
+    "}"
+    "QPushButton:hover { background-color: #E3EFE8; border-color: #1F6B4A; }"
 )
 
 
@@ -53,14 +68,14 @@ _HIGHLIGHT_BTN_STYLE = (
 _SECONDARY_EXPORT_BTN_STYLE = (
     "QPushButton {"
     "  background-color: #FFFFFF;"
-    "  border: 1px solid #1F6B4A;"
-    "  border-radius: 8px;"
-    "  color: #1F6B4A;"
-    "  padding: 6px 8px;"
-    "  font-size: 13px;"
+    "  border: 1px solid #C9D3CE;"
+    "  border-radius: 17px; /* exact */"
+    "  color: #1C2622;"
+    "  padding: 0px 4px;"
+    "  font-size: 12px;"
     "  font-weight: 600;"
     "}"
-    "QPushButton:hover { background-color: #E3EFE8; }"
+    "QPushButton:hover { background-color: #E3EFE8; border-color: #1F6B4A; }"
     "QPushButton:disabled { background-color: #F3F5F4; color: #9AA8A1; border-color: #E4E9E6; }"
 )
 

@@ -63,8 +63,8 @@ class TemplateLibraryMixin:
         self._template_list.setParent(self)
         self._template_list.hide()
 
-        # Five short buttons in two columns.  One word each; the tooltip
-        # says the rest.  Top row starts a layout, second row reuses one.
+        # Two full-width buttons start a layout; one row of three small
+        # buttons reuses or extends one.
         actions = QWidget()
         actions.setObjectName("step1Flow")
         actions.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -72,75 +72,78 @@ class TemplateLibraryMixin:
         actions_layout = QGridLayout(actions)
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setHorizontalSpacing(6)
-        actions_layout.setVerticalSpacing(6)
-        actions_layout.setColumnStretch(0, 1)
-        actions_layout.setColumnStretch(1, 1)
-        button_height = 32
+        actions_layout.setVerticalSpacing(8)
+        for column in range(3):
+            actions_layout.setColumnStretch(column, 1)
 
-        def styled(button: QPushButton, name: str, kind: str, tooltip: str) -> QPushButton:
+        def styled(
+            button: QPushButton, name: str, kind: str, tooltip: str, height: int
+        ) -> QPushButton:
             button.setObjectName(name)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setToolTip(tooltip)
-            button.setFixedHeight(button_height)
+            button.setFixedHeight(height)
             button.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+            radius = height // 2
             if kind == "primary":
                 sheet = (
-                    f"QPushButton#{name} {{ background:#1F6B4A; color:#FFFFFF; "
-                    "border:1px solid #1F6B4A; border-radius:7px; font-size:13px; "
-                    "font-weight:600; padding:2px 4px; }}"
+                    f"QPushButton#{name} {{ background:#1F6B4A; color:#FEFEFE; "
+                    f"border:1px solid #1F6B4A; border-radius:{radius}px; /* exact */ "
+                    "font-size:13px; font-weight:600; padding:0px 4px; }}"
                     f"QPushButton#{name}:hover {{ background:#134A32; border-color:#134A32; }}"
                 )
             elif kind == "outline":
                 sheet = (
-                    f"QPushButton#{name} {{ background:#FFFFFF; color:#1F6B4A; "
-                    "border:1px solid #1F6B4A; border-radius:7px; font-size:13px; "
-                    "font-weight:600; padding:2px 4px; }}"
+                    f"QPushButton#{name} {{ background:#FFFFFF; color:#134A32; "
+                    f"border:1px solid #1F6B4A; border-radius:{radius}px; /* exact */ "
+                    "font-size:13px; font-weight:500; padding:0px 4px; }}"
                     f"QPushButton#{name}:hover {{ background:#E3EFE8; }}"
                 )
             else:
                 sheet = (
                     f"QPushButton#{name} {{ background:#FFFFFF; color:#1C2622; "
-                    "border:1px solid #C9D3CE; border-radius:7px; font-size:13px; "
-                    "padding:2px 4px; }}"
+                    f"border:1px solid #C9D3CE; border-radius:{radius}px; /* exact */ "
+                    "font-size:12px; font-weight:500; padding:0px 2px; }}"
                     f"QPushButton#{name}:hover {{ background:#E3EFE8; border-color:#1F6B4A; }}"
                 )
             button.setStyleSheet(sheet.replace("{{", "{").replace("}}", "}"))
             return button
 
         create_btn = styled(
-            QPushButton("Frames"), "step1PrimaryButton", "primary",
-            "New layout: choose how many blot frames and lanes",
+            QPushButton("New Blot Frames"), "step1PrimaryButton", "primary",
+            "New layout: choose how many blot frames and lanes", 36,
         )
         create_btn.clicked.connect(self._on_create_template)
-        actions_layout.addWidget(create_btn, 0, 0)
+        actions_layout.addWidget(create_btn, 0, 0, 1, 3)
 
         create_condition_btn = styled(
-            QPushButton("Conditions"), "step1SecondaryButton", "outline",
-            "Add the +/− condition labels above the lanes",
+            QPushButton("Add Conditions"), "step1SecondaryButton", "outline",
+            "Add the +/− condition labels above the lanes", 36,
         )
         create_condition_btn.clicked.connect(self._on_create_condition_template)
-        actions_layout.addWidget(create_condition_btn, 0, 1)
+        actions_layout.addWidget(create_condition_btn, 1, 0, 1, 3)
 
         self._saved_templates_btn = styled(
             QPushButton("Templates"), "step1SavedTemplatesButton", "plain",
-            "Reuse a saved layout",
+            "Reuse a saved layout", 30,
         )
         self._saved_templates_btn.clicked.connect(self._show_saved_templates_dialog)
-        actions_layout.addWidget(self._saved_templates_btn, 1, 0)
-
-        self._saved_blot_files_btn = styled(
-            QPushButton("Blot Files"), "step1SavedBlotFilesButton", "plain",
-            "Reopen a figure you saved earlier",
-        )
-        self._saved_blot_files_btn.clicked.connect(self._show_saved_blot_files_dialog)
-        actions_layout.addWidget(self._saved_blot_files_btn, 1, 1)
+        actions_layout.addWidget(self._saved_templates_btn, 2, 0)
 
         add_blot_btn = styled(
             QPushButton("+ Frame"), "step1TextButton", "plain",
             "Add a free-position Blot Frame. Select it, draw a WB ROI, then press Enter/Return to fill it.",
+            30,
         )
         add_blot_btn.clicked.connect(self._on_add_blot_frame)
-        actions_layout.addWidget(add_blot_btn, 2, 0)
+        actions_layout.addWidget(add_blot_btn, 2, 1)
+
+        self._saved_blot_files_btn = styled(
+            QPushButton("Blots"), "step1SavedBlotFilesButton", "plain",
+            "Reopen a figure you saved earlier", 30,
+        )
+        self._saved_blot_files_btn.clicked.connect(self._show_saved_blot_files_dialog)
+        actions_layout.addWidget(self._saved_blot_files_btn, 2, 2)
         bl.addWidget(actions)
 
         # Hidden state controls keep structure values in sync with loaded or

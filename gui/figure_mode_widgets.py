@@ -296,14 +296,14 @@ class _InlineDisclosure(QWidget):
         self._header.setFixedHeight(30)
         self._header.setStyleSheet(
             "QFrame#inlineDisclosureHeader { background:#FFFFFF; "
-            "border:1px solid #D3DDD8; border-radius:6px; }"
+            "border:1px solid #C9D3CE; border-radius:15px; /* exact */ }"
         )
         header_layout = QHBoxLayout(self._header)
-        header_layout.setContentsMargins(7, 1, 4, 1)
+        header_layout.setContentsMargins(12, 1, 8, 1)
         header_layout.setSpacing(4)
         self._title_label = QLabel(title)
         self._title_label.setStyleSheet(
-            "font-size:12px; font-weight:500; color:#2F3D36; background:transparent;"
+            "font-size:13px; font-weight:500; color:#1C2622; background:transparent;"
         )
         self._title_label.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents,
