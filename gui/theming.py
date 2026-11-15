@@ -44,6 +44,8 @@ _STATIC_PROP = "_theme_static"
 # is the colour that layer has once it is composited over the backdrop.
 ON_ACCENT_SOURCE = "#FEFEFE"   # write this for text / icons on accent fills
 WELL_SOURCE = "#EEF2EF"        # write this for the well behind an image or figure
+SEGMENT_SOURCE = "#FBFCFB"     # the selected segment of a segmented control
+SEGMENT_TEXT_SOURCE = "#1B1B1A"  # text on that segment (dark in both themes)
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,8 @@ def _spec(name: str, dark: bool, tokens: dict, **kwargs) -> _Spec:
         "#F5F8F6": t["alt"],
         "#E9EEEB": t["inset"],         # segmented-control track, disabled fill
         WELL_SOURCE: t["well"],        # image / figure wells inside a card
+        SEGMENT_SOURCE: t["segment"],
+        SEGMENT_TEXT_SOURCE: t["segment_text"],
         "#C9D3CE": t["border"],        # borders
         "#E4E9E6": t["border_light"],  # light borders
         "#D9E0DC": t["border_card"],
@@ -122,6 +126,8 @@ _LIGHT = _spec(
         "control": "#EDF3F3",
         "inset": "#CEDBDB",
         "well": "#E8EFEF",
+        "segment": "#F8FAFA",
+        "segment_text": "#232724",
         "header": "#E8EEEE",
         "alt": "#E3EBEB",
         "selected": "#C5D5D5",
@@ -169,6 +175,8 @@ _DARK = _spec(
         "control": "#5F6669",
         "inset": "#444A4C",
         "well": "#3F4547",
+        "segment": "#E4E8E8",
+        "segment_text": "#1B1B19",
         "header": "#474D50",
         "alt": "#4B5255",
         "selected": "#647173",
