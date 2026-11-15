@@ -277,6 +277,7 @@ class EditableBandRectItem(QGraphicsRectItem):
         self._active_handle: str | None = None
         self._start_scene_rect = QRectF()
         self._start_pos = QPointF()
+        self._hover_cursor_shape: Qt.CursorShape | None = None
 
     def set_editing_enabled(self, enabled: bool) -> None:
         self._editing_enabled = enabled
@@ -285,7 +286,7 @@ class EditableBandRectItem(QGraphicsRectItem):
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, enabled)
         if not enabled:
             self.setSelected(False)
-            self.unsetCursor()
+            self._apply_hover_cursor(None)
         self.update()
 
     def scene_rect(self) -> QRectF:
@@ -320,24 +321,35 @@ class EditableBandRectItem(QGraphicsRectItem):
         return None
 
     def _cursor_for_handle(self, handle: str | None) -> Qt.CursorShape:
-        if handle in {"top_left", "bottom_right"}:
-            return Qt.CursorShape.SizeFDiagCursor
-        if handle in {"top_right", "bottom_left"}:
-            return Qt.CursorShape.SizeBDiagCursor
+        # Only cursors backed by a native macOS cursor are used here.  Qt draws
+        # the diagonal-resize and four-arrow cursors from bitmaps, and building
+        # those while hovering crashed the app inside CoreGraphics on macOS.
+        if handle in {"top_left", "bottom_right", "top_right", "bottom_left"}:
+            return Qt.CursorShape.CrossCursor
         if handle in {"left", "right"}:
-            return Qt.CursorShape.SizeHorCursor
+            return Qt.CursorShape.SplitHCursor
         if handle in {"top", "bottom"}:
-            return Qt.CursorShape.SizeVerCursor
-        return Qt.CursorShape.SizeAllCursor
+            return Qt.CursorShape.SplitVCursor
+        return Qt.CursorShape.OpenHandCursor
+
+    def _apply_hover_cursor(self, shape: Qt.CursorShape | None) -> None:
+        """Change the cursor only when it actually differs from the current one."""
+        if shape == self._hover_cursor_shape:
+            return
+        self._hover_cursor_shape = shape
+        if shape is None:
+            self.unsetCursor()
+        else:
+            self.setCursor(shape)
 
     def hoverMoveEvent(self, event) -> None:
         if self._editing_enabled:
-            self.setCursor(self._cursor_for_handle(self._handle_for_pos(event.pos())))
+            self._apply_hover_cursor(self._cursor_for_handle(self._handle_for_pos(event.pos())))
         super().hoverMoveEvent(event)
 
     def hoverLeaveEvent(self, event) -> None:
         if self._editing_enabled and self._active_handle is None:
-            self.unsetCursor()
+            self._apply_hover_cursor(None)
         super().hoverLeaveEvent(event)
 
     def mousePressEvent(self, event) -> None:

@@ -132,6 +132,7 @@ class ResizableBlotFrameItem(QGraphicsRectItem):
         self._start_rect = QRectF()
         self._start_scene_pos = QPointF()
         self._start_screen_pos = QPointF()
+        self._hover_cursor_shape: Qt.CursorShape | None = None
         self._moved_during_drag = False
         self._selected = False
         self._apply_style()
@@ -161,15 +162,24 @@ class ResizableBlotFrameItem(QGraphicsRectItem):
         return None
 
     def hoverMoveEvent(self, event) -> None:
+        # Only cursors that macOS provides natively are used.  Qt draws the
+        # Size* cursors from bitmaps, and building one of those while the
+        # pointer moved over a frame crashed the app inside CoreGraphics
+        # (segfault in QImage::toCGImage, macOS 27 / Qt 6.11).
         handle = self._handle_for_pos(event.pos())
         if handle == "bottom_right":
-            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+            shape = Qt.CursorShape.CrossCursor
         elif handle == "right":
-            self.setCursor(Qt.CursorShape.SizeHorCursor)
+            shape = Qt.CursorShape.SplitHCursor
         elif handle == "bottom":
-            self.setCursor(Qt.CursorShape.SizeVerCursor)
+            shape = Qt.CursorShape.SplitVCursor
         else:
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            shape = Qt.CursorShape.PointingHandCursor
+        # Hover events arrive on every pointer move; touch the cursor only
+        # when it actually changes.
+        if shape != self._hover_cursor_shape:
+            self._hover_cursor_shape = shape
+            self.setCursor(shape)
         super().hoverMoveEvent(event)
 
     def mousePressEvent(self, event) -> None:

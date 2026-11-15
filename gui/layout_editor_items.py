@@ -69,14 +69,14 @@ class ResizeHandleItem(QGraphicsRectItem):
 
     @staticmethod
     def _cursor_for_handle(handle_id: str) -> Qt.CursorShape:
-        if handle_id in {"top_left", "bottom_right"}:
-            return Qt.CursorShape.SizeFDiagCursor
-        if handle_id in {"top_right", "bottom_left"}:
-            return Qt.CursorShape.SizeBDiagCursor
+        # Native macOS cursors only: Qt's bitmap Size* cursors crashed the
+        # app inside CoreGraphics when shown over the figure preview.
+        if handle_id in {"top_left", "bottom_right", "top_right", "bottom_left"}:
+            return Qt.CursorShape.CrossCursor
         if handle_id in {"left", "right"}:
-            return Qt.CursorShape.SizeHorCursor
+            return Qt.CursorShape.SplitHCursor
         if handle_id in {"top", "bottom"}:
-            return Qt.CursorShape.SizeVerCursor
+            return Qt.CursorShape.SplitVCursor
         return Qt.CursorShape.ArrowCursor
 
     def mousePressEvent(self, event) -> None:
@@ -817,7 +817,8 @@ class LineEndpointHandle(QGraphicsEllipseItem):
         self.setZValue(1000)
         self.setVisible(False)
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
-        self.setCursor(Qt.CursorShape.SizeAllCursor)
+        # OpenHand is native; the four-arrow SizeAll cursor is a Qt bitmap.
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
 
     def mousePressEvent(self, event) -> None:
         self.owner.begin_endpoint_drag()
