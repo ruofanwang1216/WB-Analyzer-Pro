@@ -26,15 +26,41 @@ from PySide6.QtWidgets import (
 from core.layout_engine import LayoutResult
 from gui.figure_mode_widgets import _FlowLayout
 from gui.figure_mode_styles import (
-    _SMALL_ACCENT_BTN_STYLE,
     _PANEL_BTN_H,
     _PANEL_BTN_STYLE,
     _PANEL_HEADING_STYLE,
-    _PANEL_TOOL_BTN_STYLE,
     _SMALL_BTN_STYLE,
-    _TOOLBAR_BTN_H,
 )
 from utils.i18n import tr
+
+
+# The strip above the preview is sized like a word-processor ribbon: small
+# controls, tight gaps, so it takes little height away from the figure.
+_RIBBON_H = 24
+_RIBBON_BTN_STYLE = (
+    "QPushButton { background:#FFFFFF; border:1px solid #C9D3CE; "
+    "border-radius:5px; color:#3B4A43; padding:1px 8px; font-size:12px; }"
+    "QPushButton:hover { background:#E3EFE8; border-color:#1F6B4A; }"
+    "QPushButton:disabled { color:#9AA8A1; border-color:#E4E9E6; }"
+)
+_RIBBON_ACCENT_BTN_STYLE = (
+    "QPushButton { background:#FFFFFF; border:1px solid #1F6B4A; "
+    "border-radius:5px; color:#1F6B4A; padding:1px 8px; font-size:12px; "
+    "font-weight:600; }"
+    "QPushButton:hover { background:#E3EFE8; }"
+)
+_RIBBON_TOOL_BTN_STYLE = (
+    "QToolButton { background:#FFFFFF; border:1px solid #C9D3CE; "
+    "border-radius:5px; color:#1C2622; font-size:12px; padding:0px 4px; }"
+    "QToolButton:checked { background:#E3EFE8; border-color:#1F6B4A; color:#134A32; }"
+    "QToolButton:hover { background:#E3EFE8; }"
+    "QToolButton:disabled { color:#9AA8A1; border-color:#E4E9E6; }"
+)
+_RIBBON_COMBO_STYLE = (
+    "QComboBox, QFontComboBox { font-size:12px; padding:0 14px 0 5px; "
+    "background:#FFFFFF; border:1px solid #C9D3CE; border-radius:5px; }"
+    "QComboBox::drop-down, QFontComboBox::drop-down { width:14px; border:none; }"
+)
 
 
 class CanvasToolbarMixin:
@@ -59,39 +85,39 @@ class CanvasToolbarMixin:
         outer_box.setContentsMargins(0, 0, 0, 0)
         outer_box.setSpacing(0)
         row1 = QHBoxLayout()
-        row1.setContentsMargins(12, 8, 12, 8)
-        row1.setSpacing(8)
+        row1.setContentsMargins(10, 5, 10, 5)
+        row1.setSpacing(6)
         outer_box.addLayout(row1)
 
         canvas_title = QLabel("Figure Preview")
         canvas_title.setStyleSheet(
-            "font-size:14px; font-weight:600; color:#134A32; background:transparent;"
+            "font-size:13px; font-weight:600; color:#134A32; background:transparent;"
         )
         row1.addWidget(canvas_title)
         row1.addStretch(1)
 
         self._annot_undo_btn = QPushButton("Undo")
-        self._annot_undo_btn.setStyleSheet(_SMALL_BTN_STYLE)
-        self._annot_undo_btn.setFixedHeight(_TOOLBAR_BTN_H)
+        self._annot_undo_btn.setStyleSheet(_RIBBON_BTN_STYLE)
+        self._annot_undo_btn.setFixedHeight(_RIBBON_H)
         self._annot_undo_btn.setEnabled(False)
         row1.addWidget(self._annot_undo_btn)
         self._annot_undo_btn.clicked.connect(self._undo_canvas_state)
 
         self._fit_center_btn = QPushButton("Fit")
-        self._fit_center_btn.setStyleSheet(_SMALL_BTN_STYLE)
+        self._fit_center_btn.setStyleSheet(_RIBBON_BTN_STYLE)
         self._fit_center_btn.setToolTip(
             "Reset zoom and place the complete WB figure in the canvas center"
         )
-        self._fit_center_btn.setFixedHeight(_TOOLBAR_BTN_H)
+        self._fit_center_btn.setFixedHeight(_RIBBON_H)
         self._fit_center_btn.clicked.connect(
             lambda: self._canvas.fit_frame_content_to_view()
         )
         row1.addWidget(self._fit_center_btn)
 
         reset_btn = QPushButton("Reset")
-        reset_btn.setStyleSheet(_SMALL_BTN_STYLE)
+        reset_btn.setStyleSheet(_RIBBON_BTN_STYLE)
         reset_btn.setToolTip("Clear only the WB Plot Figure Generation canvas and controls")
-        reset_btn.setFixedHeight(_TOOLBAR_BTN_H)
+        reset_btn.setFixedHeight(_RIBBON_H)
         reset_btn.clicked.connect(self._on_reset_figure_generation)
         row1.addWidget(reset_btn)
 
@@ -130,32 +156,28 @@ class CanvasToolbarMixin:
             "QWidget#annotationToolbar { background: #F1F5F3; "
             "border-bottom: 1px solid #D9E0DC; border-radius: 0px; }"
         )
-        flow = _FlowLayout(self._annotation_panel, margin=8, h_spacing=6, v_spacing=6)
+        flow = _FlowLayout(self._annotation_panel, margin=6, h_spacing=4, v_spacing=4)
 
         add_text_btn = QPushButton("+ Text")
-        add_text_btn.setStyleSheet(_SMALL_ACCENT_BTN_STYLE)
+        add_text_btn.setStyleSheet(_RIBBON_ACCENT_BTN_STYLE)
         add_text_btn.setToolTip("Click then click on canvas to place a text box (Esc to cancel)")
-        add_text_btn.setFixedHeight(_TOOLBAR_BTN_H)
+        add_text_btn.setFixedHeight(_RIBBON_H)
         add_text_btn.clicked.connect(self._on_add_overlay_text)
         flow.addWidget(add_text_btn)
 
         add_line_btn = QPushButton("+ Line")
-        add_line_btn.setStyleSheet(_SMALL_ACCENT_BTN_STYLE)
+        add_line_btn.setStyleSheet(_RIBBON_ACCENT_BTN_STYLE)
         add_line_btn.setToolTip("Click then click on canvas to place a line (Esc to cancel)")
-        add_line_btn.setFixedHeight(_TOOLBAR_BTN_H)
+        add_line_btn.setFixedHeight(_RIBBON_H)
         add_line_btn.clicked.connect(self._on_add_overlay_line)
         flow.addWidget(add_line_btn)
 
 
         self._toolbar_font_family_combo = QFontComboBox()
-        self._toolbar_font_family_combo.setFixedWidth(128)
-        self._toolbar_font_family_combo.setFixedHeight(_TOOLBAR_BTN_H)
+        self._toolbar_font_family_combo.setFixedWidth(126)
+        self._toolbar_font_family_combo.setFixedHeight(_RIBBON_H)
         self._toolbar_font_family_combo.setToolTip("Font")
-        self._toolbar_font_family_combo.setStyleSheet(
-            "QFontComboBox { font-size:12px; padding:0 18px 0 6px; "
-            "background:#FFFFFF; border:1px solid #C9D3CE; border-radius:6px; }"
-            "QFontComboBox::drop-down { width:18px; border:none; }"
-        )
+        self._toolbar_font_family_combo.setStyleSheet(_RIBBON_COMBO_STYLE)
         self._toolbar_font_family_combo.setEnabled(False)
         self._toolbar_font_family_combo.currentFontChanged.connect(
             lambda f: self._apply_toolbar_font(family=f.family())
@@ -165,8 +187,8 @@ class CanvasToolbarMixin:
         self._toolbar_font_menu_btn = QToolButton()
         self._toolbar_font_menu_btn.setText("▾")
         self._toolbar_font_menu_btn.setToolTip("Choose font")
-        self._toolbar_font_menu_btn.setFixedSize(22, _TOOLBAR_BTN_H)
-        self._toolbar_font_menu_btn.setStyleSheet(_PANEL_TOOL_BTN_STYLE)
+        self._toolbar_font_menu_btn.setFixedSize(18, _RIBBON_H)
+        self._toolbar_font_menu_btn.setStyleSheet(_RIBBON_TOOL_BTN_STYLE)
         self._toolbar_font_menu_btn.setEnabled(False)
         self._toolbar_font_menu_btn.clicked.connect(self._toolbar_font_family_combo.showPopup)
         flow.addWidget(self._toolbar_font_menu_btn)
@@ -178,14 +200,10 @@ class CanvasToolbarMixin:
             ["6", "7", "8", "9", "10", "11", "12", "14", "16", "18", "20", "24", "28", "36", "48", "72"]
         )
         self._toolbar_font_size_combo.setCurrentText("12")
-        self._toolbar_font_size_combo.setFixedWidth(62)
-        self._toolbar_font_size_combo.setFixedHeight(_TOOLBAR_BTN_H)
+        self._toolbar_font_size_combo.setFixedWidth(50)
+        self._toolbar_font_size_combo.setFixedHeight(_RIBBON_H)
         self._toolbar_font_size_combo.setToolTip("Size")
-        self._toolbar_font_size_combo.setStyleSheet(
-            "QComboBox { font-size:12px; padding:0 16px 0 6px; "
-            "background:#FFFFFF; border:1px solid #C9D3CE; border-radius:6px; }"
-            "QComboBox::drop-down { width:16px; border:none; }"
-        )
+        self._toolbar_font_size_combo.setStyleSheet(_RIBBON_COMBO_STYLE)
         self._toolbar_font_size_combo.setEnabled(False)
         self._toolbar_font_size_combo.currentTextChanged.connect(
             self._on_toolbar_font_size_changed
@@ -197,9 +215,9 @@ class CanvasToolbarMixin:
             btn = QToolButton()
             btn.setText(text)
             btn.setCheckable(True)
-            btn.setFixedSize(_TOOLBAR_BTN_H + 4, _TOOLBAR_BTN_H)
+            btn.setFixedSize(_RIBBON_H + 2, _RIBBON_H)
             btn.setToolTip(tip)
-            btn.setStyleSheet(_PANEL_TOOL_BTN_STYLE)
+            btn.setStyleSheet(_RIBBON_TOOL_BTN_STYLE)
             return btn
 
         self._bold_btn = _fmt_btn("B", "Bold")
@@ -222,11 +240,11 @@ class CanvasToolbarMixin:
 
         def _content_align_btn(align: str, tip: str) -> QToolButton:
             btn = QToolButton()
-            btn.setFixedSize(_TOOLBAR_BTN_H + 4, _TOOLBAR_BTN_H)
+            btn.setFixedSize(_RIBBON_H + 2, _RIBBON_H)
             btn.setIcon(self._make_text_align_icon(align))
-            btn.setIconSize(QSize(22, 22))
+            btn.setIconSize(QSize(18, 18))
             btn.setToolTip(tip)
-            btn.setStyleSheet(_PANEL_TOOL_BTN_STYLE)
+            btn.setStyleSheet(_RIBBON_TOOL_BTN_STYLE)
             btn.clicked.connect(lambda _checked=False, a=align: self._apply_text_content_alignment(a))
             return btn
 
@@ -244,13 +262,9 @@ class CanvasToolbarMixin:
 
         self._align_text_boxes_combo = QComboBox()
         self._align_text_boxes_combo.setToolTip("Align selected text boxes")
-        self._align_text_boxes_combo.setFixedHeight(_TOOLBAR_BTN_H)
-        self._align_text_boxes_combo.setFixedWidth(138)
-        self._align_text_boxes_combo.setStyleSheet(
-            "QComboBox { font-size:12px; padding:0 16px 0 6px; "
-            "background:#FFFFFF; border:1px solid #C9D3CE; border-radius:6px; }"
-            "QComboBox::drop-down { width:16px; border:none; }"
-        )
+        self._align_text_boxes_combo.setFixedHeight(_RIBBON_H)
+        self._align_text_boxes_combo.setFixedWidth(136)
+        self._align_text_boxes_combo.setStyleSheet(_RIBBON_COMBO_STYLE)
         self._align_text_boxes_combo.addItem("Align text Boxes", "")
         for label, action in [
             ("Align Left", "left"),
@@ -270,11 +284,11 @@ class CanvasToolbarMixin:
         self._match_size_btn = QToolButton()
         self._match_size_btn.setText("Same Size")
         self._match_size_btn.setToolTip("Make selected text boxes or Blot Frames the same size")
-        self._match_size_btn.setFixedHeight(_TOOLBAR_BTN_H)
+        self._match_size_btn.setFixedHeight(_RIBBON_H)
         self._match_size_btn.setEnabled(False)
         self._match_size_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._match_size_btn.setStyleSheet(
-            _PANEL_TOOL_BTN_STYLE
+            _RIBBON_TOOL_BTN_STYLE
             + "QToolButton::menu-indicator { image:none; width:0px; }"
         )
         match_menu = QMenu(self._match_size_btn)
@@ -290,7 +304,7 @@ class CanvasToolbarMixin:
         self._selection_detail_toolbar.setStyleSheet("background: transparent;")
         row4 = QHBoxLayout(self._selection_detail_toolbar)
         row4.setContentsMargins(0, 0, 0, 0)
-        row4.setSpacing(6)
+        row4.setSpacing(4)
 
         self._line_width_label = QLabel("Line:")
         self._line_width_label.setStyleSheet("font-size:12px; color:#4A5A53; background:transparent;")
@@ -301,8 +315,8 @@ class CanvasToolbarMixin:
         self._line_width_spin.setSingleStep(0.5)
         self._line_width_spin.setDecimals(1)
         self._line_width_spin.setValue(1.5)
-        self._line_width_spin.setFixedWidth(76)
-        self._line_width_spin.setFixedHeight(_TOOLBAR_BTN_H)
+        self._line_width_spin.setFixedWidth(64)
+        self._line_width_spin.setFixedHeight(_RIBBON_H)
         self._line_width_spin.setSuffix(" pt")
         self._line_width_spin.setStyleSheet("font-size:12px;")
         self._line_width_spin.setEnabled(False)
@@ -311,7 +325,7 @@ class CanvasToolbarMixin:
         row4.addStretch()
         # Reserve this slot permanently so selecting a line does not make the
         # toolbar re-wrap and push the canvas.
-        self._selection_detail_toolbar.setFixedSize(124, _TOOLBAR_BTN_H)
+        self._selection_detail_toolbar.setFixedSize(104, _RIBBON_H)
         self._line_width_label.setVisible(False)
         self._line_width_spin.setVisible(False)
         self._selection_detail_toolbar.setVisible(True)

@@ -3484,7 +3484,7 @@ class FigureModeStructureTests(unittest.TestCase):
             0.95,
             delta=0.03,
         )
-        self.assertIn("border: 1px solid #C9D3CE", window._fit_center_btn.styleSheet())
+        self.assertIn("border:1px solid #C9D3CE", window._fit_center_btn.styleSheet())
 
     def test_layout_engine_does_not_render_panel_letters(self) -> None:
         project = TemplateEngine.build_project("multi_panel", 3, 2, 4)
