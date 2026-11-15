@@ -16,6 +16,8 @@ from utils.i18n import LANG_ZH_CN, tr
 
 # (pattern, Chinese template) for messages built with f-strings.
 _ZH_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"^Auto-straightened by (?P<angle>[\d.]+)°\. Use Rotate → Undo to revert\.$"),
+     "已自动调正 {angle}°。如需还原，请用“旋转 → 撤销”。"),
     (re.compile(r"^Loaded: (?P<name>.+) — viewer showing (?P<count>\d+) images\. Click an image to work on it\.$"),
      "已载入 {name}。当前显示 {count} 张图像，点击其中一张即可选中它。"),
     (re.compile(r"^Loaded: (?P<name>.+) — draw a ROI to continue\.$"),

@@ -246,6 +246,15 @@ _ZH_CN = {
     "Undo Image Operation": "撤销图像操作",
     "Image Transform: Low / High / Gamma": "图像显示调整：低值／高值／伽马",
     "Rotate Image": "旋转图像",
+    "Auto Straighten": "自动调正",
+    "Detect how tilted the bands are and level them": "自动识别条带的倾斜角度并调正",
+    "Auto-straighten: level tilted bands in one click (arrow: more rotate options)":
+        "自动调正：一键把倾斜的条带调平（点右侧小箭头查看更多旋转选项）",
+    "Auto-straighten: the bands are already level.": "自动调正：条带已经是水平的。",
+    "Auto-straighten: the image is still loading, try again in a moment.":
+        "自动调正：图像还在载入，请稍后再试。",
+    "Auto-straighten: no clear bands to measure, image left unchanged. Use Rotate → Custom to rotate by hand.":
+        "自动调正：没有找到足够清晰的条带，图像未改动。可以用“旋转 → 自定义”手动调整。",
     "Select this image": "选择此图像",
     "Zoom out image": "缩小图像",
     "Zoom in image": "放大图像",

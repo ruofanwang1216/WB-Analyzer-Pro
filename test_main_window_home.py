@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 from PIL import Image
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QToolButton
 
 from gui.main_window import MainWindow
 from gui.figure_generation import ColumnTableWindow
@@ -253,13 +253,20 @@ class MainWindowHomePageTests(unittest.TestCase):
         panel = window._image_panels[0]
 
         action_texts = [action.text() for action in panel.rotate_menu.actions()]
-        self.assertEqual(action_texts, ["Horizontal", "Vertical", "", "Custom", "", "Undo"])
+        self.assertEqual(action_texts, [
+            "Auto Straighten", "", "Horizontal", "Vertical", "", "Custom", "", "Undo",
+        ])
+        self.assertEqual(
+            panel.rotate_btn.popupMode(),
+            QToolButton.ToolButtonPopupMode.MenuButtonPopup,
+        )
         self.assertFalse(panel.flip_horizontal_action.icon().isNull())
         self.assertFalse(panel.flip_vertical_action.icon().isNull())
         self.assertFalse(panel.rotate_custom_action.icon().isNull())
         self.assertEqual(panel.rotate_custom_action.toolTip(), "Press Enter/Return to apply")
 
         window._set_language(LANG_ZH_CN, persist=False)
+        self.assertEqual(panel.auto_straighten_action.text(), "自动调正")
         self.assertEqual(panel.flip_horizontal_action.text(), "水平")
         self.assertEqual(panel.flip_vertical_action.text(), "垂直")
         self.assertEqual(panel.rotate_custom_action.text(), "自定义")

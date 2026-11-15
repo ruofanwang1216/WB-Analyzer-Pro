@@ -95,6 +95,13 @@ def _image_operation_icon(operation: str, size: int = 18) -> QIcon:
         painter.drawLine(QPointF(9.0, 3.0), QPointF(12.0, 6.0))
         painter.drawLine(QPointF(9.0, 15.0), QPointF(6.0, 12.0))
         painter.drawLine(QPointF(9.0, 15.0), QPointF(12.0, 12.0))
+    elif operation == "auto-straighten":
+        # A tilted band above the level band it becomes.
+        painter.drawLine(QPointF(3.0, 7.5), QPointF(15.0, 3.5))
+        painter.drawLine(QPointF(3.0, 13.5), QPointF(15.0, 13.5))
+        painter.drawLine(QPointF(9.0, 7.6), QPointF(9.0, 10.6))
+        painter.drawLine(QPointF(9.0, 10.6), QPointF(7.4, 9.0))
+        painter.drawLine(QPointF(9.0, 10.6), QPointF(10.6, 9.0))
     elif operation == "custom-rotate":
         # One continuous, two-headed curved arrow mirrors the reference icon
         # while remaining crisp on systems without the corresponding glyph.

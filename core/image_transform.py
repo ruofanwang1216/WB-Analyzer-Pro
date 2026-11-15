@@ -66,6 +66,11 @@ class GeometryTransform:
         value = self.sanitized()
         return not value.flip_x and not value.flip_y and value.rotation == 0.0
 
+    def is_axis_aligned(self) -> bool:
+        """True when the rotation is a multiple of 90 degrees (no resampling)."""
+        quarter_turns = self.sanitized().rotation / 90.0
+        return abs(quarter_turns - round(quarter_turns)) < 1e-9
+
     def rotated(self, angle_deg: float) -> "GeometryTransform":
         value = self.sanitized()
         return GeometryTransform(
@@ -298,8 +303,16 @@ def transform_pixels_16_to_8(
 def apply_geometry_to_display(
     display_pixels: np.ndarray,
     transform: GeometryTransform,
+    *,
+    scale: int = 1,
 ) -> np.ndarray:
-    """Render an 8-bit preview through non-destructive geometry metadata."""
+    """Render an 8-bit preview through non-destructive geometry metadata.
+
+    ``scale`` renders the result on a grid that many times finer than the
+    source.  Interpolating a rotated image straight onto the finer grid keeps
+    band edges crisper than rotating at 1x and letting the view enlarge the
+    result afterwards.  It only applies when the geometry actually rotates.
+    """
     pixels = np.ascontiguousarray(np.asarray(display_pixels, dtype=np.uint8))
     if pixels.ndim != 2 or pixels.size == 0:
         raise ValueError("Display geometry requires a non-empty 2D image.")
@@ -312,6 +325,12 @@ def apply_geometry_to_display(
     height, width = pixels.shape
     matrix, output_size = value.affine(width, height)
     inverse = np.linalg.inv(matrix)
+    factor = max(1, int(scale))
+    if factor > 1 and not value.is_axis_aligned():
+        # Output pixel centre (i + 0.5) / factor is where the 1x canvas is
+        # sampled, so the finer grid covers exactly the same canvas area.
+        inverse = inverse @ np.diag((1.0 / factor, 1.0 / factor, 1.0))
+        output_size = (output_size[0] * factor, output_size[1] * factor)
     coefficients = (
         float(inverse[0, 0]),
         float(inverse[0, 1]),

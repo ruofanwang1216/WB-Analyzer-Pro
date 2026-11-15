@@ -8,6 +8,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QMessageBox
 
+from core.auto_straighten import estimate_band_tilt, straightened_geometry
 from core.image_transform import (
     GeometryTransform,
     geometry_transform_from_dict,
@@ -17,6 +18,9 @@ from core.image_transform import (
 from utils.logger import get_logger
 
 log = get_logger(__name__)
+
+# Corrections smaller than this are invisible and not worth an undo step.
+MIN_AUTO_STRAIGHTEN_DEG = 0.15
 
 
 class ImageOperationsMixin:
@@ -138,6 +142,60 @@ class ImageOperationsMixin:
         except Exception as exc:
             QMessageBox.critical(self, "Image Flip Error", f"Failed to flip image:\n{exc}")
             log.error("Image flip failed: %s", exc)
+
+    def _on_auto_straighten_requested(self) -> None:
+        """Measure the band tilt on the raw pixels and level the image.
+
+        Only the presentation geometry changes: the raw pixels used for
+        quantification are never resampled.
+        """
+        if self._active_slot_index is None or self._image_path is None:
+            QMessageBox.information(self, "Select Image", "Please select an image first.")
+            return
+        raw_pixels = self.canvas.raw_pixels_for_estimation()
+        if raw_pixels is None:
+            self._status_bar.showMessage(
+                "Auto-straighten: the image is still loading, try again in a moment.", 4000
+            )
+            return
+        if self.canvas.is_rotation_mode():
+            self.canvas.cancel_rotation_mode()
+        try:
+            estimate = estimate_band_tilt(raw_pixels)
+            current = self.canvas.get_geometry_transform()
+            target = straightened_geometry(current, estimate.angle_deg)
+            correction = ((target.rotation - current.rotation + 180.0) % 360.0) - 180.0
+            log.info(
+                "Auto-straighten: raw_tilt=%+.3f deg, confidence=%.2f, reliable=%s, correction=%+.3f deg",
+                estimate.angle_deg, estimate.confidence, estimate.reliable, correction,
+            )
+            if not estimate.reliable:
+                self._refresh_rotation_controls()
+                self._status_bar.showMessage(
+                    "Auto-straighten: no clear bands to measure, image left unchanged. "
+                    "Use Rotate → Custom to rotate by hand.",
+                    6000,
+                )
+                return
+            if abs(correction) < MIN_AUTO_STRAIGHTEN_DEG:
+                self._refresh_rotation_controls()
+                self._status_bar.showMessage(
+                    "Auto-straighten: the bands are already level.", 4000
+                )
+                return
+            snapshot = self._image_operation_snapshot()
+            if snapshot is None:
+                return
+            self._commit_image_operation(
+                target,
+                snapshot,
+                f"Auto-straightened by {abs(correction):.1f}°. Use Rotate → Undo to revert.",
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "Auto Straighten", f"Failed to straighten image:\n{exc}"
+            )
+            log.error("Auto-straighten failed for %s: %s", self._image_path, exc)
 
     def _on_undo_image_operation_requested(self) -> None:
         if self._active_slot_index is None or self._image_path is None:
