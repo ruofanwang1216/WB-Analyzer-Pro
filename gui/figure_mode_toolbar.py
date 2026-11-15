@@ -98,31 +98,28 @@ class CanvasToolbarMixin:
         # ── Save buttons (shown on the "Save & Export" step) ──────────────
         self._save_panel = QWidget()
         self._save_panel.setStyleSheet("background: transparent;")
-        save_box = QVBoxLayout(self._save_panel)
+        save_box = QHBoxLayout(self._save_panel)
         save_box.setContentsMargins(0, 0, 0, 0)
-        save_box.setSpacing(8)
-        save_heading = QLabel("Save to continue later")
-        save_heading.setStyleSheet(_PANEL_HEADING_STYLE)
-        save_box.addWidget(save_heading)
+        save_box.setSpacing(6)
 
-        save_blot_btn = QPushButton("Save Blot File")
-        save_blot_btn.setStyleSheet(_PANEL_BTN_STYLE)
+        save_blot_btn = QPushButton("Save File")
+        save_blot_btn.setStyleSheet(_SMALL_BTN_STYLE)
         save_blot_btn.setToolTip(
             "Save current layout, annotations, blot images, ROIs, and editable state"
         )
-        save_blot_btn.setFixedHeight(_PANEL_BTN_H)
+        save_blot_btn.setFixedHeight(32)
         save_blot_btn.clicked.connect(self._on_save_blot_file)
-        save_box.addWidget(save_blot_btn)
+        save_box.addWidget(save_blot_btn, 1)
 
-        save_tmpl_btn = QPushButton("Save Figure Template")
-        save_tmpl_btn.setStyleSheet(_PANEL_BTN_STYLE)
+        save_tmpl_btn = QPushButton("Save Template")
+        save_tmpl_btn.setStyleSheet(_SMALL_BTN_STYLE)
         save_tmpl_btn.setToolTip(
             "Save current layout (structure, labels, annotations)\n"
             "as a reusable Figure Template in Saved Templates"
         )
-        save_tmpl_btn.setFixedHeight(_PANEL_BTN_H)
+        save_tmpl_btn.setFixedHeight(32)
         save_tmpl_btn.clicked.connect(self._on_save_template)
-        save_box.addWidget(save_tmpl_btn)
+        save_box.addWidget(save_tmpl_btn, 1)
 
         # ── Annotation tools: always on hand above the preview ────────────
         # They wrap onto extra lines when the preview is narrow, the way a

@@ -1488,8 +1488,8 @@ class FigureModeStructureTests(unittest.TestCase):
 
         self.assertEqual(window._grp1.title_text(), "Step 1: Choose Layout")
         self.assertEqual(window._grp4.title_text(), "Step 2: Fill Blot Frames")
-        self.assertEqual(window._SIDEBAR_WIDTH, 304)
-        self.assertEqual(window._step_panel.width(), 304)
+        self.assertEqual(window._SIDEBAR_WIDTH, 236)
+        self.assertEqual(window._step_panel.width(), 236)
         self.assertTrue(window._auto_detect_radio.isChecked())
         self.assertEqual(window._auto_fit_h_margin.value(), 4)
         self.assertEqual(window._auto_fit_v_margin.value(), 4)
@@ -1517,7 +1517,7 @@ class FigureModeStructureTests(unittest.TestCase):
         self.assertFalse(hasattr(window, "_step_next_btn"))
         # Saved Blot Files open from a button, not an always-on list.
         self.assertFalse(window._step_panel.isAncestorOf(window._blot_file_list))
-        self.assertEqual(window._saved_blot_files_btn.text(), "Saved Blot Files   ›")
+        self.assertEqual(window._saved_blot_files_btn.text(), "Blot Files")
         # Annotation tools sit above the preview, outside the panel.
         self.assertFalse(window._step_panel.isAncestorOf(window._bold_btn))
         self.assertTrue(window._annotation_panel.isAncestorOf(window._bold_btn))
@@ -1531,10 +1531,10 @@ class FigureModeStructureTests(unittest.TestCase):
         button_texts = [
             button.text() for button in window._grp1.findChildren(QPushButton)
         ]
-        # Step 1 is four plain buttons and nothing else.
+        # Step 1 is five one-word buttons in two columns and nothing else.
         self.assertEqual(
             button_texts,
-            ["New Blot Frames", "Add Conditions", "Saved Templates   ›", "+ Extra Frame"],
+            ["Frames", "Conditions", "Templates", "Blot Files", "+ Frame"],
         )
         self.assertNotIn("Apply Template", button_texts)
         self.assertNotIn("Apply Structure", button_texts)
@@ -1555,7 +1555,7 @@ class FigureModeStructureTests(unittest.TestCase):
                 window._export_tiff_btn.height(),
                 window._export_pptx_btn.height(),
             },
-            {36},
+            {32},
         )
         self.assertEqual(
             {
@@ -1582,24 +1582,32 @@ class FigureModeStructureTests(unittest.TestCase):
                 frame.objectName() for frame in window._grp1.findChildren(QFrame)
                 if frame.objectName().startswith("step1")
             ],
-            ["step1Divider"],
+            [],
         )
         create_frame = next(
             button for button in window._grp1.findChildren(QPushButton)
-            if button.text() == "New Blot Frames"
+            if button.text() == "Frames"
         )
         add_extra = next(
             button for button in window._grp1.findChildren(QPushButton)
-            if button.text() == "+ Extra Frame"
+            if button.text() == "+ Frame"
         )
-        self.assertEqual(create_frame.height(), 38)
-        self.assertEqual(window._saved_templates_btn.height(), 34)
-        self.assertEqual(add_extra.height(), 34)
+        self.assertEqual(create_frame.height(), 32)
+        self.assertEqual(window._saved_templates_btn.height(), 32)
+        self.assertEqual(add_extra.height(), 32)
+        # Two columns: the first two buttons share a row.
+        conditions = next(
+            button for button in window._grp1.findChildren(QPushButton)
+            if button.text() == "Conditions"
+        )
+        grid = create_frame.parentWidget().layout()
+        self.assertEqual(grid.getItemPosition(grid.indexOf(create_frame))[:2], (0, 0))
+        self.assertEqual(grid.getItemPosition(grid.indexOf(conditions))[:2], (0, 1))
         self.assertEqual(create_frame.objectName(), "step1PrimaryButton")
         self.assertEqual(add_extra.objectName(), "step1TextButton")
         create_condition = next(
             button for button in window._grp1.findChildren(QPushButton)
-            if button.text() == "Add Conditions"
+            if button.text() == "Conditions"
         )
         self.assertEqual(create_condition.objectName(), "step1SecondaryButton")
         self.assertLessEqual(
@@ -1618,10 +1626,11 @@ class FigureModeStructureTests(unittest.TestCase):
         self.assertTrue(window._selected_slot_lbl.isHidden())
         self.assertTrue(window._auto_fit_alignment.isHidden())
         self.assertEqual(window._auto_fit_alignment.currentData(), "auto")
-        self.assertIn(
-            "select then hit Enter/Return",
-            [label.text() for label in window._grp4.findChildren(QLabel)],
-        )
+        # One short hint replaces the "Detection" label and its sub-line.
+        fill_labels = [label.text() for label in window._grp4.findChildren(QLabel)]
+        self.assertNotIn("select then hit Enter/Return", fill_labels)
+        self.assertNotIn("Detection", fill_labels)
+        self.assertEqual(window._step_desc_lbl.text(), "Click frame → draw → Enter")
 
         window._manual_detect_radio.setChecked(True)
 
@@ -3180,16 +3189,14 @@ class FigureModeStructureTests(unittest.TestCase):
             [heading.text() for heading in window._step_headings],
             ["1   布局", "2   填充", "3   导出"],
         )
-        self.assertEqual(window._step_desc_lbl.text(), "点图框 → 在原图上框选 → 回车")
-        self.assertEqual(window._saved_blot_files_btn.text(), "已保存印迹图文件   ›")
+        self.assertEqual(window._step_desc_lbl.text(), "点图框 → 框选 → 回车")
+        self.assertEqual(window._saved_blot_files_btn.text(), "已存文件")
         window.set_language("en")
         self.assertEqual(
             [heading.text() for heading in window._step_headings],
             ["1   Layout", "2   Fill", "3   Export"],
         )
-        self.assertEqual(
-            window._step_desc_lbl.text(), "Click a frame → draw on the image → Enter"
-        )
+        self.assertEqual(window._step_desc_lbl.text(), "Click frame → draw → Enter")
 
     def test_saved_blot_files_open_in_a_dialog_and_return_the_list(self) -> None:
         window = FigureModeWindow()

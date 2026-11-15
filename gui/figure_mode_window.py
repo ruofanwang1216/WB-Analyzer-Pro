@@ -100,7 +100,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
     # The workflow panel needs enough room for the two-column detection and
     # template controls without clipping.  It remains substantially narrower
     # than the source-image and figure-canvas workspaces around it.
-    _SIDEBAR_WIDTH = 304
+    _SIDEBAR_WIDTH = 236
 
     def __init__(self, parent=None, *, language: str = LANG_EN) -> None:
         super().__init__(parent)
@@ -329,38 +329,29 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         self._grp5.setParent(self)
         self._grp5.hide()
 
-        self._saved_blot_files_btn = QPushButton("Saved Blot Files   ›")
-        self._saved_blot_files_btn.setObjectName("step1SavedBlotFilesButton")
-        self._saved_blot_files_btn.setFixedHeight(34)
-        self._saved_blot_files_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._saved_blot_files_btn.setToolTip("Reopen a figure you saved earlier")
-        self._saved_blot_files_btn.setStyleSheet(
-            "QPushButton#step1SavedBlotFilesButton { background:#FFFFFF; "
-            "color:#1C2622; border:1px solid #C9D3CE; border-radius:8px; "
-            "font-size:13px; padding:3px 10px; text-align:left; }"
-            "QPushButton#step1SavedBlotFilesButton:hover { background:#E3EFE8; "
-            "border-color:#1F6B4A; }"
-        )
-        self._saved_blot_files_btn.clicked.connect(self._show_saved_blot_files_dialog)
-
         self._step_desc_lbl = QLabel("")
         self._step_desc_lbl.setWordWrap(True)
         self._step_desc_lbl.setStyleSheet(
-            "font-size:12px; color:#4A5A53; background:transparent;"
+            "font-size:11px; font-weight:600; color:#1F6B4A; background:transparent;"
         )
+        # The hint above already says it; drop the repeated wording.
+        for label in self._grp4.findChildren(QLabel):
+            if label.text() in {"Detection", "select then hit Enter/Return"}:
+                label.setParent(self)
+                label.hide()
 
         page = QWidget()
         page.setObjectName("workflowStepPage")
         page.setStyleSheet("QWidget#workflowStepPage { background: #FFFFFF; }")
         page_layout = QVBoxLayout(page)
-        page_layout.setContentsMargins(12, 12, 12, 12)
-        page_layout.setSpacing(14)
+        page_layout.setContentsMargins(10, 10, 10, 10)
+        page_layout.setSpacing(12)
         self._sidebar_layout = page_layout
 
         self._step_headings: list[QLabel] = []
         self._step_pages: list[QWidget] = []
         section_contents: list[list[QWidget]] = [
-            [self._grp1, self._saved_blot_files_btn],
+            [self._grp1],
             [self._step_desc_lbl, self._grp4],
             [self._grp6, self._save_panel],
         ]
@@ -372,14 +363,14 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             )
             section_layout = QVBoxLayout(section)
             section_layout.setContentsMargins(0, 0, 0, 0)
-            section_layout.setSpacing(8)
+            section_layout.setSpacing(6)
             heading = QLabel("")
             heading.setObjectName("workflowStepHeading")
-            heading.setFixedHeight(30)
+            heading.setFixedHeight(26)
             heading.setStyleSheet(
                 "QLabel#workflowStepHeading { background:#DDE8E2; color:#134A32; "
-                "font-size:13px; font-weight:600; border-radius:6px; "
-                "padding:0px 10px; }"
+                "font-size:12px; font-weight:600; border-radius:6px; "
+                "padding:0px 8px; }"
             )
             section_layout.addWidget(heading)
             for widget in widgets:
@@ -414,7 +405,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
     _STEP_TITLES = ("Layout", "Fill", "Export")
     _STEP_DESCRIPTIONS = (
         "",
-        "Click a frame → draw on the image → Enter",
+        "Click frame → draw → Enter",
         "",
     )
 
@@ -1637,7 +1628,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         self._export_pdf_btn = QPushButton("PDF")
         self._export_pdf_btn.setObjectName("exportFormatButton")
-        self._export_pdf_btn.setFixedHeight(36)
+        self._export_pdf_btn.setFixedHeight(32)
         self._export_pdf_btn.setStyleSheet(_SECONDARY_EXPORT_BTN_STYLE)
         self._export_pdf_btn.setToolTip("Export Figure as PDF")
         self._export_pdf_btn.clicked.connect(self._on_export_pdf)
@@ -1645,7 +1636,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         self._export_tiff_btn = QPushButton("TIFF")
         self._export_tiff_btn.setObjectName("exportFormatButton")
-        self._export_tiff_btn.setFixedHeight(36)
+        self._export_tiff_btn.setFixedHeight(32)
         self._export_tiff_btn.setStyleSheet(_SECONDARY_EXPORT_BTN_STYLE)
         self._export_tiff_btn.setToolTip("Export Figure as TIFF")
         self._export_tiff_btn.clicked.connect(self._on_export_tiff)
@@ -1653,7 +1644,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         self._export_pptx_btn = QPushButton("PPTX")
         self._export_pptx_btn.setObjectName("exportFormatButton")
-        self._export_pptx_btn.setFixedHeight(36)
+        self._export_pptx_btn.setFixedHeight(32)
         self._export_pptx_btn.setStyleSheet(_SECONDARY_EXPORT_BTN_STYLE)
         self._export_pptx_btn.setToolTip("Export Figure as PPTX")
         if not PPTX_AVAILABLE:
