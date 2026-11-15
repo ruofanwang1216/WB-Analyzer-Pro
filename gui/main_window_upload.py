@@ -8,9 +8,16 @@ import shutil
 import sys
 from pathlib import Path
 
+import numpy as np
+from PIL import Image
 from PySide6.QtCore import QSize, Qt, QThread
 from PySide6.QtWidgets import QFileDialog, QListWidgetItem, QMessageBox
 
+from core.image_transform import (
+    bake_display_into_uint16,
+    default_inverted_for_pil_image,
+    embedded_display_settings,
+)
 from gui.image_panel_widgets import _UploadedFileListRow
 from gui.workers import UploadConversionWorker
 from utils.i18n import tr
@@ -192,6 +199,8 @@ class UploadMixin:
             return
         self._refresh_image_panel_layout()
         self._refresh_detection_actions()
+        # An open Image Transform window now has a histogram to show.
+        self._sync_image_transform_dialog()
         loaded = self._loaded_slot_indices()
         if len(loaded) > 1:
             message = (
@@ -554,6 +563,48 @@ class UploadMixin:
         source_key = item.data(Qt.ItemDataRole.UserRole)
         self._open_uploaded_file_entry(str(source_key))
 
+    def _write_display_adjusted_tiff(self, source: Path, target: Path) -> bool:
+        """Write an Image Lab conversion with its saved display range applied.
+
+        Inside the app a converted document keeps its raw pixels and only
+        remembers Image Lab's Low / High / Gamma.  Other programs ignore that
+        note and would show the raw data nearly blank, so the exported copy
+        gets the stretch applied, like Image Lab's "export for publication".
+        Returns False when the file has no saved settings (plain copy instead).
+        """
+        try:
+            with Image.open(source) as image:
+                settings = embedded_display_settings(image)
+                if settings is None:
+                    return False
+                pixels = np.asarray(image)
+                if pixels.ndim != 2 or pixels.dtype.itemsize != 2:
+                    return False
+                white_is_zero = default_inverted_for_pil_image(image, fallback=True)
+                adjusted = bake_display_into_uint16(
+                    pixels,
+                    settings,
+                    # The file's own polarity already shows signal dark when
+                    # white is zero; flip only if the saved view differs.
+                    flip=settings.inverted != white_is_zero,
+                )
+            from tiff_writer import build_grayscale16_tiff
+
+            height, width = adjusted.shape
+            target.write_bytes(
+                build_grayscale16_tiff(
+                    adjusted.astype("<u2").tobytes(),
+                    width=width,
+                    height=height,
+                    byteorder="little",
+                    white_is_zero=white_is_zero,
+                )
+            )
+            return True
+        except Exception:
+            log.exception("Could not write a display-adjusted TIFF for %s", source)
+            return False
+
     def _export_all_tiffs(self) -> None:
         all_tiffs: list[Path] = []
         seen: set[str] = set()
@@ -583,7 +634,8 @@ class UploadMixin:
             self._persistence.remember_tiff_export_dir(destination_root)
             for tiff_path in all_tiffs:
                 target = self._ensure_unique_path(destination_root / tiff_path.name)
-                shutil.copy2(tiff_path, target)
+                if not self._write_display_adjusted_tiff(tiff_path, target):
+                    shutil.copy2(tiff_path, target)
                 copied += 1
         except OSError as exc:
             log.error("TIFF export failed after %d file(s): %s", copied, exc)

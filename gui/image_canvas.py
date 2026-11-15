@@ -33,11 +33,18 @@ from core.image_transform import (
     ImageTransformParams,
     apply_geometry_to_display,
     auto_scale_range_16,
-    default_inverted_for_pil_image,
+    default_display_params,
+    display_histogram,
+    imagej_auto_range,
+    saturated_mask,
     image_array_to_raw_luminance,
     image_array_to_uint16_luminance,
     transform_pixels_16_to_8,
 )
+
+# Image Lab paints saturated pixels pure red.
+SATURATED_HIGHLIGHT_RGB = (255, 0, 0)
+MAX_SATURATED_HIGHLIGHT_FRACTION = 0.25
 
 # Morandi sage-green palette — muted, distinct but harmonious across 16 lanes
 _LANE_COLORS = [
@@ -175,13 +182,11 @@ class ImageLoadWorker(QObject):
                 width, height = image.size
                 if width <= 0 or height <= 0:
                     raise ValueError(f"Image has invalid dimensions: {image.size}")
-                default_params = ImageTransformParams(
-                    inverted=default_inverted_for_pil_image(image, fallback=True)
-                )
                 stride = _preview_stride(width, height)
                 quantitative = _uncompressed_uint16_tiff_memmap(path, image)
 
                 if quantitative is not None:
+                    default_params = default_display_params(image, quantitative)
                     preview = _render_default_preview(
                         quantitative, stride, default_params
                     )
@@ -219,6 +224,7 @@ class ImageLoadWorker(QObject):
                 decoded = np.asarray(image)
                 if decoded.ndim not in {2, 3} or decoded.size == 0:
                     raise ValueError(f"Unexpected image shape: {decoded.shape}")
+                default_params = default_display_params(image, decoded)
 
                 # Prepare and emit the sampled preview before the potentially
                 # expensive full-resolution RGB -> luminance conversion.
@@ -530,6 +536,10 @@ class ImageCanvas(QGraphicsView):
         self._geometry_transform = GeometryTransform()
         self._image_default_transform_params = self._default_image_transform_params()
         self._image_transform_params = self._image_default_transform_params
+        self._display_stats_cache = None
+        self._imagej_auto_threshold = 0
+        # A view option, like Image Lab's: it survives loading another image.
+        self._highlight_saturated = True
         self._roi_item: QGraphicsRectItem | None = None
         self._band_roi_item: QGraphicsRectItem | None = None
         self._lane_items: list[QGraphicsItem] = []
@@ -617,6 +627,8 @@ class ImageCanvas(QGraphicsView):
         self._geometry_transform = GeometryTransform()
         self._image_default_transform_params = self._default_image_transform_params()
         self._image_transform_params = self._image_default_transform_params
+        self._display_stats_cache = None
+        self._imagej_auto_threshold = 0
         self._roi_item = None
         self._band_roi_item = None
         self._lane_items.clear()
@@ -761,10 +773,17 @@ class ImageCanvas(QGraphicsView):
         # Presentation conversion is now performed only on the sampled view;
         # retaining a separate full-resolution uint16 display buffer is wasteful.
         self._display_source_pixels = quantitative
+        self._display_stats_cache = None
         height, width = payload["raw_shape"]
         self._raw_image_shape = (int(height), int(width))
         self._display_preview_stride = int(payload["stride"])
         self._image_memory_mapped = bool(payload["memory_mapped"])
+        if self._highlight_saturated and self._pixmap_item is not None:
+            # The quick preview is plain grey; add the saturation highlight
+            # now that the full data is here.
+            highlighted = self._with_saturation_highlight_for_current()
+            if highlighted is not None:
+                self._pixmap_item.setPixmap(highlighted)
         if self._loading_item is not None and self._loading_item.scene() is self._scene:
             self._scene.removeItem(self._loading_item)
         self._loading_item = None
@@ -958,12 +977,62 @@ class ImageCanvas(QGraphicsView):
         self.set_image_transform_params(params)
         return params
 
+    def _sampled_display_source_16(self) -> np.ndarray | None:
+        """16-bit luminance of the preview-resolution source, or None."""
+        if self._display_source_pixels is None:
+            return None
+        sampled = self._display_source_pixels[
+            ::self._display_preview_stride,
+            ::self._display_preview_stride,
+        ]
+        return image_array_to_uint16_luminance(sampled)
+
+    def display_statistics(self) -> dict | None:
+        """Histogram and value range of the image, on the 16-bit display scale.
+
+        ``saturated`` is the share of pixels at the top of the pixel type.
+        The result is cached until another image is loaded.
+        """
+        if self._display_stats_cache is not None:
+            return self._display_stats_cache
+        source = self._sampled_display_source_16()
+        if source is None or source.size == 0:
+            return None
+        counts, data_min, data_max = display_histogram(source, bins=256)
+        raw_sample = self._display_source_pixels[
+            ::self._display_preview_stride,
+            ::self._display_preview_stride,
+        ]
+        self._display_stats_cache = {
+            "histogram": counts,
+            "min": data_min,
+            "max": data_max,
+            "saturated": float(np.count_nonzero(saturated_mask(raw_sample))) / source.size,
+        }
+        return self._display_stats_cache
+
+    def highlight_saturated(self) -> bool:
+        return self._highlight_saturated
+
+    def set_highlight_saturated(self, enabled: bool) -> None:
+        """Paint saturated pixels red in the preview (never in exports)."""
+        enabled = bool(enabled)
+        if enabled == self._highlight_saturated:
+            return
+        self._highlight_saturated = enabled
+        if self._pixmap_item is None or self._display_source_pixels is None:
+            return
+        self._pixmap_item.setPixmap(self._make_display_pixmap())
+        self._update_pixmap_scene_geometry()
+
     def auto_scale_image_transform(self) -> ImageTransformParams:
+        """Image Lab "Auto Scale": clip 0.1 % of the pixels at each end."""
+        self._imagej_auto_threshold = 0
         if self._display_source_pixels is None:
             params = self._image_default_transform_params
         else:
             source = self._display_source_pixels
-            if source.dtype == np.uint8:
+            if source.dtype == np.uint8 and source.ndim == 2:
                 low, high = auto_scale_range_16(source)
                 low *= 257
                 high *= 257
@@ -974,9 +1043,26 @@ class ImageCanvas(QGraphicsView):
             params = ImageTransformParams(
                 low=low,
                 high=high,
-                gamma=1.0,
+                gamma=self._image_transform_params.gamma,
                 inverted=self._image_transform_params.inverted,
             )
+        self.set_image_transform_params(params)
+        return params
+
+    def imagej_auto_image_transform(self) -> ImageTransformParams:
+        """ImageJ Brightness/Contrast "Auto"; each press clips a little more."""
+        source = self._sampled_display_source_16()
+        if source is None:
+            return self._image_transform_params
+        low, high, self._imagej_auto_threshold = imagej_auto_range(
+            source, self._imagej_auto_threshold
+        )
+        params = ImageTransformParams(
+            low=low,
+            high=high,
+            gamma=self._image_transform_params.gamma,
+            inverted=self._image_transform_params.inverted,
+        )
         self.set_image_transform_params(params)
         return params
 
@@ -984,7 +1070,54 @@ class ImageCanvas(QGraphicsView):
         display = self.current_display_pixels()
         if display is None:
             return QPixmap()
+        if self._highlight_saturated:
+            highlighted = self._with_saturation_highlight(display)
+            if highlighted is not None:
+                return highlighted
         return self._pixmap_from_display_pixels(display)
+
+    def _with_saturation_highlight_for_current(self) -> QPixmap | None:
+        display = self.current_display_pixels()
+        if display is None:
+            return None
+        return self._with_saturation_highlight(display)
+
+    def _with_saturation_highlight(self, display: np.ndarray) -> QPixmap | None:
+        """Return the preview with saturated pixels in red, or None if there are none."""
+        if self._display_source_pixels is None:
+            return None
+        mask = saturated_mask(
+            self._display_source_pixels[
+                ::self._display_preview_stride,
+                ::self._display_preview_stride,
+            ]
+        )
+        # Only raw 16-bit signal can be "saturated".  When a large share of the
+        # image sits at the ceiling it is a display-ready picture with a
+        # white or black background, not blown-out bands.
+        if (
+            self._display_source_pixels.dtype.itemsize != 2
+            or not mask.any()
+            or mask.mean() > MAX_SATURATED_HIGHLIGHT_FRACTION
+        ):
+            return None
+        if not self._geometry_transform.is_identity():
+            mask_image = np.zeros(mask.shape, dtype=np.uint8)
+            mask_image[mask] = 255
+            # A black frame keeps the fill colour of the rotated mask at zero.
+            mask_image[0, :] = mask_image[-1, :] = 0
+            mask_image[:, 0] = mask_image[:, -1] = 0
+            mask = apply_geometry_to_display(mask_image, self._geometry_transform) > 127
+        if mask.shape != display.shape:
+            return None
+        rgb = np.repeat(display[:, :, None], 3, axis=2)
+        rgb[mask] = SATURATED_HIGHLIGHT_RGB
+        rgb = np.ascontiguousarray(rgb)
+        height, width, _ = rgb.shape
+        qimage = QImage(
+            rgb.data, width, height, rgb.strides[0], QImage.Format.Format_RGB888
+        )
+        return QPixmap.fromImage(qimage)
 
     @staticmethod
     def _pixmap_from_display_pixels(display: np.ndarray) -> QPixmap:

@@ -1900,6 +1900,9 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             self._image_transform_dialog.paramsChanged.connect(self._apply_image_transform_params)
             self._image_transform_dialog.autoScaleRequested.connect(self._auto_scale_image_transform)
             self._image_transform_dialog.resetRequested.connect(self._reset_image_transform)
+            self._image_transform_dialog.imagejAutoRequested.connect(self._imagej_auto_image_transform)
+            self._image_transform_dialog.applyToAllRequested.connect(self._apply_image_transform_to_all)
+            self._image_transform_dialog.highlightSaturatedChanged.connect(self._set_highlight_saturated)
 
         self._sync_image_transform_dialog()
         self._image_transform_dialog.show()
@@ -1913,8 +1916,11 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         has_source = canvas is not None and canvas.has_image_transform_source()
         self._image_transform_dialog.set_controls_enabled(has_source)
         if has_source and canvas is not None:
+            self._image_transform_dialog.set_image_statistics(canvas.display_statistics())
+            self._image_transform_dialog.set_highlight_saturated(canvas.highlight_saturated())
             self._image_transform_dialog.set_params(canvas.get_image_transform_params())
         else:
+            self._image_transform_dialog.set_image_statistics(None)
             self._image_transform_dialog.set_params(ImageTransformParams())
 
     def _apply_image_transform_params(self, params: ImageTransformParams) -> None:
@@ -1939,6 +1945,40 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             3000,
         )
 
+    def _imagej_auto_image_transform(self) -> None:
+        canvas = self._active_image_transform_canvas()
+        if canvas is None:
+            return
+        params = canvas.imagej_auto_image_transform()
+        if self._image_transform_dialog is not None:
+            self._image_transform_dialog.set_params(params)
+        self._status_bar.showMessage(
+            f"ImageJ Auto applied: Low {params.low}, High {params.high}, Gamma {params.gamma:.2f}.",
+            3000,
+        )
+
+    def _apply_image_transform_to_all(self) -> None:
+        """Copy the selected image's display settings to every open image."""
+        canvas = self._active_image_transform_canvas()
+        if canvas is None:
+            return
+        params = canvas.get_image_transform_params()
+        count = 0
+        for index in self._loaded_slot_indices():
+            other = self._image_panels[index].canvas
+            if other is canvas or not other.has_image_transform_source():
+                continue
+            other.set_image_transform_params(params)
+            count += 1
+        self._status_bar.showMessage(
+            f"Image Transform copied to {count} other image(s).", 3000
+        )
+
+    def _set_highlight_saturated(self, enabled: bool) -> None:
+        # A view option shared by every image panel, as in Image Lab.
+        for panel in self._image_panels:
+            panel.canvas.set_highlight_saturated(enabled)
+
     def _reset_image_transform(self) -> None:
         canvas = self._active_image_transform_canvas()
         if canvas is None:
@@ -1946,7 +1986,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         params = canvas.reset_image_transform()
         if self._image_transform_dialog is not None:
             self._image_transform_dialog.set_params(params)
-        self._status_bar.showMessage("Image Transform reset to full 16-bit range.", 3000)
+        self._status_bar.showMessage("Image Transform reset to the settings the image opened with.", 3000)
 
     def _normalize_auto_detections(self, detections: list[dict], preserve_target_row: bool = False) -> list[dict]:
         params = self.param_panel.get_params()

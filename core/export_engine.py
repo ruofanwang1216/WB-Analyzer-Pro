@@ -33,7 +33,7 @@ from PySide6.QtGui import (
 
 from core.image_transform import (
     apply_geometry_to_display,
-    default_inverted_for_pil_image,
+    default_display_params,
     geometry_transform_from_dict,
     image_array_to_uint16_luminance,
     image_transform_from_dict,
@@ -255,14 +255,18 @@ def _crop_qimage(
     """
     try:
         with Image.open(image_path) as img:
-            default_inverted = default_inverted_for_pil_image(img, fallback=True)
-            pixels = image_array_to_uint16_luminance(np.array(img))
+            source = np.array(img)
+            default_tone = default_display_params(img, source)
+            pixels = image_array_to_uint16_luminance(source)
     except Exception:
         return QImage()
 
-    tone = image_transform_from_dict(
-        image_transform,
-        default_inverted=default_inverted,
+    # Without saved settings the image is shown the way the Quantify view
+    # first shows it (Image Lab's stored settings, or an auto scale).
+    tone = (
+        image_transform_from_dict(image_transform, default_inverted=default_tone.inverted)
+        if image_transform
+        else default_tone
     )
     geometry = geometry_transform_from_dict(geometry_transform)
     if geometry.is_identity():
