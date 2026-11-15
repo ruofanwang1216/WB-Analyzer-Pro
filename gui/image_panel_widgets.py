@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen  # noqa: F401 - kept for callers
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
@@ -22,6 +22,34 @@ from config.settings import COLOR_ACCENT_LIGHT, COLOR_ACCENT_TEXT
 SELECTED_PANEL_BORDER = "#4FA683"
 from gui.icons import _image_operation_icon, _zoom_icon
 from gui.image_canvas import ImageCanvas
+
+
+class _ElidedLabel(QLabel):
+    """Label that shortens text that does not fit with "…" in the middle.
+
+    A plain centred label cuts long file names off at both edges.  Here the
+    start and the end of the name stay readable; the full name is still what
+    ``text()`` returns and what the tooltip shows.
+    """
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt API
+        hint = super().minimumSizeHint()
+        return QSize(min(hint.width(), 40), hint.height())
+
+    def paintEvent(self, _event) -> None:  # noqa: N802 - Qt API
+        painter = QPainter(self)
+        rect = self.contentsRect()
+        shown = self.fontMetrics().elidedText(
+            self.text(), Qt.TextElideMode.ElideMiddle, max(0, rect.width())
+        )
+        painter.setPen(self.palette().color(self.foregroundRole()))
+        painter.drawText(rect, int(self.alignment()), shown)
+        painter.end()
+
+    def shown_text(self) -> str:
+        return self.fontMetrics().elidedText(
+            self.text(), Qt.TextElideMode.ElideMiddle, max(0, self.contentsRect().width())
+        )
 
 
 class _PanelSelectionCheckBox(QCheckBox):
@@ -242,7 +270,7 @@ class _ImagePanelWidget(QFrame):
         self.fit_btn.setText("Fit")
         self.fit_btn.setToolTip("Fit the whole image to this panel")
         top_row.addWidget(self.fit_btn)
-        self.filename_label = QLabel("")
+        self.filename_label = _ElidedLabel("")
         self.filename_label.setObjectName("panel_filename_label")
         self.filename_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.filename_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -329,7 +357,7 @@ class _UploadedFileListRow(QWidget):
         remove_btn.clicked.connect(lambda _=False: self.remove_requested.emit(self._source_key))
         row.addWidget(remove_btn)
 
-        label = QLabel(name)
+        label = _ElidedLabel(name)
         label.setObjectName("uploaded_file_name_lbl")
         label.setToolTip(tooltip)
         label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)

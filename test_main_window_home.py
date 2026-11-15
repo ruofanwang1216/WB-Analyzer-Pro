@@ -212,6 +212,28 @@ class MainWindowHomePageTests(unittest.TestCase):
         self.assertIsNotNone(window._embedded_column_table)
         self.assertTrue(window._figure_generation_btn.isChecked())
 
+    def test_top_tabs_have_room_for_their_text_when_selected(self) -> None:
+        from PySide6.QtGui import QFont, QFontMetrics
+
+        window = self._make_window()
+        window.resize(1200, 800)
+        window.show()
+        for language in (LANG_EN, LANG_ZH_CN):
+            window._set_language(language, persist=False)
+            for select in (window._on_figure_generation_clicked, window._on_wb_plot_mode):
+                select()
+                self._app.processEvents()
+                for button in (window._figure_generation_btn, window._wb_plot_generation_btn):
+                    font = QFont(button.font())
+                    font.setPixelSize(14)
+                    font.setBold(True)
+                    needed = QFontMetrics(font).horizontalAdvance(
+                        button.text().replace("&&", "&")
+                    )
+                    # Text plus the 16px padding on each side fits the button.
+                    self.assertGreaterEqual(button.width(), needed + 32, button.text())
+        window.close()
+
     def test_home_controls_switch_between_english_and_chinese(self) -> None:
         window = self._make_window()
 

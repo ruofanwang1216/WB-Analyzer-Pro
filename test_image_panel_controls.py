@@ -100,6 +100,33 @@ class ImagePanelControlTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_long_file_name_is_shortened_in_the_middle_not_cut_off(self) -> None:
+        panel = _ImagePanelWidget()
+        try:
+            panel.resize(360, 240)
+            panel.show()
+            name = "2026-11-14_HeLa_MEK_vinculin_replicate_3_long_exposure.tif"
+            panel.set_filename(name)
+            self._app.processEvents()
+
+            label = panel.filename_label
+            # The full name is kept for code and for the tooltip.
+            self.assertEqual(label.text(), name)
+            self.assertEqual(label.toolTip(), name)
+            shown = label.shown_text()
+            self.assertIn("…", shown)
+            self.assertTrue(shown.startswith("2026"))
+            self.assertTrue(shown.endswith(".tif"))
+            self.assertLessEqual(
+                label.fontMetrics().horizontalAdvance(shown), label.width()
+            )
+
+            panel.set_filename("short.tif")
+            self._app.processEvents()
+            self.assertEqual(label.shown_text(), "short.tif")
+        finally:
+            panel.close()
+
     def test_fit_button_refits_the_image_and_activates_its_panel(self) -> None:
         window = self._make_window()
         try:
