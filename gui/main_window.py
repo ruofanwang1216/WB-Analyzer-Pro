@@ -12,6 +12,8 @@ from PySide6.QtCore import Qt, QObject, QThread, QRectF, QSize, QSizeF, QEvent
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
+    QFont,
+    QFontMetrics,
     QKeySequence,
     QShortcut,
 )
@@ -831,6 +833,22 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
             total = max(sum(self._main_splitter.sizes()), self._main_splitter.width(), 1)
             self._main_splitter.setSizes([files_width, max(200, total - files_width)])
 
+    def _fit_workspace_tab_widths(self) -> None:
+        """Size each top tab for its text in bold.
+
+        The selected tab is drawn bold, which is wider than the regular
+        weight the button measured itself with, so its text was cut off.
+        """
+        for button in (self._figure_generation_btn, self._wb_plot_generation_btn):
+            font = QFont(button.font())
+            font.setPixelSize(14)
+            font.setBold(True)
+            text = button.text().replace("&&", "&")
+            text_width = QFontMetrics(font).horizontalAdvance(text)
+            # 16px padding each side, 1px borders, and a little slack for
+            # font differences between machines.
+            button.setMinimumWidth(text_width + 2 * 16 + 2 + 10)
+
     def _sync_workspace_tabs(self) -> None:
         """Highlight the top tab of the workspace that is on screen."""
         quant = not self._home_mode_active and not self._is_wb_plot_workspace_active()
@@ -875,6 +893,7 @@ class MainWindow(FixedRoiMixin, ImageOperationsMixin, UploadMixin, QMainWindow):
             tr("① Quantify & Plot", language).replace("&", "&&")
         )
         self._wb_plot_generation_btn.setText(tr("② Figure Layout", language))
+        self._fit_workspace_tab_widths()
         self._files_drop_hint.setText(tr("Drop .scn / .tif files here", language))
         self._analyze_hint.setText(
             tr("Draw the lane ROI, then the band ROI, then press Enter.", language)
