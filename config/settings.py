@@ -3,7 +3,7 @@ from config.paths import APP_FOLDER_NAME, app_data_dir
 APP_NAME = "WB Analyzer Pro"
 # Single source of truth for the version: pyinstaller.spec and the Windows
 # installer build both read it from here.
-VERSION = "0.3.1"
+VERSION = "0.4.0"
 
 PROJECT_FOLDER_NAME = APP_FOLDER_NAME
 # App-managed settings belong in the platform's per-user application-data
