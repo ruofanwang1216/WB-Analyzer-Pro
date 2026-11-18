@@ -292,8 +292,8 @@ class FigureStyleConfig:
     """Visual style of the quantification bar graph.
 
     The defaults follow GraphPad Prism's "Column bar, mean with SD" look:
-    bold Arial, heavy black axes with outward ticks, solid black bars,
-    black SD error bars, 45 degree group labels.
+    bold Arial, heavy black axes with outward ticks, gray bars with a black
+    outline, black SD error bars, 45 degree group labels.
     """
 
     font_family: str = "Arial"
@@ -348,7 +348,7 @@ class FigureStyleConfig:
     scatter_size: float = 6.0
     colors: dict[str, QColor] = field(
         default_factory=lambda: {
-            "bar": QColor("#000000"),
+            "bar": QColor("#A6A6A6"),
             "border": QColor("#000000"),
             "error": QColor("#000000"),
             "scatter": QColor("#000000"),
@@ -370,7 +370,7 @@ BAR_PALETTES: dict[str, tuple[str, list[str]]] = {
 def bar_fill_color(cfg: "FigureStyleConfig", index: int) -> QColor:
     palette = BAR_PALETTES.get(cfg.bar_palette, ("", []))[1]
     if not palette:
-        return QColor(cfg.colors.get("bar", QColor("#000000")))
+        return QColor(cfg.colors.get("bar", QColor("#A6A6A6")))
     return QColor(palette[index % len(palette)])
 
 
