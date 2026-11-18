@@ -2365,6 +2365,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self.param_panel.status_message.connect(self._status_bar.showMessage)
         self.param_panel.detect_requested.connect(self._detect_bands)
         self.param_panel.auto_lane_detect_requested.connect(self._run_quant_auto_lane_detect)
+        self.param_panel.manual_roi_requested.connect(self._start_manual_roi)
         self.param_panel.custom_rotate_requested.connect(self._on_custom_rotate_requested)
         self.param_panel.rotate_requested.connect(self._on_rotate_requested)
         self.param_panel.cancel_rotate_requested.connect(self._on_cancel_rotate_requested)
@@ -2427,6 +2428,41 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._save_active_slot_state()
         self._refresh_detection_actions()
         self._act_analyze.setEnabled(False)
+
+    def _start_manual_roi(self) -> None:
+        """Clear the active image's boxes and wait for the user to draw.
+
+        Drawing by hand always worked by dragging on the image, but nothing
+        on screen said so, least of all after Auto-detect had filled the
+        image with boxes.  This gives that route an explicit starting point.
+        """
+        loaded = self._loaded_slot_indices()
+        if not loaded:
+            self._status_bar.showMessage(
+                tr("Import an image first.", self._language), 4000
+            )
+            return
+        if self._active_slot_index is None:
+            if len(loaded) > 1:
+                self._status_bar.showMessage(
+                    tr("Click an image to select it first.", self._language), 4000
+                )
+                return
+            self._set_active_slot(loaded[0])
+        if self.canvas.is_rotation_mode():
+            self.canvas.cancel_rotation_mode()
+        self._leave_quant_auto_review()
+        self.canvas.clear_roi()
+        self._on_canvas_roi_cleared_for_slot(self._active_slot_index)
+        self._current_mode = "manual"
+        self.canvas.set_interaction_mode("manual")
+        self.canvas.setFocus()
+        self._status_bar.showMessage(
+            tr(
+                "Drag around the lanes, then drag around the band, then Analyze.",
+                self._language,
+            )
+        )
 
     # ── ROI / lane helpers ─────────────────────────────────────────────────────
 

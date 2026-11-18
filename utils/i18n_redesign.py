@@ -120,4 +120,9 @@ ZH_CN_REDESIGN: dict[str, str] = {
     "Reuse a saved layout": "套用已保存的布局",
     "Save File": "保存文件",
     "Save Template": "保存模板",
+    "Draw manually": "手动框选",
+    "Clear the boxes on this image and draw your own: drag around the lanes, then drag around the band, then Analyze.": "清除这张图上的框，自己来画：先框选泳道，再框选条带，然后定量分析。",
+    "Import an image first.": "请先导入图像。",
+    "Click an image to select it first.": "请先点击选中一张图像。",
+    "Drag around the lanes, then drag around the band, then Analyze.": "先拖动框选泳道，再拖动框选条带，然后定量分析。",
 }
