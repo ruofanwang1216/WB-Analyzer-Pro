@@ -234,6 +234,33 @@ class MainWindowHomePageTests(unittest.TestCase):
                     self.assertGreaterEqual(button.width(), needed + 32, button.text())
         window.close()
 
+    def test_drop_down_lists_show_every_entry_in_full(self) -> None:
+        window = self._make_window()
+        window.resize(1300, 850)
+        window.show()
+        self._app.processEvents()
+        window._on_wb_plot_mode()
+        figure = window._figure_mode_window
+        combos = {
+            "language": window._language_combo,
+            "align boxes": figure._align_text_boxes_combo,
+        }
+        for name, combo in combos.items():
+            combo.setEnabled(True)
+            combo.showPopup()
+            self._app.processEvents()
+            view = combo.view()
+            viewport = view.viewport().rect()
+            for row in range(combo.count()):
+                rect = view.visualRect(combo.model().index(row, 0))
+                self.assertGreaterEqual(rect.top(), viewport.top(), name)
+                self.assertLessEqual(rect.bottom(), viewport.bottom(), name)
+                text_width = view.fontMetrics().horizontalAdvance(combo.itemText(row))
+                self.assertLessEqual(text_width + 16, viewport.width(), (name, combo.itemText(row)))
+            combo.hidePopup()
+            self._app.processEvents()
+        window.close()
+
     def test_home_controls_switch_between_english_and_chinese(self) -> None:
         window = self._make_window()
 

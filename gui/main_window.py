@@ -53,6 +53,7 @@ from gui.param_panel import ParamPanel
 from gui.results_panel import ResultsPanel
 from gui.redesign_styles import restyle_param_panel
 from gui.status_messages import LocalizedStatusBar
+from gui.theme import install_combo_popup_fix
 from gui.tutorial import TutorialController, TutorialModeDialog
 from utils.logger import get_logger
 from utils.persistence import AppPersistence
@@ -245,6 +246,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         # Set the theme before any widget is built so each one starts in it.
         saved_theme = self._persistence.read_config().get("ui", {}).get("theme")
         theming.install()
+        install_combo_popup_fix()
         self._theme = theming.set_theme(
             saved_theme if saved_theme in theming.THEMES else theming.THEME_LIGHT
         )
