@@ -153,7 +153,35 @@ class SupersampledGeometryTests(unittest.TestCase):
         self.assertEqual(fine.shape, (base.shape[0] * 3, base.shape[1] * 3))
         # Averaging the fine render back down must reproduce the 1x render.
         pooled = fine.reshape(base.shape[0], 3, base.shape[1], 3).mean(axis=(1, 3))
-        self.assertLess(float(np.mean(np.abs(pooled - base))), 1.5)
+        self.assertLess(float(np.mean(np.abs(pooled - base))), 2.5)
+
+    def test_rotated_preview_looks_like_the_unrotated_one(self) -> None:
+        """Straightening must change the angle only, not the sharpness.
+
+        The view enlarges an unrotated preview bilinearly.  A rotation too
+        small to move any pixel must therefore give that same picture.
+        """
+        display = (synthetic_blot(0.0, noise=0.08) >> 8).astype(np.uint8)
+        height, width = display.shape
+        unrotated = np.asarray(
+            Image.fromarray(display).resize(
+                (width * 3, height * 3), Image.Resampling.BILINEAR
+            ),
+            dtype=np.float64,
+        )
+        rotated = apply_geometry_to_display(
+            display, GeometryTransform(rotation=1e-6), scale=3
+        ).astype(np.float64)
+        rotated = rotated[: height * 3, : width * 3]
+        inner = (slice(6, -6), slice(6, -6))
+        self.assertLessEqual(float(np.max(np.abs(rotated[inner] - unrotated[inner]))), 2.0)
+
+        def edge_energy(image: np.ndarray) -> float:
+            return float(np.mean(np.abs(np.diff(image[inner], axis=0))))
+
+        self.assertAlmostEqual(
+            edge_energy(rotated) / edge_energy(unrotated), 1.0, delta=0.02
+        )
 
     def test_right_angles_are_never_resampled(self) -> None:
         display = (synthetic_blot(0.0) >> 8).astype(np.uint8)

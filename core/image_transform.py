@@ -326,9 +326,11 @@ def apply_geometry_to_display(
     """Render an 8-bit preview through non-destructive geometry metadata.
 
     ``scale`` renders the result on a grid that many times finer than the
-    source.  Interpolating a rotated image straight onto the finer grid keeps
-    band edges crisper than rotating at 1x and letting the view enlarge the
-    result afterwards.  It only applies when the geometry actually rotates.
+    source, using bilinear interpolation.  The view enlarges an unrotated
+    preview bilinearly as well, so a rotated image drawn this way looks the
+    same as before the rotation: neither softer nor sharper.  Use an odd
+    factor so the finer grid samples source pixel centres.  It only applies
+    when the geometry actually rotates.
     """
     pixels = np.ascontiguousarray(np.asarray(display_pixels, dtype=np.uint8))
     if pixels.ndim != 2 or pixels.size == 0:
@@ -343,7 +345,9 @@ def apply_geometry_to_display(
     matrix, output_size = value.affine(width, height)
     inverse = np.linalg.inv(matrix)
     factor = max(1, int(scale))
+    resample = Image.Resampling.BICUBIC
     if factor > 1 and not value.is_axis_aligned():
+        resample = Image.Resampling.BILINEAR
         # Output pixel centre (i + 0.5) / factor is where the 1x canvas is
         # sampled, so the finer grid covers exactly the same canvas area.
         inverse = inverse @ np.diag((1.0 / factor, 1.0 / factor, 1.0))
@@ -361,7 +365,7 @@ def apply_geometry_to_display(
         output_size,
         Image.Transform.AFFINE,
         coefficients,
-        resample=Image.Resampling.BICUBIC,
+        resample=resample,
         fillcolor=fill_value,
     )
     return np.ascontiguousarray(np.asarray(image, dtype=np.uint8))
