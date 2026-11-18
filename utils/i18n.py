@@ -227,7 +227,6 @@ _ZH_CN = {
     "Invert display": "反相显示",
     "Show bright signal as dark bands on a light background": "在浅色背景上将高亮信号显示为深色条带",
     "Auto Scale": "自动缩放",
-    "ImageJ Auto": "ImageJ 自动",
     "Apply to All": "应用到全部图像",
     "Brightness": "亮度",
     "Contrast": "对比度",
@@ -241,9 +240,6 @@ _ZH_CN = {
     ),
     "Same as Auto Scale in Image Lab: ignores the darkest and brightest 0.1% of pixels.": (
         "与 Image Lab 的 Auto Scale 相同：忽略最暗和最亮各 0.1% 的像素。"
-    ),
-    "Same as Auto in ImageJ's Brightness/Contrast. Click again for a stronger stretch.": (
-        "与 ImageJ 亮度／对比度里的 Auto 相同。再点一次，拉伸会更强。"
     ),
     "Back to how the image looked when it was opened": "恢复到图像刚打开时的显示效果",
     "Use these settings for every open image": "把这组设置用到所有已打开的图像",

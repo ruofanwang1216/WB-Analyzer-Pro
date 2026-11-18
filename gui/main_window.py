@@ -1960,7 +1960,6 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             self._image_transform_dialog.paramsChanged.connect(self._apply_image_transform_params)
             self._image_transform_dialog.autoScaleRequested.connect(self._auto_scale_image_transform)
             self._image_transform_dialog.resetRequested.connect(self._reset_image_transform)
-            self._image_transform_dialog.imagejAutoRequested.connect(self._imagej_auto_image_transform)
             self._image_transform_dialog.applyToAllRequested.connect(self._apply_image_transform_to_all)
             self._image_transform_dialog.highlightSaturatedChanged.connect(self._set_highlight_saturated)
 
@@ -2005,18 +2004,6 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             self._image_transform_dialog.set_params(params)
         self._status_bar.showMessage(
             f"Auto Scale applied: Low {params.low}, High {params.high}, Gamma {params.gamma:.2f}.",
-            3000,
-        )
-
-    def _imagej_auto_image_transform(self) -> None:
-        canvas = self._active_image_transform_canvas()
-        if canvas is None:
-            return
-        params = canvas.imagej_auto_image_transform()
-        if self._image_transform_dialog is not None:
-            self._image_transform_dialog.set_params(params)
-        self._status_bar.showMessage(
-            f"ImageJ Auto applied: Low {params.low}, High {params.high}, Gamma {params.gamma:.2f}.",
             3000,
         )
 

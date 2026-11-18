@@ -35,7 +35,6 @@ from core.image_transform import (
     auto_scale_range_16,
     default_display_params,
     display_histogram,
-    imagej_auto_range,
     saturated_mask,
     image_array_to_raw_luminance,
     image_array_to_uint16_luminance,
@@ -542,7 +541,6 @@ class ImageCanvas(QGraphicsView):
         self._image_default_transform_params = self._default_image_transform_params()
         self._image_transform_params = self._image_default_transform_params
         self._display_stats_cache = None
-        self._imagej_auto_threshold = 0
         # A view option, like Image Lab's: it survives loading another image.
         self._highlight_saturated = True
         self._roi_item: QGraphicsRectItem | None = None
@@ -634,7 +632,6 @@ class ImageCanvas(QGraphicsView):
         self._image_default_transform_params = self._default_image_transform_params()
         self._image_transform_params = self._image_default_transform_params
         self._display_stats_cache = None
-        self._imagej_auto_threshold = 0
         self._roi_item = None
         self._band_roi_item = None
         self._lane_items.clear()
@@ -1053,7 +1050,6 @@ class ImageCanvas(QGraphicsView):
 
     def auto_scale_image_transform(self) -> ImageTransformParams:
         """Image Lab "Auto Scale": clip 0.1 % of the pixels at each end."""
-        self._imagej_auto_threshold = 0
         if self._display_source_pixels is None:
             params = self._image_default_transform_params
         else:
@@ -1072,23 +1068,6 @@ class ImageCanvas(QGraphicsView):
                 gamma=self._image_transform_params.gamma,
                 inverted=self._image_transform_params.inverted,
             )
-        self.set_image_transform_params(params)
-        return params
-
-    def imagej_auto_image_transform(self) -> ImageTransformParams:
-        """ImageJ Brightness/Contrast "Auto"; each press clips a little more."""
-        source = self._sampled_display_source_16()
-        if source is None:
-            return self._image_transform_params
-        low, high, self._imagej_auto_threshold = imagej_auto_range(
-            source, self._imagej_auto_threshold
-        )
-        params = ImageTransformParams(
-            low=low,
-            high=high,
-            gamma=self._image_transform_params.gamma,
-            inverted=self._image_transform_params.inverted,
-        )
         self.set_image_transform_params(params)
         return params
 
