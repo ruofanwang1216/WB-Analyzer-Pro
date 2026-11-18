@@ -858,6 +858,10 @@ class ImageCanvas(QGraphicsView):
     def has_image_transform_source(self) -> bool:
         return self._display_source_pixels is not None
 
+    def default_image_transform_params(self) -> ImageTransformParams:
+        """The display settings the current image opened with (what Reset restores)."""
+        return self._image_default_transform_params
+
     def get_image_transform_params(self) -> ImageTransformParams:
         return self._image_transform_params
 
