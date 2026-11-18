@@ -130,7 +130,7 @@ class MainWindowHomePageTests(unittest.TestCase):
         self.assertFalse(window._param_panel_host.isHidden())
         self.assertFalse(window._files_title.isHidden())
         self.assertEqual(window._files_panel.width(), full_width)
-        self.assertEqual(window._files_toggle_btn.text(), "▶")
+        self.assertEqual(window._files_toggle_btn.property("arrow"), "right")
         # With the list gone the lane settings move up under the header.
         self.assertLess(
             window._param_panel_host.mapTo(window._files_panel, QPoint()).y(), 80
@@ -138,7 +138,7 @@ class MainWindowHomePageTests(unittest.TestCase):
 
         window._set_files_panel_collapsed(False)
         self.assertFalse(window._files_list.isHidden())
-        self.assertEqual(window._files_toggle_btn.text(), "▼")
+        self.assertEqual(window._files_toggle_btn.property("arrow"), "left")
 
     def test_collapsed_sidebar_is_a_rail_only_where_it_holds_just_files(self) -> None:
         window = self._make_window()

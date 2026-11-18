@@ -60,6 +60,7 @@ from utils.i18n import LANG_EN, LANG_ZH_CN, tr
 from gui import theming
 from gui.icons import (
     _folder_open_icon,
+    _panel_arrow_icon,
     _theme_toggle_icon,
 )
 from gui.workers import (
@@ -444,7 +445,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._theme_toggle_btn = QToolButton()
         self._theme_toggle_btn.setObjectName("theme_toggle_btn")
         self._theme_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._theme_toggle_btn.setIconSize(QSize(20, 20))
+        self._theme_toggle_btn.setIconSize(QSize(16, 16))
         self._theme_toggle_btn.setFixedSize(30, 30)
         self._theme_toggle_btn.clicked.connect(self._toggle_theme)
         self._theme_toolbar_action = tb.addWidget(self._theme_toggle_btn)
@@ -556,8 +557,11 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         files_header = QHBoxLayout()
         files_header.setContentsMargins(0, 0, 0, 0)
         files_header.setSpacing(6)
-        self._files_toggle_btn = QPushButton("▼")
+        # The panel folds away to the left, so the arrow points left.
+        self._files_toggle_btn = QPushButton()
         self._files_toggle_btn.setObjectName("files_panel_toggle")
+        self._files_toggle_btn.setIconSize(QSize(10, 10))
+        self._set_files_toggle_arrow("left")
         self._files_toggle_btn.setToolTip("Collapse Uploaded Files panel")
         files_header.addWidget(self._files_toggle_btn)
         self._files_title = QLabel("Uploaded Files")
@@ -858,7 +862,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             sidebar_layout.setContentsMargins(8, 8, 2, 8)
             self._files_card_layout.setContentsMargins(8, 8, 8, 8)
         sidebar_layout.invalidate()
-        self._files_toggle_btn.setText("▶" if collapsed else "▼")
+        self._set_files_toggle_arrow("right" if collapsed else "left")
         self._files_toggle_btn.setToolTip(
             tr(
                 "Expand Uploaded Files panel"
@@ -924,6 +928,10 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             self._set_files_panel_collapsed(collapsed, persist=False)
         self._sync_param_panel_visibility()
 
+    def _set_files_toggle_arrow(self, direction: str) -> None:
+        self._files_toggle_btn.setProperty("arrow", direction)
+        self._files_toggle_btn.setIcon(_panel_arrow_icon(direction=direction))
+
     def _refresh_empty_state_text(self) -> None:
         language = getattr(self, "_language", LANG_EN)
         heading_color = theming.translate_hex(COLOR_TEXT)
@@ -956,6 +964,8 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._act_open.setIcon(_folder_open_icon())
         self._refresh_theme_toggle()
         self._refresh_empty_state_text()
+        if hasattr(self, "_files_toggle_btn"):
+            self._set_files_toggle_arrow(self._files_toggle_btn.property("arrow") or "left")
         if persist:
             self._persistence.remember_ui_state(theme=self._theme)
 
