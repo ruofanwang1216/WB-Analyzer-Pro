@@ -492,9 +492,11 @@ class EditableBandRectItem(QGraphicsRectItem):
         return [QRectF(point.x() - half, point.y() - half, size, size) for point in points]
 
 
-# A rotated preview is rendered up to 3x finer than the source so straightened
-# bands stay crisp; this caps the longest side of that render.
+# A rotated preview is rendered 3x finer than the source so that it looks the
+# same as the unrotated preview (see ``apply_geometry_to_display``); this caps
+# the longest side of that render.  Larger previews are rotated at 1x.
 _MAX_SUPERSAMPLED_PREVIEW_SIDE = 2400
+_ROTATION_SUPERSAMPLE = 3
 
 
 class ImageCanvas(QGraphicsView):
@@ -904,9 +906,8 @@ class ImageCanvas(QGraphicsView):
         if self._raw_image_shape is None or self._geometry_transform.is_axis_aligned():
             return 1
         longest = max(self._raw_image_shape) / max(1, self._display_preview_stride)
-        for factor in (3, 2):
-            if longest * factor <= _MAX_SUPERSAMPLED_PREVIEW_SIDE:
-                return factor
+        if longest * _ROTATION_SUPERSAMPLE <= _MAX_SUPERSAMPLED_PREVIEW_SIDE:
+            return _ROTATION_SUPERSAMPLE
         return 1
 
     def raw_pixels_for_estimation(self) -> np.ndarray | None:
@@ -1093,24 +1094,26 @@ class ImageCanvas(QGraphicsView):
         return params
 
     def _make_display_pixmap(self) -> QPixmap:
-        display = self.current_display_pixels(
-            supersample=self._rotation_supersample()
-        )
+        supersample = self._rotation_supersample()
+        display = self.current_display_pixels(supersample=supersample)
         if display is None:
             return QPixmap()
         if self._highlight_saturated:
-            highlighted = self._with_saturation_highlight(display)
+            highlighted = self._with_saturation_highlight(display, supersample)
             if highlighted is not None:
                 return highlighted
         return self._pixmap_from_display_pixels(display)
 
     def _with_saturation_highlight_for_current(self) -> QPixmap | None:
-        display = self.current_display_pixels()
+        supersample = self._rotation_supersample()
+        display = self.current_display_pixels(supersample=supersample)
         if display is None:
             return None
-        return self._with_saturation_highlight(display)
+        return self._with_saturation_highlight(display, supersample)
 
-    def _with_saturation_highlight(self, display: np.ndarray) -> QPixmap | None:
+    def _with_saturation_highlight(
+        self, display: np.ndarray, supersample: int = 1
+    ) -> QPixmap | None:
         """Return the preview with saturated pixels in red, or None if there are none."""
         if self._display_source_pixels is None:
             return None
@@ -1135,7 +1138,9 @@ class ImageCanvas(QGraphicsView):
             # A black frame keeps the fill colour of the rotated mask at zero.
             mask_image[0, :] = mask_image[-1, :] = 0
             mask_image[:, 0] = mask_image[:, -1] = 0
-            mask = apply_geometry_to_display(mask_image, self._geometry_transform) > 127
+            mask = apply_geometry_to_display(
+                mask_image, self._geometry_transform, scale=supersample
+            ) > 127
         if mask.shape != display.shape:
             return None
         rgb = np.repeat(display[:, :, None], 3, axis=2)
