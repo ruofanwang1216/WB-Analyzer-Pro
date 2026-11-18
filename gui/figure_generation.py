@@ -259,10 +259,15 @@ class _ColumnTableWidget(QTableWidget):
 
 class _PreviewScrollArea(QScrollArea):
     clicked = Signal()
+    resized = Signal()
 
     def mousePressEvent(self, event) -> None:
         self.clicked.emit()
         super().mousePressEvent(event)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.resized.emit()
 
 
 class _GroupHeaderView(QHeaderView):
@@ -1906,6 +1911,9 @@ class ColumnTableWindow(QMainWindow):
         self._editing_group_index: int | None = None
         self._table_zoom_factor = 1.0
         self._figure_zoom_factor = 1.0
+        # While True the figure preview is re-fitted whenever its panel changes
+        # size; zooming by hand turns it off, Fit turns it back on.
+        self._figure_fit_mode = True
         self._preview_plot: _PrismBarPlotWidget | None = None
         self._preview_plot_base_size: tuple[int, int] | None = None
         self._preview_scroll_area: _PreviewScrollArea | None = None
@@ -2250,6 +2258,7 @@ class ColumnTableWindow(QMainWindow):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.clicked.connect(lambda: self.panelFocusRequested.emit("figure"))
+        scroll.resized.connect(self._on_preview_viewport_resized)
         # The well matches the image well; the figure page itself stays white
         # because that page is exactly what gets exported.
         scroll.setObjectName("figure_preview_well")
@@ -2311,7 +2320,10 @@ class ColumnTableWindow(QMainWindow):
         needed = (preferred.width(), preferred.height())
         if self._preview_plot_base_size != needed:
             self._preview_plot_base_size = needed
-            self._apply_figure_zoom()
+            if self._figure_fit_mode:
+                self._fit_figure_to_viewport()
+            else:
+                self._apply_figure_zoom()
 
     def _on_style_config_changed(self, *, push_history: bool = True) -> None:
         if push_history:
@@ -2412,7 +2424,7 @@ class ColumnTableWindow(QMainWindow):
     def _apply_figure_zoom(self) -> None:
         if self._preview_plot is None or self._preview_plot_base_size is None:
             return
-        scale = max(0.1, min(2.8, self._figure_zoom_factor))
+        scale = max(0.1, min(4.0, self._figure_zoom_factor))
         self._figure_zoom_factor = scale
         bw, bh = self._preview_plot_base_size
         target_w, target_h = int(bw * scale), int(bh * scale)
@@ -2428,6 +2440,7 @@ class ColumnTableWindow(QMainWindow):
         self.panelFocusRequested.emit("table")
 
     def zoom_figure_preview(self, zoom_in: bool) -> None:
+        self._figure_fit_mode = False
         self._figure_zoom_factor *= 1.12 if zoom_in else 1.0 / 1.12
         self._apply_figure_zoom()
         self.panelFocusRequested.emit("figure")
@@ -2447,19 +2460,32 @@ class ColumnTableWindow(QMainWindow):
         self.panelFocusRequested.emit("table")
 
     def fit_figure_preview(self) -> None:
+        self._figure_fit_mode = True
+        if self._fit_figure_to_viewport():
+            self.panelFocusRequested.emit("figure")
+
+    def _on_preview_viewport_resized(self) -> None:
+        if self._figure_fit_mode:
+            self._fit_figure_to_viewport()
+
+    def _fit_figure_to_viewport(self) -> bool:
+        """Scale the figure so it fills the panel's width or height."""
         if self._preview_scroll_area is None or self._preview_plot_base_size is None:
-            return
-        viewport = self._preview_scroll_area.viewport().size()
+            return False
+        try:
+            viewport = self._preview_scroll_area.viewport().size()
+        except RuntimeError:
+            self._preview_scroll_area = None
+            return False
         if viewport.width() <= 0 or viewport.height() <= 0:
-            return
+            return False
         bw, bh = self._preview_plot_base_size
-        # Leave a small frame around the plot so the initial preview is clearly
-        # contained within, rather than touching or spilling past the viewport.
-        scale_w = max(0.1, float(viewport.width() - 24) / float(max(1, bw)))
-        scale_h = max(0.1, float(viewport.height() - 24) / float(max(1, bh)))
+        # A thin frame keeps the white page visibly inside the well.
+        scale_w = max(0.1, float(viewport.width() - 8) / float(max(1, bw)))
+        scale_h = max(0.1, float(viewport.height() - 8) / float(max(1, bh)))
         self._figure_zoom_factor = min(scale_w, scale_h)
         self._apply_figure_zoom()
-        self.panelFocusRequested.emit("figure")
+        return True
 
     def table_to_dataframe(self) -> pd.DataFrame:
         rows: list[dict[str, str]] = []
