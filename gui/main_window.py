@@ -861,7 +861,12 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             sidebar_layout.setContentsMargins(8, 8, 2, 8)
             self._files_card_layout.setContentsMargins(8, 8, 8, 8)
         sidebar_layout.invalidate()
-        self._set_files_toggle_arrow("right" if collapsed else "left")
+        # The arrow shows where the click sends the files: into a rail on the
+        # left, or (with the lane settings below) up into the card header.
+        if show_roi:
+            self._set_files_toggle_arrow("down" if collapsed else "up")
+        else:
+            self._set_files_toggle_arrow("right" if collapsed else "left")
         self._files_toggle_btn.setToolTip(
             tr(
                 "Expand Uploaded Files panel"

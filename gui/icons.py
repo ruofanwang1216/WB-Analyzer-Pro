@@ -170,7 +170,7 @@ def _theme_toggle_icon(*, dark: bool, size: int = 16) -> QIcon:
 
 
 def _panel_arrow_icon(*, direction: str, size: int = 10) -> QIcon:
-    """A small filled triangle pointing ``"left"`` or ``"right"``."""
+    """A small filled triangle pointing left, right, up or down."""
     color = theming.color("#3B4A43")
 
     def draw(painter: QPainter) -> None:
@@ -180,6 +180,14 @@ def _panel_arrow_icon(*, direction: str, size: int = 10) -> QIcon:
             tri.moveTo(7.2, 1.6)
             tri.lineTo(7.2, 8.4)
             tri.lineTo(2.4, 5.0)
+        elif direction == "up":
+            tri.moveTo(1.6, 7.2)
+            tri.lineTo(8.4, 7.2)
+            tri.lineTo(5.0, 2.4)
+        elif direction == "down":
+            tri.moveTo(1.6, 2.8)
+            tri.lineTo(8.4, 2.8)
+            tri.lineTo(5.0, 7.6)
         else:
             tri.moveTo(2.8, 1.6)
             tri.lineTo(2.8, 8.4)
