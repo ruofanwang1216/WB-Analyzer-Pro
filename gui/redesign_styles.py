@@ -154,6 +154,18 @@ PARAM_PANEL_STYLESHEET = f"""
         border-color: #D9E0DC;
         color: #8A9891;
     }}
+    QPushButton#manual_roi_btn {{
+        background-color: {COLOR_SURFACE};
+        border: 1px solid {COLOR_ACCENT};
+        border-radius: 7px;
+        color: {COLOR_ACCENT};
+        font-size: 12px;
+        font-weight: 600;
+        padding: 0px 8px;
+    }}
+    QPushButton#manual_roi_btn:hover {{
+        background-color: {COLOR_ACCENT_LIGHT};
+    }}
     QPushButton#fix_roi_btn, QPushButton#cancel_fixed_roi_btn {{
         font-size: 12px;
         padding: 0px 10px;

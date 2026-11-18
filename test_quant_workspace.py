@@ -308,6 +308,73 @@ class QuantWorkspaceTests(unittest.TestCase):
         self.assertTrue(figure._canvas_undo_stack)
         window.close()
 
+    def test_draw_manually_needs_an_image(self) -> None:
+        window = MainWindowFactory.make()
+        window._on_figure_generation_clicked()
+        button = window.param_panel._manual_roi_btn
+        self.assertEqual(button.text(), "Draw manually")
+
+        button.click()
+
+        self.assertEqual(window._status_bar.currentMessage(), "Import an image first.")
+
+    def test_draw_manually_clears_boxes_and_returns_to_hand_drawing(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        import numpy as np
+        from PIL import Image
+        from PySide6.QtCore import QRectF
+
+        window = MainWindowFactory.make()
+        window._on_figure_generation_clicked()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "blot.tif"
+            pixels = np.full((120, 240), 60000, dtype=np.uint16)
+            for lane in range(4):
+                pixels[50:62, 20 + lane * 55:55 + lane * 55] = 8000
+            Image.fromarray(pixels).save(path)
+            canvas = window._image_panels[0].canvas
+            canvas.load_image_blocking(path)
+            window._slot_states[0]["path"] = str(path)
+            window._slot_states[0]["selected"] = True
+            window._refresh_image_panel_layout()
+            self.assertEqual(window._active_slot_index, 0)
+
+            # Boxes from an automatic pass are on the image.
+            window.param_panel.lane_count.setValue(4)
+            roi = QRectF(10, 30, 220, 60)
+            with patch.object(canvas, "get_roi", return_value=roi):
+                window._on_roi_changed(roi)
+                window._run_quant_auto_lane_detect()
+            self.assertTrue(canvas.is_quant_auto_review())
+            self.assertTrue(canvas._auto_band_items)
+
+            window.param_panel._manual_roi_btn.click()
+
+            self.assertFalse(canvas.is_quant_auto_review())
+            self.assertFalse(canvas._auto_band_items)
+            self.assertIsNone(canvas._roi_item)
+            self.assertEqual(window._lane_rects, [])
+            self.assertIsNone(window._band_roi)
+            self.assertFalse(window._act_analyze.isEnabled())
+            self.assertEqual(window._current_mode, "manual")
+            self.assertEqual(
+                window._status_bar.currentMessage(),
+                "Drag around the lanes, then drag around the band, then Analyze.",
+            )
+
+            # Drawing by hand then works as before: lanes, then the band.
+            with patch.object(canvas, "get_roi", return_value=roi):
+                window._on_roi_changed(roi)
+            self.assertEqual(len(window._lane_rects), 4)
+            self.assertFalse(canvas.is_quant_auto_review())
+        window.close()
+
+    def test_draw_manually_is_translated(self) -> None:
+        window = MainWindowFactory.make({"language": LANG_ZH_CN})
+        self.assertEqual(window.param_panel._manual_roi_btn.text(), "手动框选")
+
     def test_dropped_images_are_imported(self) -> None:
         window = MainWindowFactory.make()
         mime = QMimeData()

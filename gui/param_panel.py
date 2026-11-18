@@ -55,6 +55,7 @@ class ParamPanel(QWidget):
     status_message = Signal(str)       # emitted for status bar warnings
     detect_requested = Signal()        # kept for toolbar compatibility
     auto_lane_detect_requested = Signal()  # find lanes + bands inside the drawn ROI
+    manual_roi_requested = Signal()        # start over and draw the ROIs by hand
     custom_rotate_requested = Signal()
     rotate_requested = Signal()
     cancel_rotate_requested = Signal()
@@ -242,6 +243,19 @@ class ParamPanel(QWidget):
         self._auto_lane_btn.clicked.connect(self.auto_lane_detect_requested)
         manual_layout.addWidget(self._auto_lane_btn)
 
+        # The by-hand route gets its own button so it is as visible as the
+        # automatic one: it clears the boxes and waits for the user's drags.
+        self._manual_roi_btn = QPushButton("Draw manually")
+        self._manual_roi_btn.setObjectName("manual_roi_btn")
+        self._manual_roi_btn.setFixedHeight(26)
+        self._manual_roi_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._manual_roi_btn.setToolTip(
+            "Clear the boxes on this image and draw your own: drag around the "
+            "lanes, then drag around the band, then Analyze."
+        )
+        self._manual_roi_btn.clicked.connect(self.manual_roi_requested)
+        manual_layout.addWidget(self._manual_roi_btn)
+
         # Shown only when auto-detect finds a faint band right next to a main
         # band.  Off: boxes wrap the main band only.  On: both bands together.
         self._adjacent_band_check = QCheckBox("Include adjacent band")
@@ -332,6 +346,12 @@ class ParamPanel(QWidget):
         self._fixed_label.setText(tr("Fixed ROI", language))
         self._fix_btn.setText(tr("Fix", language))
         self._auto_lane_btn.setText(tr("Auto-detect lanes", language))
+        self._manual_roi_btn.setText(tr("Draw manually", language))
+        self._manual_roi_btn.setToolTip(tr(
+            "Clear the boxes on this image and draw your own: drag around the "
+            "lanes, then drag around the band, then Analyze.",
+            language,
+        ))
         self._adjacent_band_check.setText(tr("Include adjacent band", language))
         self._adjacent_band_check.setToolTip(tr(
             "A faint second band was found right next to the main band. "
