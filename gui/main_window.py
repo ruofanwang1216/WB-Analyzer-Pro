@@ -1967,10 +1967,13 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._image_transform_dialog.set_controls_enabled(has_source)
         if has_source and canvas is not None:
             self._image_transform_dialog.set_image_statistics(canvas.display_statistics())
+            opened = canvas.default_image_transform_params()
+            self._image_transform_dialog.set_reference_window(opened.low, opened.high)
             self._image_transform_dialog.set_highlight_saturated(canvas.highlight_saturated())
             self._image_transform_dialog.set_params(canvas.get_image_transform_params())
         else:
             self._image_transform_dialog.set_image_statistics(None)
+            self._image_transform_dialog.set_reference_window(None)
             self._image_transform_dialog.set_params(ImageTransformParams())
 
     def _apply_image_transform_params(self, params: ImageTransformParams) -> None:
