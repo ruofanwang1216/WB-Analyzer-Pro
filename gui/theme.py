@@ -1,10 +1,13 @@
 """Application-wide Qt stylesheet built from the shared colour palette."""
 from __future__ import annotations
 
+from PySide6.QtWidgets import QComboBox
+
 from config.settings import (
     COLOR_ACCENT,
     COLOR_ACCENT_DARK,
     COLOR_ACCENT_LIGHT,
+    COLOR_ACCENT_TEXT,
     COLOR_BG,
     COLOR_BORDER,
     COLOR_RESULTS_HD,
@@ -144,6 +147,29 @@ QDialog QComboBox::down-arrow {{
     height: 10px;
     margin-right: 8px;
 }}
+/* Drop-down lists.  On macOS a styled QComboBox otherwise opens the native
+   "pop up over the current item" menu, which Qt sizes from the closed box:
+   with rounded, padded boxes it came out too short, showing half a row and
+   a scroll arrow that could not be dragged.  combobox-popup: 0 makes every
+   combo open an ordinary list below itself, sized to all of its items. */
+QComboBox {{
+    combobox-popup: 0;
+}}
+QComboBox QAbstractItemView {{
+    background-color: {COLOR_SURFACE};
+    color: {COLOR_TEXT};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 8px;
+    padding: 4px;
+    outline: none;
+    selection-background-color: {COLOR_ACCENT_LIGHT};
+    selection-color: {COLOR_ACCENT_TEXT};
+}}
+QComboBox QAbstractItemView::item {{
+    min-height: 24px;
+    padding: 2px 8px;
+    border-radius: 5px;
+}}
 QToolTip {{
     background-color: #1C2622;
     color: #FEFEFE;
@@ -152,3 +178,28 @@ QToolTip {{
     font-size: 12px;
 }}
 """
+
+
+_original_show_popup = QComboBox.showPopup
+
+
+def _show_popup_wide_enough(self: QComboBox) -> None:
+    """Open the list at least as wide as its longest entry.
+
+    The list otherwise takes the width of the closed box, which cut off
+    longer entries such as "Distribute Horizontally".
+    """
+    view = self.view()
+    if view is not None and self.count():
+        metrics = view.fontMetrics()
+        widest = max(metrics.horizontalAdvance(self.itemText(i)) for i in range(self.count()))
+        # Item padding, list padding and border, and room for a scroll bar.
+        needed = widest + 2 * 8 + 2 * 4 + 2 + 16
+        view.setMinimumWidth(max(self.width(), min(needed, 420)))
+    _original_show_popup(self)
+
+
+def install_combo_popup_fix() -> None:
+    """Make every drop-down list wide enough for its entries (idempotent)."""
+    if QComboBox.showPopup is not _show_popup_wide_enough:
+        QComboBox.showPopup = _show_popup_wide_enough
