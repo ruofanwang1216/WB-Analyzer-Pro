@@ -207,13 +207,22 @@ class ImageTransformDialogTests(unittest.TestCase):
         dialog.set_image_statistics(
             {"histogram": counts, "min": low, "max": high, "saturated": 0.0104}
         )
+        dialog.set_reference_window(4000, 30000)
         dialog.set_params(ImageTransformParams(low=4000, high=30000, inverted=True))
         return dialog, emitted, (low, high)
 
-    def test_sliders_cover_the_values_in_the_image(self) -> None:
-        dialog, emitted, (low, high) = self._dialog()
-        self.assertEqual((dialog._low_slider.minimum(), dialog._low_slider.maximum()), (low, high))
-        self.assertEqual(dialog._high_slider.value(), 30000)
+    def test_sliders_start_centred_and_move_both_ways(self) -> None:
+        dialog, emitted, _ = self._dialog()
+        for slider, value in ((dialog._low_slider, 4000), (dialog._high_slider, 30000)):
+            self.assertEqual(slider.value(), value)
+            self.assertEqual(slider.value() - slider.minimum(), slider.maximum() - slider.value())
+        # Low may go below the darkest pixel; the range grows for far values.
+        dialog._low_slider.setValue(dialog._low_slider.minimum())
+        self.assertEqual(emitted[-1].low, 4000 - 26000)
+        dialog.set_params(ImageTransformParams(low=4000, high=65535, inverted=True))
+        self.assertEqual(dialog._high_slider.value(), 65535)
+        emitted.clear()
+        dialog.set_params(ImageTransformParams(low=4000, high=30000, inverted=True))
         self.assertEqual(emitted, [])
         self.assertIn("1.0", dialog._info_label.text())
 

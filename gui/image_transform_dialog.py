@@ -273,6 +273,7 @@ class ImageTransformDialog(QDialog):
         self._params = ImageTransformParams()
         # Range of values present in the image; None until an image is shown.
         self._data_range: tuple[int, int] | None = None
+        self._reference_window: tuple[int, int] | None = None
         self._saturated_fraction = 0.0
 
         # Light-palette colours; the theme translates them for dark mode.
@@ -311,8 +312,9 @@ class ImageTransformDialog(QDialog):
 
         # Without an image the unmodified range sits at the midpoint of both
         # controls: Low 0 in [-65535, 65535], High 65535 in [0, 131070].  Once
-        # an image is shown the sliders cover the values present in it, as in
-        # Image Lab; the number boxes still accept the wider range.
+        # an image is shown each slider is centred on the value the image
+        # opened with (see _slider_bounds); the number boxes accept the full
+        # range.
         self._low_slider, self._low_spin = self._make_int_control(
             MIN_TONE_VALUE, MAX_16BIT_VALUE, 0
         )
@@ -507,11 +509,35 @@ class ImageTransformDialog(QDialog):
 
     # ── widget refresh ────────────────────────────────────────────────────
 
+    def set_reference_window(self, low: int | None, high: int | None = None) -> None:
+        """Set the Low / High the image opened with; the sliders centre on them."""
+        self._reference_window = (
+            None if low is None or high is None else (int(low), int(high))
+        )
+        self._refresh_widgets()
+
     def _slider_bounds(self) -> tuple[tuple[int, int], tuple[int, int]]:
-        if self._data_range is None:
+        """Slider ranges for Low and High.
+
+        Each slider is centred on the value the image opened with and reaches
+        one display-window width to either side, so both can always be moved
+        left and right.  A value set further out (typed, dragged on the
+        histogram, or from an auto button) stretches the range to include it.
+        """
+        if self._data_range is None or self._reference_window is None:
             return (MIN_TONE_VALUE, MAX_16BIT_VALUE), (0, MAX_TONE_VALUE)
-        data_min, data_max = self._data_range
-        return (data_min, data_max), (data_min, data_max)
+        ref_low, ref_high = self._reference_window
+        reach = max(256, ref_high - ref_low)
+        p = self._params
+        low_bounds = (
+            max(MIN_TONE_VALUE, min(ref_low - reach, p.low)),
+            min(MAX_16BIT_VALUE, max(ref_low + reach, p.low)),
+        )
+        high_bounds = (
+            max(0, min(ref_high - reach, p.high)),
+            min(MAX_TONE_VALUE, max(ref_high + reach, p.high)),
+        )
+        return low_bounds, high_bounds
 
     def _default_window(self) -> tuple[int, int]:
         """The range ImageJ's Brightness / Contrast sliders are measured against."""
