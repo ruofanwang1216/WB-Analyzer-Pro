@@ -314,7 +314,7 @@ class FigureStyleConfig:
     x_title_offset_x: int = 0
     x_title_offset_y: int = 0
     y_title: str = "Relative Protein Level"
-    y_title_font_size: int = 16
+    y_title_font_size: int = 17
     y_title_bold: bool = True
     y_title_offset_x: int = 0
     y_title_offset_y: int = 0
@@ -323,7 +323,7 @@ class FigureStyleConfig:
     y_max: float | None = None
     y_major_interval: float | None = None
     y_minor_interval: float | None = None
-    tick_label_font_size: int = 14
+    tick_label_font_size: int = 16
     tick_label_bold: bool = True
     frame_style: str = "left_bottom"  # no_frame, left_bottom, box_frame
     show_major_grid: bool = False
@@ -976,7 +976,7 @@ class _PrismBarPlotWidget(QWidget):
     openControlPanel = Signal(str)
     styleEdited = Signal()
 
-    _TICK_LEN = 7.0
+    _TICK_LEN = 9.0
     _TICK_GAP = 5.0
     _EDGE = 14.0
 
