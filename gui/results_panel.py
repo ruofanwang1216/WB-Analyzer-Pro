@@ -488,17 +488,8 @@ class ResultsPanel(QWidget):
         if target_entry is None:
             return
 
-        band_name = self._normalize_band_name(target_entry, column_index)
-        confirm = QMessageBox.question(
-            self,
-            "Remove Band",
-            f"Remove {band_name} from results?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if confirm != QMessageBox.StandardButton.Yes:
-            return
-
+        # The × on a column removes it straight away, without a confirmation
+        # dialog; the bulk Delete button still asks first.
         self._delete_entry_ids({target_id})
 
     def _entry_id_for_column(self, column_index: int) -> int | None:
