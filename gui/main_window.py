@@ -575,15 +575,11 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._files_list.setObjectName("uploaded_files_list")
         self._files_list.setMinimumHeight(72)
         self._files_card_layout.addWidget(self._files_list, 1)
-        # Drop target and TIFF export share one slim row.
+        # Files can be dropped anywhere on the window, so the row needs no
+        # label saying so; it holds the TIFF export only.
         files_actions = QHBoxLayout()
         files_actions.setContentsMargins(0, 0, 0, 0)
         files_actions.setSpacing(6)
-        self._files_drop_hint = QLabel("Drop .scn / .tif")
-        self._files_drop_hint.setObjectName("files_drop_hint")
-        self._files_drop_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._files_drop_hint.setFixedHeight(24)
-        files_actions.addWidget(self._files_drop_hint, 1)
         self._export_all_tiffs_btn = QPushButton("Export All TIFFs")
         self._export_all_tiffs_btn.setObjectName("export_all_tiffs_btn")
         self._export_all_tiffs_btn.setFixedHeight(24)
@@ -801,7 +797,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self.setStatusBar(self._status_bar)
         self._refresh_image_panel_layout()
         self._sync_workspace_tabs()
-        self._status_bar.showMessage("Choose a tool or import images.")
+        self._status_bar.clearMessage()
 
     def _set_files_panel_collapsed(
         self,
@@ -843,7 +839,6 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._param_panel_host.setVisible(show_roi)
         self._files_title.setVisible(not rail)
         self._files_list.setVisible(not collapsed)
-        self._files_drop_hint.setVisible(not collapsed)
         self._export_all_tiffs_btn.setVisible(not collapsed)
         self._files_bottom_spacer.changeSize(
             0,
@@ -943,12 +938,9 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         language = getattr(self, "_language", LANG_EN)
         heading_color = theming.translate_hex(COLOR_TEXT)
         self._empty_state.setText(
-            f"<div style='font-size:16px; font-weight:600; color:{heading_color};'>"
+            f"<div style='font-size:15px; font-weight:500; color:{heading_color};'>"
             + tr("Drop .scn or .tif files here, or click Import Images", language)
-            + "</div><br>"
-            + tr("1. Import images", language) + "<br>"
-            + tr("2. Draw the lanes and the band", language) + "<br>"
-            + tr("3. Analyze — the table and bar chart fill in automatically", language)
+            + "</div>"
         )
 
     def _refresh_theme_toggle(self) -> None:
@@ -998,7 +990,6 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         )
         self._wb_plot_generation_btn.setText(tr("② Figure Layout", language))
         self._fit_workspace_tab_widths()
-        self._files_drop_hint.setText(tr("Drop .scn / .tif", language))
         self._refresh_empty_state_text()
         self._tutorial_btn.setText(tr("New User Tutorial", language))
         self._files_title.setText(tr("Uploaded Files", language))
@@ -1036,9 +1027,8 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             panel.flip_horizontal_action.setText(tr("Horizontal", language))
             panel.undo_image_operation_action.setText(tr("Undo", language))
         if self._home_mode_active:
-            self._status_bar.showMessage(
-                tr("Choose a tool or import images.", language)
-            )
+            # Home needs no prompt; the empty canvas already says what to do.
+            self._status_bar.clearMessage()
         elif self._is_wb_plot_workspace_active():
             self._status_bar.showMessage(
                 tr("Opened WB Figure Layout workspace.", language)
@@ -1282,9 +1272,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._workspace_toolbar_action.setVisible(True)
         self._set_workspace_focus_target("image")
         self._sync_workspace_tabs()
-        self._status_bar.showMessage(
-            tr("Choose a tool or import images.", self._language)
-        )
+        self._status_bar.clearMessage()
 
     def _restore_initial_home_after_tutorial(self) -> None:
         """Discard tutorial artifacts and reproduce the fresh-launch Home UI."""
@@ -1350,9 +1338,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._wb_plot_workspace_layout.addWidget(self._wb_plot_placeholder)
 
         self._show_home_page()
-        self._status_bar.showMessage(
-            tr("Choose a tool or import images.", self._language)
-        )
+        self._status_bar.clearMessage()
 
     def _on_densitometry_mode(self) -> None:
         """Open the analysis-first view of the existing densitometry workspace."""

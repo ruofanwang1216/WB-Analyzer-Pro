@@ -46,6 +46,9 @@ class MainWindowHomePageTests(unittest.TestCase):
         self.assertFalse(window._files_list.isHidden())
         self.assertFalse(window._empty_state.isHidden())
         self.assertTrue(window._viewer_container.isHidden())
+        # Home carries one line of text and no status prompt.
+        self.assertNotIn("1.", window._empty_state.text())
+        self.assertEqual(window._status_bar.currentMessage(), "")
         self.assertTrue(window._param_panel_host.isHidden())
         self.assertTrue(window._figure_workspace.isHidden())
         self.assertTrue(window._results_dock.isHidden())
@@ -126,7 +129,7 @@ class MainWindowHomePageTests(unittest.TestCase):
 
         # Folding the file list keeps the lane tools: only the list goes.
         self.assertTrue(window._files_list.isHidden())
-        self.assertTrue(window._files_drop_hint.isHidden())
+        self.assertFalse(hasattr(window, "_files_drop_hint"))
         self.assertFalse(window._param_panel_host.isHidden())
         self.assertFalse(window._files_title.isHidden())
         self.assertEqual(window._files_panel.width(), full_width)
