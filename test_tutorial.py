@@ -405,7 +405,7 @@ class TutorialWorkflowTests(unittest.TestCase):
         self.assertIsNone(window._figure_mode_window)
         self.assertTrue(window._figure_workspace.isHidden())
         self.assertTrue(window._results_dock.isHidden())
-        self.assertTrue(window._files_panel_collapsed)
+        self.assertFalse(window._empty_state.isHidden())
 
     def test_column_setup_defaults_are_opt_in(self) -> None:
         normal = ColumnSetupDialog()

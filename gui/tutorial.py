@@ -754,8 +754,22 @@ class TutorialController(QObject):
         self._sync_roi_hint(step.key)
         self._sync_table_drag_hint(step.key)
         self._sync_roi_enter_prompt(step.key)
+        self._reveal_step_target(step)
         self._position_overlays()
         self._panel.raise_()
+
+    def _reveal_step_target(self, step: _Step) -> None:
+        """Open the Figure Layout step page that holds this step's control."""
+        figure = getattr(self._host, "_figure_mode_window", None)
+        if figure is None or self._mode != "wb_figure":
+            return
+        try:
+            target = step.target()
+        except Exception:
+            return
+        widget = target[0] if isinstance(target, tuple) else target
+        if isinstance(widget, QWidget):
+            figure.reveal_widget(widget)
 
     def _clear_roi_hints(self) -> None:
         for image_panel in self._host._image_panels:
@@ -1032,7 +1046,7 @@ class TutorialController(QObject):
                 _Step(
                     "create_column_table",
                     "Create the column table first",
-                    "Click Densitometry Figure Generation. The tutorial opens Column Setup directly with Samples = 3 and Replicates = 2. Confirm it before drawing any ROI.",
+                    "Click ① Quantify & Plot at the top. The tutorial opens Column Setup with Samples = 3 and Replicates = 2. Confirm it before drawing any ROI.",
                     lambda: host._figure_generation_btn,
                     True,
                 ),
@@ -1199,7 +1213,7 @@ class TutorialController(QObject):
                 _Step(
                     "generate_figure",
                     "Generate the densitometry figure",
-                    "Click Figures Generation. The completed table will be normalized to Group A and the figure preview will be generated.",
+                    "Click Plot. The completed table will be normalized to Group A and the figure preview will be generated.",
                     lambda: (
                         None
                         if host._embedded_column_table is None
@@ -1253,7 +1267,7 @@ class TutorialController(QObject):
             _Step(
                 "frame_template",
                 "Create the blot frames",
-                "Click Create Blot Frame Template. Tutorial defaults are Panels = 1, Blot Frames = 2, and Lanes = 3, matching the supplied setup screenshot.",
+                "Click New Blot Frames. Tutorial defaults are Panels = 1, Blot Frames = 2, and Lanes = 3, matching the supplied setup screenshot.",
                 lambda: figure_target("step1PrimaryButton"),
                 True,
             ),
@@ -1267,7 +1281,7 @@ class TutorialController(QObject):
             _Step(
                 "condition_template",
                 "Create the blot conditions",
-                "Click Create Blot Condition Template. Tutorial defaults are one condition row and one evenly divided Group Level 1.",
+                "Click Add Conditions. Tutorial defaults are one condition row and one evenly divided Group Level 1.",
                 lambda: figure_target("step1SecondaryButton"),
                 True,
             ),

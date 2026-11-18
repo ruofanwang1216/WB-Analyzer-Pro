@@ -40,14 +40,15 @@ from PySide6.QtWidgets import (
     QCheckBox, QHBoxLayout, QLabel, QMessageBox, QPushButton,
     QFileDialog,  # noqa: F401 - used by the mixins; kept importable from here
     QInputDialog, QListWidget, QListWidgetItem,
-    QComboBox, QRadioButton, QScrollArea, QSpinBox, QDoubleSpinBox, QToolButton, QVBoxLayout, QWidget,
+    QComboBox, QRadioButton, QScrollArea, QSizePolicy, QSpinBox, QDoubleSpinBox, QStackedWidget,
+    QToolButton, QToolTip, QVBoxLayout, QWidget,
 )
 
 from config.paths import blot_files_dir
 from core.export_engine import (
     PPTX_AVAILABLE,
 )
-from core.band_auto_fit import calculate_band_auto_fit
+from core.band_auto_fit import calculate_band_auto_fit, equalize_strip_heights
 from core.image_transform import geometry_transform_from_dict
 from core.condition_template import even_lane_group_ranges, make_condition_table
 from core.figure_project import (
@@ -60,6 +61,7 @@ from core.layout_engine import (
     scene_to_pt,
 )
 from core.template_engine import TemplateEngine
+from gui import theming
 from gui.condition_template_dialog import (
     ConditionPreviewWidget as _ConditionPreviewWidget,
     ConditionTemplateDialogController,
@@ -99,7 +101,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
     # The workflow panel needs enough room for the two-column detection and
     # template controls without clipping.  It remains substantially narrower
     # than the source-image and figure-canvas workspaces around it.
-    _SIDEBAR_WIDTH = 210
+    _SIDEBAR_WIDTH = 248
 
     def __init__(self, parent=None, *, language: str = LANG_EN) -> None:
         super().__init__(parent)
@@ -132,6 +134,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         self._tutorial_mode = False
         self._tutorial_saved_roi_fill_mode: str | None = None
         self._language = language if language in {LANG_EN, LANG_ZH_CN} else LANG_EN
+        self._current_step = 1
 
         # Dynamic sidebar sub-widgets rebuilt when project structure changes
         self._step4_slot_widgets: list[QWidget] = []
@@ -222,6 +225,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         # The selected target is regenerated as the user interacts with the
         # canvas, so refresh it through its source-aware helper as well.
         self._refresh_selected_slot_label()
+        self._refresh_step_panel_texts()
 
     def _retranslate_widget_tree(self, root: QWidget) -> None:
         """Translate an existing WB Figure widget tree in either direction."""
@@ -266,53 +270,9 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
     def _build_ui(self) -> None:
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setSpacing(8)
 
-        # ── Left: scrollable sidebar ──────────────────────────────────────
-        sidebar_scroll = QScrollArea()
-        sidebar_scroll.setFixedWidth(self._SIDEBAR_WIDTH)
-        sidebar_scroll.setWidgetResizable(True)
-        sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        sidebar_scroll.setStyleSheet(
-            "QScrollArea { border: none; background: #EAF2EE; }"
-        )
-
-        sidebar_widget = QWidget()
-        sidebar_widget.setStyleSheet("background: #EAF2EE;")
-        sidebar_layout = QVBoxLayout(sidebar_widget)
-        sidebar_layout.setContentsMargins(2, 8, 2, 8)
-        sidebar_layout.setSpacing(4)
-        self._sidebar_layout = sidebar_layout
-
-        # Title
-        title_lbl = QLabel("Workflow")
-        title_lbl.setStyleSheet(
-            "font-weight:700; font-size:14px; color:#24352E; padding:3px 6px 7px 6px;"
-        )
-        sidebar_layout.addWidget(title_lbl)
-
-        # Step groups
-        self._grp1 = self._build_step1()
-        self._grp4 = self._build_apply_roi_step()
-        self._grp5 = self._build_saved_blot_files_step()
-        self._grp6 = self._build_step6()
-        self._grp4.set_expanded(False)
-
-        for grp in (self._grp1, self._grp4, self._grp5, self._grp6):
-            sidebar_layout.addWidget(grp)
-        sidebar_layout.addStretch()
-
-        sidebar_scroll.setWidget(sidebar_widget)
-        root.addWidget(sidebar_scroll)
-
-        # ── Separator ─────────────────────────────────────────────────────
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setFrameShadow(QFrame.Shadow.Sunken)
-        sep.setStyleSheet("color: #BDD0C6;")
-        root.addWidget(sep)
-
-        # ── Right: annotation toolbar + canvas ────────────────────────────
+        # ── Centre: slim canvas bar + figure canvas ───────────────────────
         self._canvas = FigureCanvas(self)
         self._canvas.on_text_edited = self._on_canvas_text_edited
         self._canvas.on_text_rotation_changed = self._on_canvas_text_rotation_changed
@@ -330,17 +290,237 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         )
         canvas_scroll.setWidget(self._canvas)
 
-        right_widget = QWidget()
-        right_widget.setStyleSheet("background: #FFFFFF;")
-        right_vbox = QVBoxLayout(right_widget)
-        right_vbox.setContentsMargins(0, 0, 0, 0)
-        right_vbox.setSpacing(0)
-        right_vbox.addWidget(self._build_canvas_toolbar())
-        right_vbox.addWidget(canvas_scroll, 1)
-        root.addWidget(right_widget, 1)
+        canvas_card = QFrame()
+        canvas_card.setObjectName("figureCanvasCard")
+        canvas_card.setStyleSheet(
+            "QFrame#figureCanvasCard { background: #FFFFFF; "
+            "border: 1px solid #D9E0DC; border-radius: 10px; }"
+        )
+        canvas_vbox = QVBoxLayout(canvas_card)
+        canvas_vbox.setContentsMargins(1, 1, 1, 1)
+        canvas_vbox.setSpacing(0)
+        # The white page sits inside the card with a margin, like the image well.
+        canvas_scroll.setContentsMargins(0, 0, 0, 0)
+        page_holder = QWidget()
+        page_holder.setObjectName("figurePageHolder")
+        page_holder.setStyleSheet("QWidget#figurePageHolder { background: transparent; }")
+        page_holder_box = QVBoxLayout(page_holder)
+        page_holder_box.setContentsMargins(2, 0, 2, 2)
+        page_holder_box.addWidget(canvas_scroll)
+        # The bar carries the annotation tools; building it also creates
+        # the save panel that is placed on the last step page below.
+        canvas_vbox.addWidget(self._build_canvas_toolbar())
+        canvas_vbox.addWidget(page_holder, 1)
+        root.addWidget(canvas_card, 1)
+
+        # ── Right: fixed-width panel, all three stages on one screen ──────
+        # Each stage needs only a few controls, so they are stacked instead
+        # of paged: nothing to click through and no empty space.
+        panel = QFrame()
+        panel.setObjectName("workflowStepPanel")
+        panel.setFixedWidth(self._SIDEBAR_WIDTH)
+        panel.setStyleSheet(
+            "QFrame#workflowStepPanel { background: #FFFFFF; "
+            "border: 1px solid #D9E0DC; border-radius: 10px; }"
+        )
+        self._step_panel = panel
+        panel_outer = QVBoxLayout(panel)
+        panel_outer.setContentsMargins(1, 1, 1, 1)
+        panel_outer.setSpacing(0)
+
+        self._grp1 = self._build_step1()
+        self._grp4 = self._build_apply_roi_step()
+        self._grp5 = self._build_saved_blot_files_step()
+        self._grp6 = self._build_step6()
+        for grp in (self._grp1, self._grp4, self._grp5, self._grp6):
+            grp.set_flat(True)
+        # Saved Blot Files open from a button, like Saved Templates.
+        self._grp5.setParent(self)
+        self._grp5.hide()
+
+        # The Fill how-to lives behind a "?" next to the heading, like the
+        # ROI card in Quantify & Plot.  The hidden label only holds the text.
+        self._step_desc_lbl = QLabel("")
+        self._step_desc_lbl.setParent(self)
+        self._step_desc_lbl.hide()
+        self._fill_help_btn = QToolButton()
+        self._fill_help_btn.setObjectName("fill_help_btn")
+        self._fill_help_btn.setText("?")
+        self._fill_help_btn.setFixedSize(16, 16)
+        self._fill_help_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._fill_help_btn.setStyleSheet(
+            "QToolButton#fill_help_btn { background:transparent; "
+            "border:1px solid #C9D3CE; border-radius:8px; /* exact */ "
+            "color:#5A6B63; font-size:10px; font-weight:600; padding:0px; }"
+            "QToolButton#fill_help_btn:hover { border-color:#1F6B4A; color:#134A32; }"
+        )
+        self._fill_help_btn.clicked.connect(self._show_fill_help)
+        # The hint above already says it; drop the repeated wording.
+        for label in self._grp4.findChildren(QLabel):
+            if label.text() in {"Detection", "select then hit Enter/Return"}:
+                label.setParent(self)
+                label.hide()
+
+        page = QWidget()
+        page.setObjectName("workflowStepPage")
+        page.setStyleSheet("QWidget#workflowStepPage { background: transparent; }")
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(12, 12, 12, 12)
+        page_layout.setSpacing(16)
+        self._sidebar_layout = page_layout
+
+        self._step_headings: list[QLabel] = []
+        self._step_badges: list[QLabel] = []
+        self._step_pages: list[QWidget] = []
+        section_contents: list[list[QWidget]] = [
+            [self._grp1],
+            [self._grp4],
+            [self._grp6, self._save_panel],
+        ]
+        for number, widgets in enumerate(section_contents, start=1):
+            section = QWidget()
+            section.setObjectName("workflowStepSection")
+            section.setStyleSheet(
+                "QWidget#workflowStepSection { background: transparent; }"
+            )
+            section_layout = QVBoxLayout(section)
+            section_layout.setContentsMargins(0, 0, 0, 0)
+            section_layout.setSpacing(8)
+            heading_row = QHBoxLayout()
+            heading_row.setContentsMargins(0, 0, 0, 0)
+            heading_row.setSpacing(8)
+            badge = QLabel(str(number))
+            badge.setObjectName("workflowStepBadge")
+            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            badge.setFixedSize(20, 20)
+            badge.setStyleSheet(
+                "QLabel#workflowStepBadge { background:#1F6B4A; color:#FEFEFE; "
+                "border-radius:10px; /* exact */ font-size:11px; font-weight:700; }"
+            )
+            heading = QLabel("")
+            heading.setObjectName("workflowStepHeading")
+            heading.setFixedHeight(22)
+            heading.setStyleSheet(
+                "QLabel#workflowStepHeading { background:transparent; color:#1C2622; "
+                "font-size:13px; font-weight:700; }"
+            )
+            heading_row.addWidget(badge)
+            heading_row.addWidget(heading)
+            if number == 2:
+                heading_row.addWidget(self._fill_help_btn)
+            heading_row.addStretch(1)
+            section_layout.addLayout(heading_row)
+            for widget in widgets:
+                section_layout.addWidget(widget)
+            page_layout.addWidget(section)
+            self._step_headings.append(heading)
+            self._step_badges.append(badge)
+            self._step_pages.append(section)
+        page_layout.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet(
+            "QScrollArea { border: none; background: transparent; }"
+        )
+        scroll.viewport().setObjectName("workflowStepViewport")
+        scroll.viewport().setStyleSheet(
+            "QWidget#workflowStepViewport { background: transparent; }"
+        )
+        scroll.setWidget(page)
+        self._step_scroll = scroll
+        panel_outer.addWidget(scroll, 1)
+        root.addWidget(panel)
 
         # Wire scene selection → font/line controls
         self._canvas._scene.selectionChanged.connect(self._on_canvas_selection_changed)
+        self.go_to_step(1)
+
+    # ── Step panel ────────────────────────────────────────────────────────
+
+    # Short on purpose: the panel should read at a glance.
+    _STEP_TITLES = ("Layout", "Fill", "Export")
+    _STEP_DESCRIPTIONS = (
+        "",
+        "How to fill a blot frame:\n"
+        "1. Click a blot frame in the Figure Preview\n"
+        "2. Draw a box around the band on the image\n"
+        "3. Press Enter/Return to fill the frame",
+        "",
+    )
+
+    def current_step(self) -> int:
+        return self._current_step
+
+    def go_to_step(self, number: int) -> None:
+        """Bring one stage into view; all stages stay on screen together."""
+        number = max(1, min(int(number), len(self._STEP_TITLES)))
+        self._current_step = number
+        self._refresh_step_panel_texts()
+        self._step_scroll.ensureWidgetVisible(self._step_pages[number - 1], 0, 12)
+
+    def reveal_widget(self, widget: QWidget | None) -> None:
+        """Scroll to the stage that holds a control (used by the tutorial)."""
+        if widget is None:
+            return
+        for index, section in enumerate(self._step_pages, start=1):
+            if section is widget or section.isAncestorOf(widget):
+                self._current_step = index
+                self._step_scroll.ensureWidgetVisible(widget, 0, 12)
+                return
+
+    def _refresh_step_panel_texts(self) -> None:
+        for index, heading in enumerate(self._step_headings, start=1):
+            heading.setText(tr(self._STEP_TITLES[index - 1], self._language))
+        self._step_desc_lbl.setText(tr(self._STEP_DESCRIPTIONS[1], self._language))
+        self._fill_help_btn.setToolTip(self._step_desc_lbl.text())
+        # "Blots" alone already means something else in Chinese.
+        self._saved_blot_files_btn.setText(
+            "Blots" if self._language != "zh_CN" else tr("Blot Files", self._language)
+        )
+
+    def _show_fill_help(self) -> None:
+        QToolTip.showText(
+            self._fill_help_btn.mapToGlobal(self._fill_help_btn.rect().bottomLeft()),
+            self._fill_help_btn.toolTip(),
+            self._fill_help_btn,
+        )
+
+    def _show_saved_blot_files_dialog(self) -> None:
+        """Pick a saved Blot File from a list, the way Saved Templates works."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(tr("Saved Blot Files", self._language))
+        dialog.setModal(True)
+        dialog.setMinimumSize(380, 420)
+        dialog.setStyleSheet("QDialog { background:#FFFFFF; }")
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 14)
+        layout.setSpacing(10)
+        self._blot_file_list.setMaximumHeight(16777215)
+        self._grp5.setParent(dialog)
+        layout.addWidget(self._grp5, 1)
+        self._grp5.show()
+        self._populate_blot_file_list()
+
+        def close_if_opened() -> None:
+            selected = self._current_blot_file_selection()
+            if selected and self._active_blot_file_id == selected:
+                dialog.accept()
+
+        open_btn = self._blot_file_open_btn
+        open_btn.clicked.connect(close_if_opened)
+        self._blot_file_dialog = dialog
+        self._retranslate_widget_tree(dialog)
+        try:
+            dialog.exec()
+        finally:
+            open_btn.clicked.disconnect(close_if_opened)
+            # Hand the list back before the dialog is destroyed.
+            self._grp5.setParent(self)
+            self._grp5.hide()
+            self._blot_file_dialog = None
+            dialog.deleteLater()
 
     # ── Saved template library ────────────────────────────────────────────
 
@@ -387,7 +567,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         preview_label = QLabel("Frame Preview")
         preview_label.setStyleSheet(
-            "font-size:10px; font-weight:600; color:#5C7167;"
+            "font-size:12px; font-weight:600; color:#5C7167;"
         )
         outer.addWidget(preview_label)
 
@@ -571,32 +751,49 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         detection_lbl = QLabel("Detection")
         detection_lbl.setStyleSheet(
-            "font-size:10px; font-weight:600; color:#3A4B43; padding:1px;"
+            "font-size:12px; font-weight:600; color:#3A4B43; padding:1px;"
         )
         grp.body_layout().addWidget(detection_lbl)
 
-        mode_row = QHBoxLayout()
-        mode_row.setContentsMargins(0, 0, 0, 0)
-        mode_row.setSpacing(9)
+        # Auto | Manual as one segmented pill.
+        mode_track = QFrame()
+        mode_track.setObjectName("fillModeTrack")
+        mode_track.setFixedHeight(36)
+        mode_track.setStyleSheet(
+            "QFrame#fillModeTrack { background:#E9EEEB; border:none; "
+            "border-radius:18px; /* exact */ }"
+        )
+        mode_row = QHBoxLayout(mode_track)
+        mode_row.setContentsMargins(3, 3, 3, 3)
+        mode_row.setSpacing(2)
         self._roi_mode_group = QButtonGroup(self)
         self._roi_mode_group.setExclusive(True)
-        self._auto_detect_radio = QRadioButton("Auto Detect")
-        self._manual_detect_radio = QRadioButton("Manual")
+        # Checkable buttons (not radio buttons) so the text can be centred.
+        self._auto_detect_radio = QPushButton("Auto")
+        self._manual_detect_radio = QPushButton("Manual")
+        for button in (self._auto_detect_radio, self._manual_detect_radio):
+            button.setCheckable(True)
         self._auto_detect_radio.setChecked(True)
         for button in (self._auto_detect_radio, self._manual_detect_radio):
+            button.setObjectName("fillModeSegment")
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setFixedHeight(30)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             button.setStyleSheet(
-                "QRadioButton { font-size:9px; color:#2F3D36; spacing:4px; }"
-                "QRadioButton::indicator { width:13px; height:13px; }"
+                "QPushButton#fillModeSegment { background:transparent; color:#3B4A43; "
+                "border:none; border-radius:15px; /* exact */ font-size:13px; "
+                "padding:0px; }"
+                f"QPushButton#fillModeSegment:checked {{ background:{theming.SEGMENT_SOURCE}; "
+                f"color:{theming.SEGMENT_TEXT_SOURCE}; font-weight:600; }}"
             )
             self._roi_mode_group.addButton(button)
-            mode_row.addWidget(button)
-        mode_row.addStretch(1)
+            mode_row.addWidget(button, 1)
         self._auto_detect_radio.toggled.connect(self._on_roi_fill_mode_changed)
-        grp.body_layout().addLayout(mode_row)
+        grp.body_layout().addWidget(mode_track)
 
         enter_hint = QLabel("select then hit Enter/Return")
         enter_hint.setStyleSheet(
-            "font-size:8px; color:#73867D; padding:0 1px 2px 1px;"
+            "font-size:11px; color:#73867D; padding:0 1px 2px 1px;"
         )
         grp.body_layout().addWidget(enter_hint)
 
@@ -611,13 +808,13 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         self._auto_fit_h_margin = QSpinBox()
         self._auto_fit_h_margin.setRange(0, 200)
         self._auto_fit_h_margin.setValue(4)
-        self._auto_fit_h_margin.setSingleStep(4)
+        self._auto_fit_h_margin.setSingleStep(1)
         self._auto_fit_h_margin.setAccelerated(True)
         self._auto_fit_h_margin.setSuffix(" px")
-        self._auto_fit_h_margin.setFixedHeight(22)
+        self._auto_fit_h_margin.setFixedHeight(28)
         self._auto_fit_h_margin.setStyleSheet(
             "QSpinBox { background:#FFFFFF; border:1px solid #C7D6CE; "
-            "border-radius:4px; padding:1px 3px; font-size:9px; }"
+            "border-radius:4px; padding:1px 3px; font-size:12px; }"
         )
         self._auto_fit_h_margin.setToolTip(
             "Original-image background retained to the left and right of each "
@@ -627,10 +824,10 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         self._auto_fit_v_margin = QSpinBox()
         self._auto_fit_v_margin.setRange(0, 200)
         self._auto_fit_v_margin.setValue(4)
-        self._auto_fit_v_margin.setSingleStep(4)
+        self._auto_fit_v_margin.setSingleStep(1)
         self._auto_fit_v_margin.setAccelerated(True)
         self._auto_fit_v_margin.setSuffix(" px")
-        self._auto_fit_v_margin.setFixedHeight(22)
+        self._auto_fit_v_margin.setFixedHeight(28)
         self._auto_fit_v_margin.setStyleSheet(self._auto_fit_h_margin.styleSheet())
         self._auto_fit_v_margin.setToolTip(
             "Original-image background retained above and below each aligned "
@@ -649,7 +846,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             "Auto uses the more stable band edge when one-sided trailing is detected. "
             "No band pixels are redrawn, stretched, or erased."
         )
-        margin_label_style = "font-size:9px; color:#3A4B43; background:transparent;"
+        margin_label_style = "font-size:12px; color:#3A4B43; background:transparent;"
         h_margin_lbl = QLabel("H margin")
         h_margin_lbl.setStyleSheet(margin_label_style)
         v_margin_lbl = QLabel("V margin")
@@ -668,14 +865,14 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         fix_btn = QPushButton("Fix ROI")
         fix_btn.setStyleSheet(_SMALL_BTN_STYLE)
-        fix_btn.setFixedHeight(24)
+        fix_btn.setFixedHeight(30)
         fix_btn.setToolTip("Capture the current ROI size, or arm the next drawn ROI as the fixed size.")
         fix_btn.clicked.connect(self._on_add_fixed_roi_clicked)
         fixed_row.addWidget(fix_btn)
 
         cancel_btn = QPushButton("Cancel Fixed ROI")
         cancel_btn.setStyleSheet(_SMALL_BTN_STYLE)
-        cancel_btn.setFixedHeight(24)
+        cancel_btn.setFixedHeight(30)
         cancel_btn.setToolTip("Return all WB image windows to freehand ROI drawing.")
         cancel_btn.clicked.connect(self._on_cancel_fixed_roi_clicked)
         fixed_row.addWidget(cancel_btn)
@@ -685,7 +882,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         self._fixed_roi_list.setMinimumHeight(54)
         self._fixed_roi_list.setMaximumHeight(82)
         self._fixed_roi_list.setStyleSheet(
-            "QListWidget { background:#FFFFFF; border:1px solid #CBD9D1; border-radius:6px; font-size:10px; }"
+            "QListWidget { background:#FFFFFF; border:1px solid #CBD9D1; border-radius:6px; font-size:12px; }"
             "QListWidget::item { padding:1px 3px; }"
             "QListWidget::item:selected { background:#C9DED2; color:#1E3D2F; }"
         )
@@ -768,14 +965,14 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         layout.setContentsMargins(5, 0, 2, 0)
         layout.setSpacing(3)
         label = QLabel(str(item.data(_FIXED_ROI_NAME_ROLE) or item.text()))
-        label.setStyleSheet("font-size:10px; color:#2C4A3D;")
+        label.setStyleSheet("font-size:12px; color:#2C4A3D;")
         layout.addWidget(label, 1)
         delete_btn = QToolButton()
         delete_btn.setText("×")
         delete_btn.setToolTip("Delete this fixed ROI size")
-        delete_btn.setFixedSize(16, 16)
+        delete_btn.setFixedSize(20, 20)
         delete_btn.setStyleSheet(
-            "QToolButton { border:1px solid #9EB3A8; border-radius:8px; background:#F7FAF8; color:#6A7A72; font-size:10px; }"
+            "QToolButton { border:1px solid #9EB3A8; border-radius:8px; background:#F7FAF8; color:#6A7A72; font-size:12px; }"
             "QToolButton:hover { background:#F0D7D7; color:#8A3B3B; border-color:#C99595; }"
         )
         delete_btn.clicked.connect(lambda _checked=False, it=item: self._delete_fixed_roi_item(it))
@@ -803,9 +1000,9 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         bl = grp.body_layout()
 
         self._blot_file_list = QListWidget()
-        self._blot_file_list.setMaximumHeight(86)
+        self._blot_file_list.setMaximumHeight(200)
         self._blot_file_list.setStyleSheet(
-            "QListWidget { background:#FFFFFF; border:1px solid #C9B6B6; border-radius:6px; font-size:10px; }"
+            "QListWidget { background:#FFFFFF; border:1px solid #C9B6B6; border-radius:6px; font-size:12px; }"
             "QListWidget::item { padding:2px 4px; }"
             "QListWidget::item:selected { background:#E6CACA; color:#4A2428; }"
         )
@@ -818,9 +1015,11 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         bl.addWidget(self._blot_file_list)
 
         open_btn = QPushButton("Open Blot File")
-        open_btn.setStyleSheet(_SMALL_BTN_STYLE)
+        open_btn.setStyleSheet(_APPLY_BTN_STYLE)
+        open_btn.setFixedHeight(36)
         open_btn.clicked.connect(self._on_open_blot_file)
         bl.addWidget(open_btn)
+        self._blot_file_open_btn = open_btn
 
         self._populate_blot_file_list()
         return grp
@@ -866,18 +1065,18 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         row_layout.setContentsMargins(6, 0, 4, 0)
         row_layout.setSpacing(4)
         lbl = _TemplateNameLabel(str(summary["name"]), str(summary["id"]))
-        lbl.setStyleSheet("font-size:10px; color:#4A2428;")
+        lbl.setStyleSheet("font-size:12px; color:#4A2428;")
         lbl.setCursor(Qt.CursorShape.IBeamCursor)
         lbl.setToolTip("Double-click to rename this saved Blot File")
         lbl.doubleClicked.connect(self._on_rename_blot_file)
         row_layout.addWidget(lbl, 1)
         del_btn = QToolButton()
         del_btn.setText("×")
-        del_btn.setFixedSize(16, 16)
+        del_btn.setFixedSize(20, 20)
         del_btn.setToolTip(f'Delete Blot File "{summary["name"]}"')
         del_btn.setStyleSheet(
             "QToolButton { border:1px solid #BCA0A0; border-radius:8px; "
-            "background:#FDF8F8; color:#7A5B5B; font-size:10px; }"
+            "background:#FDF8F8; color:#7A5B5B; font-size:12px; }"
             "QToolButton:hover { background:#F0D7D7; color:#8A3B3B; border-color:#C99595; }"
         )
         del_btn.clicked.connect(lambda _=False, bid=summary["id"]: self._on_delete_blot_file(bid))
@@ -1117,6 +1316,9 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         self._active_slot_ref = ref
         self._refresh_selected_slot_label()
         self._on_canvas_selection_changed()
+        if self._current_step == 1:
+            # Picking a frame is the start of filling it.
+            self.go_to_step(2)
         if self._tutorial_mode:
             self.workflowEvent.emit("blot_frame_selected")
 
@@ -1327,6 +1529,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
                 return False
             slot.source_image_path = image_path
             slot.bounding_box = crop
+            slot.fit_box = crop
             slot.image_transform = image_transform
             slot.geometry_transform = geometry_transform
             slot.lane_crops = list(result.lane_crop_boxes)
@@ -1336,6 +1539,9 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             if frame is not None:
                 frame_width_pt = scene_to_pt(frame.rect().width())
                 slot.display_height_pt = frame_width_pt / crop_aspect_ratio
+                # Strips of one panel are shown at one height: shorter crops
+                # are widened vertically to match the tallest strip.
+                self._equalize_panel_strip_heights(ref.panel_idx, frame_width_pt)
             # Keep lane definitions and frame width unchanged. Only Auto-Fit
             # height follows the tight crop so contain-scaling fills the frame.
             self._rebuild_step4()
@@ -1359,6 +1565,58 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
                 "without stretching or generating band pixels.",
             )
         return True
+
+    def _equalize_panel_strip_heights(self, panel_idx: int, default_width_pt: float) -> None:
+        """Make every Auto-Fit strip in a panel the same height without stretching."""
+        if self._project is None or not (0 <= panel_idx < len(self._project.panels)):
+            return
+        slots = [
+            slot
+            for slot in self._project.panels[panel_idx].blot_slots
+            if slot.source_image_path
+            and slot.bounding_box is not None
+            and slot.preserve_image_aspect
+            and not slot.lane_crops
+        ]
+        if not slots:
+            return
+        strips = []
+        for slot in slots:
+            # Always start from the crop as chosen, so the panel can also get
+            # shorter again when its tallest strip is re-fitted more tightly.
+            box = slot.fit_box or slot.bounding_box
+            strips.append({
+                "crop": (box.x, box.y, box.w, box.h),
+                "frame_width": float(slot.display_width_pt or default_width_pt),
+                "image_height": self._presentation_image_height(slot),
+            })
+        for slot, fitted in zip(slots, equalize_strip_heights(strips)):
+            x, y, w, h = fitted["crop"]
+            current = slot.bounding_box
+            if (
+                abs(h - current.h) > 1e-6 or abs(y - current.y) > 1e-6
+                or abs(x - current.x) > 1e-6 or abs(w - current.w) > 1e-6
+            ):
+                slot.bounding_box = ImageBBox(x, y, w, h)
+                slot.saved_preview_path = ""
+            if fitted["frame_height"] > 0:
+                slot.display_height_pt = fitted["frame_height"]
+
+    @staticmethod
+    def _presentation_image_height(slot: BlotSlot) -> float | None:
+        """Height of the slot's source image as displayed (after rotate/flip)."""
+        try:
+            from PIL import Image
+
+            with Image.open(slot.source_image_path) as image:
+                width, height = image.size
+            transform = geometry_transform_from_dict(slot.geometry_transform)
+            if not transform.is_identity():
+                _matrix, (_out_w, out_h) = transform.affine(width, height)
+                return float(out_h)
+            return float(height)
+        except Exception:
+            return None
 
     @staticmethod
     def _lane_rois_for_auto_fit(
@@ -1464,6 +1722,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         blot_view_state = self._canvas.capture_blot_view_state()
         self._remember_canvas_undo_state()
+        was_auto_fitted = bool(slot.preserve_image_aspect) and not slot.lane_crops
         slot.source_image_path = image_path
         slot.bounding_box = ImageBBox(
             x=roi["x"],
@@ -1471,13 +1730,25 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             w=roi["w"],
             h=roi["h"],
         )
+        slot.fit_box = ImageBBox(x=roi["x"], y=roi["y"], w=roi["w"], h=roi["h"])
         slot.image_transform = image_transform
         slot.geometry_transform = geometry_transform
         slot.lane_crops = []
-        slot.preserve_image_aspect = False
         slot.saved_preview_path = ""
-        # Preserve lane_count, lane_rois, display width/height and all canvas
-        # offsets.  The selected ROI only changes the pixels inside the frame.
+        # Preserve lane_count, lane_rois, display width and all canvas offsets.
+        # A frame that still has its layout size keeps it: the selected ROI only
+        # changes the pixels inside the frame.  A frame whose height was set by
+        # an earlier Auto-Fit no longer has a size the user chose, so stretching
+        # a manual ROI into it would distort the blot; there the height follows
+        # the ROI's proportions, like Auto-Fit, and the panel is re-levelled.
+        frame = self._canvas._blot_frames.get((pi, si, None, None, None, "blot"))
+        if was_auto_fitted and frame is not None and roi["w"] > 0 and roi["h"] > 0:
+            frame_width_pt = scene_to_pt(frame.rect().width())
+            slot.preserve_image_aspect = True
+            slot.display_height_pt = frame_width_pt * roi["h"] / roi["w"]
+            self._equalize_panel_strip_heights(pi, frame_width_pt)
+        else:
+            slot.preserve_image_aspect = False
 
         self._rebuild_step4()
         self._recompute_and_refresh(fit_view=False)
@@ -1496,7 +1767,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         self._export_pdf_btn = QPushButton("PDF")
         self._export_pdf_btn.setObjectName("exportFormatButton")
-        self._export_pdf_btn.setFixedHeight(25)
+        self._export_pdf_btn.setFixedHeight(32)
         self._export_pdf_btn.setStyleSheet(_SECONDARY_EXPORT_BTN_STYLE)
         self._export_pdf_btn.setToolTip("Export Figure as PDF")
         self._export_pdf_btn.clicked.connect(self._on_export_pdf)
@@ -1504,7 +1775,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         self._export_tiff_btn = QPushButton("TIFF")
         self._export_tiff_btn.setObjectName("exportFormatButton")
-        self._export_tiff_btn.setFixedHeight(25)
+        self._export_tiff_btn.setFixedHeight(32)
         self._export_tiff_btn.setStyleSheet(_SECONDARY_EXPORT_BTN_STYLE)
         self._export_tiff_btn.setToolTip("Export Figure as TIFF")
         self._export_tiff_btn.clicked.connect(self._on_export_tiff)
@@ -1512,7 +1783,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
 
         self._export_pptx_btn = QPushButton("PPTX")
         self._export_pptx_btn.setObjectName("exportFormatButton")
-        self._export_pptx_btn.setFixedHeight(25)
+        self._export_pptx_btn.setFixedHeight(32)
         self._export_pptx_btn.setStyleSheet(_SECONDARY_EXPORT_BTN_STYLE)
         self._export_pptx_btn.setToolTip("Export Figure as PPTX")
         if not PPTX_AVAILABLE:
@@ -1530,9 +1801,12 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
                 "PPTX export requires python-pptx.\n"
                 "pip install python-pptx"
             )
-            note.setStyleSheet("color:#A66; font-size:9px;")
+            note.setStyleSheet("color:#A66; font-size:12px;")
             bl.addWidget(note)
 
+        for button in (self._export_pdf_btn, self._export_tiff_btn, self._export_pptx_btn):
+            button.setFixedHeight(34)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
         return grp
 
     # ── Canvas annotation toolbar ─────────────────────────────────────────

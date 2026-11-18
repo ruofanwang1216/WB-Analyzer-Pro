@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QIcon, QPainter, QPainterPath, QPen, QPixmap
+
+from gui import theming
 
 
 def _folder_open_icon(size: int = 22) -> QIcon:
@@ -13,7 +15,7 @@ def _folder_open_icon(size: int = 22) -> QIcon:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.scale(size / 24.0, size / 24.0)
-    pen = QPen(QColor("#29483B"), 1.8)
+    pen = QPen(theming.color("#29483B"), 1.8)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     painter.setPen(pen)
@@ -53,7 +55,7 @@ def _zoom_icon(*, zoom_in: bool, size: int = 18) -> QIcon:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.scale(size / 18.0, size / 18.0)
-    pen = QPen(QColor("#405967"), 1.6)
+    pen = QPen(theming.color("#405967"), 1.6)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     painter.setPen(pen)
@@ -75,7 +77,7 @@ def _image_operation_icon(operation: str, size: int = 18) -> QIcon:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.scale(size / 18.0, size / 18.0)
-    pen = QPen(QColor("#26322D"), 1.65)
+    pen = QPen(theming.color("#26322D"), 1.65)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     painter.setPen(pen)
@@ -93,6 +95,13 @@ def _image_operation_icon(operation: str, size: int = 18) -> QIcon:
         painter.drawLine(QPointF(9.0, 3.0), QPointF(12.0, 6.0))
         painter.drawLine(QPointF(9.0, 15.0), QPointF(6.0, 12.0))
         painter.drawLine(QPointF(9.0, 15.0), QPointF(12.0, 12.0))
+    elif operation == "auto-straighten":
+        # A tilted band above the level band it becomes.
+        painter.drawLine(QPointF(3.0, 7.5), QPointF(15.0, 3.5))
+        painter.drawLine(QPointF(3.0, 13.5), QPointF(15.0, 13.5))
+        painter.drawLine(QPointF(9.0, 7.6), QPointF(9.0, 10.6))
+        painter.drawLine(QPointF(9.0, 10.6), QPointF(7.4, 9.0))
+        painter.drawLine(QPointF(9.0, 10.6), QPointF(10.6, 9.0))
     elif operation == "custom-rotate":
         # One continuous, two-headed curved arrow mirrors the reference icon
         # while remaining crisp on systems without the corresponding glyph.
@@ -112,3 +121,89 @@ def _image_operation_icon(operation: str, size: int = 18) -> QIcon:
 
     painter.end()
     return QIcon(pixmap)
+
+
+def _crisp_icon(size: int, draw) -> QIcon:
+    """Paint *draw* (in a 0..size box) at 1x, 2x and 3x so it stays sharp.
+
+    Qt picks the pixmap that matches the screen, so Retina and scaled macOS
+    displays never enlarge a low-resolution bitmap.
+    """
+    icon = QIcon()
+    for ratio in (1, 2, 3):
+        pixmap = QPixmap(size * ratio, size * ratio)
+        pixmap.setDevicePixelRatio(float(ratio))
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        draw(painter)
+        painter.end()
+        icon.addPixmap(pixmap)
+    return icon
+
+
+def _theme_toggle_icon(*, dark: bool, size: int = 16) -> QIcon:
+    """Sun while the dark theme is on, moon while the light theme is on."""
+    import math
+
+    color = theming.color("#3B4A43")
+
+    def draw(painter: QPainter) -> None:
+        painter.scale(size / 16.0, size / 16.0)
+        if dark:
+            pen = QPen(color, 1.3)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(QRectF(5.4, 5.4, 5.2, 5.2))
+            for step in range(8):
+                angle = math.radians(step * 45.0)
+                dx, dy = math.cos(angle), math.sin(angle)
+                painter.drawLine(
+                    QPointF(8.0 + dx * 4.6, 8.0 + dy * 4.6),
+                    QPointF(8.0 + dx * 6.4, 8.0 + dy * 6.4),
+                )
+        else:
+            # A filled crescent: a disc with an offset disc cut away.
+            disc = QPainterPath()
+            disc.addEllipse(QRectF(2.0, 2.0, 12.0, 12.0))
+            cut = QPainterPath()
+            cut.addEllipse(QRectF(5.6, -0.6, 11.0, 11.0))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(color)
+            painter.drawPath(disc.subtracted(cut))
+
+    return _crisp_icon(size, draw)
+
+
+def _panel_arrow_icon(*, direction: str, size: int = 10) -> QIcon:
+    """A small filled triangle pointing left, right, up or down."""
+    color = theming.color("#3B4A43")
+
+    def draw(painter: QPainter) -> None:
+        painter.scale(size / 10.0, size / 10.0)
+        tri = QPainterPath()
+        if direction == "left":
+            tri.moveTo(7.2, 1.6)
+            tri.lineTo(7.2, 8.4)
+            tri.lineTo(2.4, 5.0)
+        elif direction == "up":
+            tri.moveTo(1.6, 7.2)
+            tri.lineTo(8.4, 7.2)
+            tri.lineTo(5.0, 2.4)
+        elif direction == "down":
+            tri.moveTo(1.6, 2.8)
+            tri.lineTo(8.4, 2.8)
+            tri.lineTo(5.0, 7.6)
+        else:
+            tri.moveTo(2.8, 1.6)
+            tri.lineTo(2.8, 8.4)
+            tri.lineTo(7.6, 5.0)
+        tri.closeSubpath()
+        pen = QPen(color, 0.9)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(color)
+        painter.drawPath(tri)
+
+    return _crisp_icon(size, draw)

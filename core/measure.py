@@ -158,6 +158,75 @@ def quantify_roi(raw_image: np.ndarray, raw_roi_geometry: Any) -> dict[str, int 
     }
 
 
+# ── Local background (auto-detected band boxes) ───────────────────────────────
+
+BACKGROUND_STRIP_MIN_PX = 2
+BACKGROUND_STRIP_MAX_PX = 4
+
+
+def background_strips(
+    rect: tuple[float, float, float, float],
+    other_rects: list[tuple[float, float, float, float]],
+    image_size: tuple[float, float],
+) -> list[tuple[float, float, float, float]]:
+    """Thin background strips directly above and below a band box.
+
+    Each strip is as wide as the box, touches its top/bottom edge and is a
+    quarter of the box height thick (2–4 px).  A side is dropped when its
+    strip would leave the image or touch another band box.
+    """
+    x, y, width, height = rect
+    image_w, image_h = image_size
+    thickness = float(
+        min(BACKGROUND_STRIP_MAX_PX, max(BACKGROUND_STRIP_MIN_PX, round(height / 4.0)))
+    )
+    strips: list[tuple[float, float, float, float]] = []
+    for sy in (y - thickness, y + height):
+        if sy < 0 or sy + thickness > image_h or x < 0 or x + width > image_w:
+            continue
+        blocked = False
+        for ox, oy, ow, oh in other_rects:
+            if ox < x + width and x < ox + ow and oy < sy + thickness and sy < oy + oh:
+                blocked = True
+                break
+        if not blocked:
+            strips.append((x, sy, width, thickness))
+    return strips
+
+
+def local_background_level(
+    raw_image: np.ndarray,
+    raw_background_rois: list[Any],
+    *,
+    light_on_dark: bool = True,
+) -> float | None:
+    """Per-pixel background from the strips next to one band box.
+
+    The median of the strip pixels is used so a few stray pixels do not move
+    it.  When the two sides disagree by more than their own noise, one side is
+    probably touching other signal, so only the cleaner side (the one further
+    from "signal") is used.
+    """
+    sides = []
+    for geometry in raw_background_rois:
+        values = roi_pixels(raw_image, geometry).astype(np.float64, copy=False)
+        if values.size:
+            sides.append(values)
+    if not sides:
+        return None
+    if len(sides) == 1:
+        return float(np.median(sides[0]))
+    medians = [float(np.median(values)) for values in sides]
+    pooled = np.concatenate(sides)
+    noise = max(
+        1.4826 * float(np.median(np.abs(values - median)))
+        for values, median in zip(sides, medians)
+    )
+    if abs(medians[0] - medians[1]) > 2.0 * noise:
+        return min(medians) if light_on_dark else max(medians)
+    return float(np.median(pooled))
+
+
 def measure_all_lanes(
     image_path: str,
     band_rois: list,
@@ -195,6 +264,23 @@ def measure_all_lanes_in_array(arr: np.ndarray, band_rois: list) -> list[dict]:
         row = {"lane": lane_index, **quantify_roi(raw_image, geometry)}
         if band_index is not None:
             row["band"] = band_label or f"Band {int(band_index)}"
+        if isinstance(geometry, dict) and "background_rois" in geometry:
+            light_on_dark = bool(geometry.get("light_on_dark", True))
+            level = local_background_level(
+                raw_image, geometry["background_rois"], light_on_dark=light_on_dark
+            )
+            if level is None:
+                # No usable background next to this box: report it instead of guessing.
+                row["Background"] = None
+                row["Net Mean"] = None
+                row["Net IntDen"] = None
+            else:
+                sign = 1.0 if light_on_dark else -1.0
+                row["Background"] = round(level, 3)
+                row["Net Mean"] = round(sign * (float(row["Mean"]) - level), 3)
+                row["Net IntDen"] = round(
+                    sign * (float(row["IntDen"]) - level * float(row["Area"])), 3
+                )
         results.append(row)
         log.info("Lane %d: %s", lane_index, row)
     return results

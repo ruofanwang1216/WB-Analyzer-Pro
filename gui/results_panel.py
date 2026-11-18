@@ -24,10 +24,14 @@ from config.settings import (
     COLOR_TEXT_HINT,
     COLOR_TEXT_MUTED,
 )
+from gui import theming
 from utils.i18n import LANG_EN, tr
 
 _COLS = ["Run", "Band", "Lane", "Area", "Mean", "Min", "Max", "IntDen", "RawIntDen"]
 _METRICS = ["Area", "Mean", "Min", "Max", "IntDen", "RawIntDen"]
+# Extra rows shown only when a run carries local-background values
+# (auto-detected band boxes).  "Net" = raw value minus local background.
+_BACKGROUND_METRICS = ["Background", "Net Mean", "Net IntDen"]
 _ODD_RUN_BG = QColor(239, 244, 248, 235)      # neutral blue
 _EVEN_RUN_BG = QColor(212, 237, 228, 220)     # soft green, clearly visible
 _ODD_RUN_HEADER_TINT = QColor(220, 233, 243)
@@ -131,12 +135,12 @@ class _BandHeaderView(QHeaderView):
         delete_rect = self._delete_icon_rect(rect)
 
         # Checkbox: small white box with subtle border.
-        painter.setPen(QPen(QColor("#8FA1AE"), 1))
-        painter.setBrush(QColor("#FFFFFF"))
+        painter.setPen(QPen(theming.color(QColor("#8FA1AE")), 1))
+        painter.setBrush(theming.color(QColor("#FFFFFF")))
         painter.drawRect(checkbox_rect)
 
         if logicalIndex in self._checked_sections:
-            painter.setPen(QPen(QColor(COLOR_ACCENT_TEXT), 1.6))
+            painter.setPen(QPen(theming.color(QColor(COLOR_ACCENT_TEXT)), 1.6))
             painter.drawLine(
                 checkbox_rect.left() + 2,
                 checkbox_rect.center().y(),
@@ -151,10 +155,10 @@ class _BandHeaderView(QHeaderView):
             )
 
         # Delete icon: gray x in subtle circle (ⓧ style).
-        painter.setPen(QPen(QColor("#9AA9B4"), 1))
-        painter.setBrush(QColor(245, 248, 250, 235))
+        painter.setPen(QPen(theming.color(QColor("#9AA9B4")), 1))
+        painter.setBrush(theming.color(QColor(245, 248, 250, 235)))
         painter.drawEllipse(delete_rect)
-        painter.setPen(QPen(QColor("#8A98A3"), 1.3))
+        painter.setPen(QPen(theming.color(QColor("#8A98A3")), 1.3))
         painter.drawLine(delete_rect.left() + 4, delete_rect.top() + 4, delete_rect.right() - 4, delete_rect.bottom() - 4)
         painter.drawLine(delete_rect.right() - 4, delete_rect.top() + 4, delete_rect.left() + 4, delete_rect.bottom() - 4)
 
@@ -166,7 +170,7 @@ class _BandHeaderView(QHeaderView):
             max(0, delete_rect.left() - checkbox_rect.right() - 12),
             rect.height(),
         )
-        painter.setPen(QColor("#5C6F7D"))
+        painter.setPen(theming.color(QColor("#5C6F7D")))
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter, text)
         painter.restore()
 
@@ -203,18 +207,29 @@ class ResultsPanel(QWidget):
         self._run_column_ranges: dict[int, tuple[int, int]] = {}
         self._checked_entry_ids: set[int] = set()
         self._build_ui()
+        theming.on_change(self._refresh_table)
 
     def _build_ui(self) -> None:
+        # The whole panel is one rounded card (it used to paint only its children).
+        self.setObjectName("results_panel_card")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"""
             QWidget {{
                 background-color: {COLOR_SURFACE};
+            }}
+            QWidget#results_panel_card {{
+                border: 1px solid #D9E0DC;
+                border-radius: 10px;
+            }}
+            QLabel {{
+                background: transparent;
             }}
             QTableWidget {{
                 background-color: {COLOR_SURFACE};
                 alternate-background-color: {COLOR_ROW_ALT};
                 gridline-color: {COLOR_BORDER_LIGHT};
                 border: none;
-                font-size: 12px;
+                font-size: 13px;
                 color: {COLOR_TEXT};
             }}
             QTableWidget::item {{
@@ -223,10 +238,9 @@ class ResultsPanel(QWidget):
             }}
             QHeaderView::section {{
                 background-color: {COLOR_RESULTS_HD};
-                color: {COLOR_TEXT_HINT};
-                font-size: 10px;
-                font-weight: bold;
-                letter-spacing: 1px;
+                color: {COLOR_TEXT_MUTED};
+                font-size: 12px;
+                font-weight: 600;
                 padding: 5px 12px;
                 border: none;
                 border-bottom: 1px solid {COLOR_BORDER};
@@ -235,10 +249,10 @@ class ResultsPanel(QWidget):
             QPushButton#export_btn {{
                 background-color: {COLOR_ACCENT_LIGHT};
                 border: 1px solid {COLOR_ACCENT};
-                border-radius: 5px;
+                border-radius: 8px;
                 color: {COLOR_ACCENT_TEXT};
-                padding: 3px 10px;
-                font-size: 11px;
+                padding: 6px 12px;
+                font-size: 12px;
             }}
             QPushButton#export_btn:hover {{
                 background-color: {COLOR_ACCENT};
@@ -247,20 +261,20 @@ class ResultsPanel(QWidget):
             QPushButton#clear_btn {{
                 background-color: {COLOR_SURFACE};
                 border: 1px solid {COLOR_BORDER};
-                border-radius: 5px;
-                color: {COLOR_TEXT_MUTED};
-                padding: 3px 10px;
-                font-size: 11px;
+                border-radius: 8px;
+                color: #3B4A43;
+                padding: 6px 12px;
+                font-size: 12px;
             }}
         """)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(6, 4, 6, 4)
-        root.setSpacing(6)
+        root.setContentsMargins(12, 10, 12, 10)
+        root.setSpacing(8)
 
         bar = QHBoxLayout()
         self._title = QLabel("Results")
-        self._title.setStyleSheet(f"font-weight: bold; color: {COLOR_TEXT};")
+        self._title.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {COLOR_TEXT};")
         bar.addWidget(self._title)
         bar.addStretch()
 
@@ -309,6 +323,7 @@ class ResultsPanel(QWidget):
         self._clear_btn.setText(tr("Clear", language))
         if self._all_rows:
             self._refresh_table()
+        self._update_panel_state()
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -325,7 +340,10 @@ class ResultsPanel(QWidget):
                 "Run": run_label,
             }
             self._next_entry_id += 1
-            for col in ("Band", "Lane", "Area", "Mean", "Min", "Max", "IntDen", "RawIntDen"):
+            for col in (
+                "Band", "Lane", "Area", "Mean", "Min", "Max", "IntDen", "RawIntDen",
+                *_BACKGROUND_METRICS,
+            ):
                 entry[col] = row[col] if col in df.columns else None
             self._all_rows.append(entry)
 
@@ -370,8 +388,8 @@ class ResultsPanel(QWidget):
         # Keep each run's color fixed by run order so older groups do not change
         # when a new analysis is appended.
         if run_index % 2 == 0:
-            return _EVEN_RUN_BG, _EVEN_RUN_HEADER_TINT
-        return _ODD_RUN_BG, _ODD_RUN_HEADER_TINT
+            return theming.color(_EVEN_RUN_BG), theming.color(_EVEN_RUN_HEADER_TINT)
+        return theming.color(_ODD_RUN_BG), theming.color(_ODD_RUN_HEADER_TINT)
 
     def _refresh_table(self) -> None:
         self._table.clear()
@@ -393,7 +411,8 @@ class ResultsPanel(QWidget):
         self._run_column_ranges = self._compute_run_column_ranges(visible_entries)
         self._checked_entry_ids.intersection_update(self._visible_entry_ids)
 
-        self._table.setRowCount(len(_METRICS))
+        metrics = self._visible_metrics()
+        self._table.setRowCount(len(metrics))
         self._table.setColumnCount(1 + len(visible_entries))
 
         metric_header = QTableWidgetItem(tr("Metric", self._language))
@@ -414,7 +433,7 @@ class ResultsPanel(QWidget):
             if int(entry["_id"]) in self._checked_entry_ids:
                 checked_sections.add(col_idx)
 
-        for row_idx, metric in enumerate(_METRICS):
+        for row_idx, metric in enumerate(metrics):
             metric_item = QTableWidgetItem(tr(metric, self._language))
             metric_item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
             self._table.setItem(row_idx, 0, metric_item)
@@ -469,17 +488,8 @@ class ResultsPanel(QWidget):
         if target_entry is None:
             return
 
-        band_name = self._normalize_band_name(target_entry, column_index)
-        confirm = QMessageBox.question(
-            self,
-            "Remove Band",
-            f"Remove {band_name} from results?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if confirm != QMessageBox.StandardButton.Yes:
-            return
-
+        # The × on a column removes it straight away, without a confirmation
+        # dialog; the bulk Delete button still asks first.
         self._delete_entry_ids({target_id})
 
     def _entry_id_for_column(self, column_index: int) -> int | None:
@@ -523,24 +533,56 @@ class ResultsPanel(QWidget):
         self._clear_btn.setEnabled(has_rows)
         self._delete_btn.setEnabled(has_rows and has_checked)
         if has_rows:
-            self._title.setText(f"Results — {total} row(s) across {self._run_counter} run(s)")
+            self._title.setText(
+                tr(
+                    "Results — {total} row(s) across {runs} run(s)",
+                    self._language,
+                    total=total,
+                    runs=self._run_counter,
+                )
+            )
         else:
-            self._title.setText("Results")
+            self._title.setText(tr("Results", self._language))
+
+    def _has_background_values(self) -> bool:
+        return any(
+            entry.get(metric) is not None and not pd.isna(entry.get(metric))
+            for entry in self._all_rows
+            for metric in _BACKGROUND_METRICS
+        )
+
+    def _visible_metrics(self) -> list[str]:
+        if self._has_background_values():
+            return [*_METRICS, *_BACKGROUND_METRICS]
+        return list(_METRICS)
 
     def _to_dataframe(self) -> pd.DataFrame:
-        return pd.DataFrame(self._all_rows, columns=_COLS)
+        columns = list(_COLS)
+        if self._has_background_values():
+            columns += _BACKGROUND_METRICS
+        return pd.DataFrame(self._all_rows, columns=columns)
 
     def selected_mean_values(self) -> list[str]:
         if self._table.rowCount() <= 0:
             return []
+        metrics = self._visible_metrics()
         try:
-            mean_row = _METRICS.index("Mean")
+            mean_row = metrics.index("Mean")
         except ValueError:
             return []
+        selected = self._table.selectedIndexes()
+        # Selecting cells in the background-subtracted "Net Mean" row autofills
+        # those values instead of the raw Mean.
+        if "Net Mean" in metrics:
+            net_row = metrics.index("Net Mean")
+            if any(idx.row() == net_row and idx.column() > 0 for idx in selected) and not any(
+                idx.row() == mean_row and idx.column() > 0 for idx in selected
+            ):
+                mean_row = net_row
         selected_cols = sorted(
             {
                 idx.column()
-                for idx in self._table.selectedIndexes()
+                for idx in selected
                 if idx.row() == mean_row and idx.column() > 0
             }
         )

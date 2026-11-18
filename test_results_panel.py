@@ -59,5 +59,22 @@ class ResultsPanelColorTests(unittest.TestCase):
         self.assertEqual(remaining_color, second_run_color)
 
 
+    def test_column_cross_removes_the_band_without_asking(self) -> None:
+        from unittest.mock import patch
+
+        from PySide6.QtWidgets import QMessageBox
+
+        panel = ResultsPanel()
+        panel.show_results(self._df("Band 1"))
+        panel.show_results(self._df("Band 2"))
+        self.assertEqual(len(panel._all_rows), 2)
+
+        with patch.object(QMessageBox, "question") as question:
+            panel._on_header_delete_requested(1)
+
+        question.assert_not_called()
+        self.assertEqual(len(panel._all_rows), 1)
+        self.assertEqual(panel._all_rows[0]["Band"], "Band 2")
+
 if __name__ == "__main__":
     unittest.main()

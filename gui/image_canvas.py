@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QGraphicsPathItem,
 )
 
+from gui import theming
 from config.settings import (
     COLOR_ACCENT,
     COLOR_ACCENT_LIGHT,
@@ -32,11 +33,17 @@ from core.image_transform import (
     ImageTransformParams,
     apply_geometry_to_display,
     auto_scale_range_16,
-    default_inverted_for_pil_image,
+    default_display_params,
+    display_histogram,
+    saturated_mask,
     image_array_to_raw_luminance,
     image_array_to_uint16_luminance,
     transform_pixels_16_to_8,
 )
+
+# Image Lab paints saturated pixels pure red.
+SATURATED_HIGHLIGHT_RGB = (255, 0, 0)
+MAX_SATURATED_HIGHLIGHT_FRACTION = 0.25
 
 # Morandi sage-green palette — muted, distinct but harmonious across 16 lanes
 _LANE_COLORS = [
@@ -174,13 +181,11 @@ class ImageLoadWorker(QObject):
                 width, height = image.size
                 if width <= 0 or height <= 0:
                     raise ValueError(f"Image has invalid dimensions: {image.size}")
-                default_params = ImageTransformParams(
-                    inverted=default_inverted_for_pil_image(image, fallback=True)
-                )
                 stride = _preview_stride(width, height)
                 quantitative = _uncompressed_uint16_tiff_memmap(path, image)
 
                 if quantitative is not None:
+                    default_params = default_display_params(image, quantitative)
                     preview = _render_default_preview(
                         quantitative, stride, default_params
                     )
@@ -218,6 +223,7 @@ class ImageLoadWorker(QObject):
                 decoded = np.asarray(image)
                 if decoded.ndim not in {2, 3} or decoded.size == 0:
                     raise ValueError(f"Unexpected image shape: {decoded.shape}")
+                default_params = default_display_params(image, decoded)
 
                 # Prepare and emit the sampled preview before the potentially
                 # expensive full-resolution RGB -> luminance conversion.
@@ -277,6 +283,7 @@ class EditableBandRectItem(QGraphicsRectItem):
         self._active_handle: str | None = None
         self._start_scene_rect = QRectF()
         self._start_pos = QPointF()
+        self._hover_cursor_shape: Qt.CursorShape | None = None
 
     def set_editing_enabled(self, enabled: bool) -> None:
         self._editing_enabled = enabled
@@ -285,7 +292,7 @@ class EditableBandRectItem(QGraphicsRectItem):
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, enabled)
         if not enabled:
             self.setSelected(False)
-            self.unsetCursor()
+            self._apply_hover_cursor(None)
         self.update()
 
     def scene_rect(self) -> QRectF:
@@ -296,10 +303,19 @@ class EditableBandRectItem(QGraphicsRectItem):
             return None
 
         rect = self.rect()
-        left = abs(pos.x() - rect.left()) <= self._HANDLE_MARGIN
-        right = abs(pos.x() - rect.right()) <= self._HANDLE_MARGIN
-        top = abs(pos.y() - rect.top()) <= self._HANDLE_MARGIN
-        bottom = abs(pos.y() - rect.bottom()) <= self._HANDLE_MARGIN
+        # The grab zone is a few *screen* pixels wide and never more than a
+        # quarter of the box, so the middle of even a small box always moves
+        # the whole box instead of resizing it.
+        zoom = 1.0
+        scene = self.scene()
+        if scene is not None and scene.views():
+            zoom = max(1e-6, abs(scene.views()[0].transform().m11()))
+        margin_x = min(self._HANDLE_MARGIN / zoom, rect.width() * 0.25)
+        margin_y = min(self._HANDLE_MARGIN / zoom, rect.height() * 0.25)
+        left = abs(pos.x() - rect.left()) <= margin_x
+        right = abs(pos.x() - rect.right()) <= margin_x
+        top = abs(pos.y() - rect.top()) <= margin_y
+        bottom = abs(pos.y() - rect.bottom()) <= margin_y
 
         if left and top:
             return "top_left"
@@ -320,24 +336,35 @@ class EditableBandRectItem(QGraphicsRectItem):
         return None
 
     def _cursor_for_handle(self, handle: str | None) -> Qt.CursorShape:
-        if handle in {"top_left", "bottom_right"}:
-            return Qt.CursorShape.SizeFDiagCursor
-        if handle in {"top_right", "bottom_left"}:
-            return Qt.CursorShape.SizeBDiagCursor
+        # Only cursors backed by a native macOS cursor are used here.  Qt draws
+        # the diagonal-resize and four-arrow cursors from bitmaps, and building
+        # those while hovering crashed the app inside CoreGraphics on macOS.
+        if handle in {"top_left", "bottom_right", "top_right", "bottom_left"}:
+            return Qt.CursorShape.CrossCursor
         if handle in {"left", "right"}:
-            return Qt.CursorShape.SizeHorCursor
+            return Qt.CursorShape.SplitHCursor
         if handle in {"top", "bottom"}:
-            return Qt.CursorShape.SizeVerCursor
-        return Qt.CursorShape.SizeAllCursor
+            return Qt.CursorShape.SplitVCursor
+        return Qt.CursorShape.OpenHandCursor
+
+    def _apply_hover_cursor(self, shape: Qt.CursorShape | None) -> None:
+        """Change the cursor only when it actually differs from the current one."""
+        if shape == self._hover_cursor_shape:
+            return
+        self._hover_cursor_shape = shape
+        if shape is None:
+            self.unsetCursor()
+        else:
+            self.setCursor(shape)
 
     def hoverMoveEvent(self, event) -> None:
         if self._editing_enabled:
-            self.setCursor(self._cursor_for_handle(self._handle_for_pos(event.pos())))
+            self._apply_hover_cursor(self._cursor_for_handle(self._handle_for_pos(event.pos())))
         super().hoverMoveEvent(event)
 
     def hoverLeaveEvent(self, event) -> None:
         if self._editing_enabled and self._active_handle is None:
-            self.unsetCursor()
+            self._apply_hover_cursor(None)
         super().hoverLeaveEvent(event)
 
     def mousePressEvent(self, event) -> None:
@@ -419,11 +446,14 @@ class EditableBandRectItem(QGraphicsRectItem):
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         rect = self.rect()
-        pen = QPen(QColor("#E8A87C"), 2, Qt.PenStyle.SolidLine)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        # Cosmetic pen: a constant thin outline on screen, so the frame does
+        # not hide the band edges on small (low-resolution) blots.
+        selected = self._editing_enabled and self.isSelected()
+        pen = QPen(QColor("#D9773C" if selected else "#E8A87C"), 2.0 if selected else 1.5, Qt.PenStyle.SolidLine)
+        pen.setCosmetic(True)
+        pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
         painter.setPen(pen)
-        painter.setBrush(QBrush(QColor(232, 168, 124, 50)))
+        painter.setBrush(QBrush(QColor(232, 168, 124, 30)))
         painter.drawRect(rect)
 
         center_pen = QPen(QColor(140, 79, 33, 160), 1, Qt.PenStyle.SolidLine)
@@ -442,7 +472,11 @@ class EditableBandRectItem(QGraphicsRectItem):
 
     def _handle_rects(self) -> list[QRectF]:
         rect = self.rect()
-        size = 6.0
+        zoom = 1.0
+        scene = self.scene()
+        if scene is not None and scene.views():
+            zoom = max(1e-6, abs(scene.views()[0].transform().m11()))
+        size = min(6.0 / zoom, rect.width() * 0.2, rect.height() * 0.2)
         half = size / 2.0
         points = [
             rect.topLeft(),
@@ -455,6 +489,13 @@ class EditableBandRectItem(QGraphicsRectItem):
             rect.bottomRight(),
         ]
         return [QRectF(point.x() - half, point.y() - half, size, size) for point in points]
+
+
+# A rotated preview is rendered 3x finer than the source so that it looks the
+# same as the unrotated preview (see ``apply_geometry_to_display``); this caps
+# the longest side of that render.  Larger previews are rotated at 1x.
+_MAX_SUPERSAMPLED_PREVIEW_SIDE = 2400
+_ROTATION_SUPERSAMPLE = 3
 
 
 class ImageCanvas(QGraphicsView):
@@ -501,6 +542,9 @@ class ImageCanvas(QGraphicsView):
         self._geometry_transform = GeometryTransform()
         self._image_default_transform_params = self._default_image_transform_params()
         self._image_transform_params = self._image_default_transform_params
+        self._display_stats_cache = None
+        # A view option, like Image Lab's: it survives loading another image.
+        self._highlight_saturated = True
         self._roi_item: QGraphicsRectItem | None = None
         self._band_roi_item: QGraphicsRectItem | None = None
         self._lane_items: list[QGraphicsItem] = []
@@ -512,6 +556,13 @@ class ImageCanvas(QGraphicsView):
         self._interaction_mode = "manual"
         self._auto_edit_enabled = False
         self._auto_edit_tool = "move"
+        # Densitometry auto-lane review: boxes are editable and a drag on
+        # empty space inside the lane ROI adds a new box.
+        self._quant_auto_review = False
+        self._drawing_new_auto_band = False
+        self._new_auto_band_preview: QGraphicsRectItem | None = None
+        self._auto_bg_strip_items: list[QGraphicsRectItem] = []
+        self._auto_quiet_lanes = False
         self._rotation_mode = False
         self._rotation_dragging = False
         self._rotation_angle_deg = 0.0
@@ -551,8 +602,14 @@ class ImageCanvas(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
-        self.setBackgroundBrush(QColor(COLOR_BG))
+        self.setBackgroundBrush(theming.color(theming.WELL_SOURCE))
+        theming.on_change(self._apply_theme_background)
         self.setMouseTracking(True)
+        self.setFrameShape(QGraphicsView.Shape.NoFrame)
+
+    def _apply_theme_background(self) -> None:
+        self.setBackgroundBrush(theming.color(theming.WELL_SOURCE))
+        self.viewport().update()
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -576,6 +633,7 @@ class ImageCanvas(QGraphicsView):
         self._geometry_transform = GeometryTransform()
         self._image_default_transform_params = self._default_image_transform_params()
         self._image_transform_params = self._image_default_transform_params
+        self._display_stats_cache = None
         self._roi_item = None
         self._band_roi_item = None
         self._lane_items.clear()
@@ -584,6 +642,11 @@ class ImageCanvas(QGraphicsView):
         self._manual_band_labels.clear()
         self._auto_lane_frames.clear()
         self._final_crop_item = None
+        self._quant_auto_review = False
+        self._drawing_new_auto_band = False
+        self._new_auto_band_preview = None
+        self._auto_bg_strip_items = []
+        self._auto_edit_enabled = False
         self._rotation_mode = False
         self._rotation_dragging = False
         self._rotation_angle_deg = 0.0
@@ -715,10 +778,17 @@ class ImageCanvas(QGraphicsView):
         # Presentation conversion is now performed only on the sampled view;
         # retaining a separate full-resolution uint16 display buffer is wasteful.
         self._display_source_pixels = quantitative
+        self._display_stats_cache = None
         height, width = payload["raw_shape"]
         self._raw_image_shape = (int(height), int(width))
         self._display_preview_stride = int(payload["stride"])
         self._image_memory_mapped = bool(payload["memory_mapped"])
+        if self._highlight_saturated and self._pixmap_item is not None:
+            # The quick preview is plain grey; add the saturation highlight
+            # now that the full data is here.
+            highlighted = self._with_saturation_highlight_for_current()
+            if highlighted is not None:
+                self._pixmap_item.setPixmap(highlighted)
         if self._loading_item is not None and self._loading_item.scene() is self._scene:
             self._scene.removeItem(self._loading_item)
         self._loading_item = None
@@ -793,6 +863,10 @@ class ImageCanvas(QGraphicsView):
     def has_image_transform_source(self) -> bool:
         return self._display_source_pixels is not None
 
+    def default_image_transform_params(self) -> ImageTransformParams:
+        """The display settings the current image opened with (what Reset restores)."""
+        return self._image_default_transform_params
+
     def get_image_transform_params(self) -> ImageTransformParams:
         return self._image_transform_params
 
@@ -808,7 +882,7 @@ class ImageCanvas(QGraphicsView):
         """Compatibility API: display transforms are never quantitative."""
         return False
 
-    def current_display_pixels(self) -> np.ndarray | None:
+    def current_display_pixels(self, *, supersample: int = 1) -> np.ndarray | None:
         if self._display_source_pixels is None:
             return None
         preview_source = self._display_source_pixels[
@@ -820,7 +894,22 @@ class ImageCanvas(QGraphicsView):
             preview_source,
             self._image_transform_params,
         )
-        return apply_geometry_to_display(toned, self._geometry_transform)
+        return apply_geometry_to_display(
+            toned, self._geometry_transform, scale=supersample
+        )
+
+    def _rotation_supersample(self) -> int:
+        """Finer render grid for a rotated preview, bounded by its size."""
+        if self._raw_image_shape is None or self._geometry_transform.is_axis_aligned():
+            return 1
+        longest = max(self._raw_image_shape) / max(1, self._display_preview_stride)
+        if longest * _ROTATION_SUPERSAMPLE <= _MAX_SUPERSAMPLED_PREVIEW_SIDE:
+            return _ROTATION_SUPERSAMPLE
+        return 1
+
+    def raw_pixels_for_estimation(self) -> np.ndarray | None:
+        """Read-only view of the raw pixels for measurements that copy nothing."""
+        return self._raw_quantification_pixels
 
     def current_analysis_pixels(self) -> np.ndarray | None:
         """Return a safe copy of native-depth raw quantification pixels."""
@@ -912,12 +1001,61 @@ class ImageCanvas(QGraphicsView):
         self.set_image_transform_params(params)
         return params
 
+    def _sampled_display_source_16(self) -> np.ndarray | None:
+        """16-bit luminance of the preview-resolution source, or None."""
+        if self._display_source_pixels is None:
+            return None
+        sampled = self._display_source_pixels[
+            ::self._display_preview_stride,
+            ::self._display_preview_stride,
+        ]
+        return image_array_to_uint16_luminance(sampled)
+
+    def display_statistics(self) -> dict | None:
+        """Histogram and value range of the image, on the 16-bit display scale.
+
+        ``saturated`` is the share of pixels at the top of the pixel type.
+        The result is cached until another image is loaded.
+        """
+        if self._display_stats_cache is not None:
+            return self._display_stats_cache
+        source = self._sampled_display_source_16()
+        if source is None or source.size == 0:
+            return None
+        counts, data_min, data_max = display_histogram(source, bins=256)
+        raw_sample = self._display_source_pixels[
+            ::self._display_preview_stride,
+            ::self._display_preview_stride,
+        ]
+        self._display_stats_cache = {
+            "histogram": counts,
+            "min": data_min,
+            "max": data_max,
+            "saturated": float(np.count_nonzero(saturated_mask(raw_sample))) / source.size,
+        }
+        return self._display_stats_cache
+
+    def highlight_saturated(self) -> bool:
+        return self._highlight_saturated
+
+    def set_highlight_saturated(self, enabled: bool) -> None:
+        """Paint saturated pixels red in the preview (never in exports)."""
+        enabled = bool(enabled)
+        if enabled == self._highlight_saturated:
+            return
+        self._highlight_saturated = enabled
+        if self._pixmap_item is None or self._display_source_pixels is None:
+            return
+        self._pixmap_item.setPixmap(self._make_display_pixmap())
+        self._update_pixmap_scene_geometry()
+
     def auto_scale_image_transform(self) -> ImageTransformParams:
+        """Image Lab "Auto Scale": clip 0.1 % of the pixels at each end."""
         if self._display_source_pixels is None:
             params = self._image_default_transform_params
         else:
             source = self._display_source_pixels
-            if source.dtype == np.uint8:
+            if source.dtype == np.uint8 and source.ndim == 2:
                 low, high = auto_scale_range_16(source)
                 low *= 257
                 high *= 257
@@ -928,17 +1066,70 @@ class ImageCanvas(QGraphicsView):
             params = ImageTransformParams(
                 low=low,
                 high=high,
-                gamma=1.0,
+                gamma=self._image_transform_params.gamma,
                 inverted=self._image_transform_params.inverted,
             )
         self.set_image_transform_params(params)
         return params
 
     def _make_display_pixmap(self) -> QPixmap:
-        display = self.current_display_pixels()
+        supersample = self._rotation_supersample()
+        display = self.current_display_pixels(supersample=supersample)
         if display is None:
             return QPixmap()
+        if self._highlight_saturated:
+            highlighted = self._with_saturation_highlight(display, supersample)
+            if highlighted is not None:
+                return highlighted
         return self._pixmap_from_display_pixels(display)
+
+    def _with_saturation_highlight_for_current(self) -> QPixmap | None:
+        supersample = self._rotation_supersample()
+        display = self.current_display_pixels(supersample=supersample)
+        if display is None:
+            return None
+        return self._with_saturation_highlight(display, supersample)
+
+    def _with_saturation_highlight(
+        self, display: np.ndarray, supersample: int = 1
+    ) -> QPixmap | None:
+        """Return the preview with saturated pixels in red, or None if there are none."""
+        if self._display_source_pixels is None:
+            return None
+        mask = saturated_mask(
+            self._display_source_pixels[
+                ::self._display_preview_stride,
+                ::self._display_preview_stride,
+            ]
+        )
+        # Only raw 16-bit signal can be "saturated".  When a large share of the
+        # image sits at the ceiling it is a display-ready picture with a
+        # white or black background, not blown-out bands.
+        if (
+            self._display_source_pixels.dtype.itemsize != 2
+            or not mask.any()
+            or mask.mean() > MAX_SATURATED_HIGHLIGHT_FRACTION
+        ):
+            return None
+        if not self._geometry_transform.is_identity():
+            mask_image = np.zeros(mask.shape, dtype=np.uint8)
+            mask_image[mask] = 255
+            # A black frame keeps the fill colour of the rotated mask at zero.
+            mask_image[0, :] = mask_image[-1, :] = 0
+            mask_image[:, 0] = mask_image[:, -1] = 0
+            mask = apply_geometry_to_display(
+                mask_image, self._geometry_transform, scale=supersample
+            ) > 127
+        if mask.shape != display.shape:
+            return None
+        rgb = np.repeat(display[:, :, None], 3, axis=2)
+        rgb[mask] = SATURATED_HIGHLIGHT_RGB
+        rgb = np.ascontiguousarray(rgb)
+        height, width, _ = rgb.shape
+        qimage = QImage(
+            rgb.data, width, height, rgb.strides[0], QImage.Format.Format_RGB888
+        )
+        return QPixmap.fromImage(qimage)
 
     @staticmethod
     def _pixmap_from_display_pixels(display: np.ndarray) -> QPixmap:
@@ -1180,6 +1371,7 @@ class ImageCanvas(QGraphicsView):
         """Use single large ROI behavior for WB Plot cropping."""
         self._wb_plot_roi_only = enabled
         if enabled:
+            self.set_quant_auto_review(False)
             if self._band_roi_item is not None:
                 self._scene.removeItem(self._band_roi_item)
                 self._band_roi_item = None
@@ -1225,6 +1417,7 @@ class ImageCanvas(QGraphicsView):
         self._moving_fixed_roi = False
         if not self._fixed_roi_enabled:
             self._fixed_roi_size = None
+        self.set_quant_auto_review(False)
         self.clear_auto_overlays()
 
     def clear_auto_overlays(self) -> None:
@@ -1237,6 +1430,7 @@ class ImageCanvas(QGraphicsView):
         for label in self._auto_band_labels:
             self._scene.removeItem(label)
         self._auto_band_labels.clear()
+        self._clear_auto_background_strips()
         self.clear_manual_band_labels()
         self._auto_lane_frames.clear()
         if self._final_crop_item is not None:
@@ -1297,12 +1491,23 @@ class ImageCanvas(QGraphicsView):
             label.setZValue(12)
             self._manual_band_labels.append(label)
 
-    def set_auto_detect_overlays(self, detections: list[dict]) -> None:
+    def set_auto_detect_overlays(
+        self, detections: list[dict], *, quiet_lanes: bool | None = None
+    ) -> None:
         """
         Draw lane frames (blue) and band boxes (orange) from auto_detect_all()
         results. Clears any previous overlays first.
+
+        ``quiet_lanes`` (densitometry auto review) keeps everything except the
+        band boxes out of the way: lane borders become hairlines with no fill
+        and no "L" label, and the "#N" labels keep a constant on-screen size
+        above their box, so nothing is drawn over the band being measured.
         """
         self.clear_auto_overlays()
+        if quiet_lanes is None:
+            # Redrawing after an edit keeps whatever style the review started in.
+            quiet_lanes = self._auto_quiet_lanes
+        self._auto_quiet_lanes = bool(quiet_lanes)
         if self._band_roi_item is not None:
             self._scene.removeItem(self._band_roi_item)
             self._band_roi_item = None
@@ -1317,16 +1522,25 @@ class ImageCanvas(QGraphicsView):
         for lane in detections:
             lane_rect = lane["lane_rect"]
 
-            pen = QPen(QColor(COLOR_BAND_ROI), 1.5, Qt.PenStyle.DashLine)
-            item = self._scene.addRect(
-                lane_rect,
-                pen,
-                QBrush(QColor(138, 174, 196, 20)),
-            )
-            item.setZValue(8)
-            self._lane_items.append(item)
+            if quiet_lanes:
+                pen = QPen(QColor(90, 130, 160, 150), 1.0, Qt.PenStyle.DotLine)
+                pen.setCosmetic(True)
+                item = self._scene.addRect(lane_rect, pen, QBrush(Qt.BrushStyle.NoBrush))
+                item.setZValue(8)
+                item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+                self._lane_items.append(item)
+            else:
+                pen = QPen(QColor(COLOR_BAND_ROI), 1.5, Qt.PenStyle.DashLine)
+                item = self._scene.addRect(
+                    lane_rect,
+                    pen,
+                    QBrush(QColor(138, 174, 196, 20)),
+                )
+                item.setZValue(8)
+                self._lane_items.append(item)
 
             label = self._scene.addText(f"L{lane['lane_index']}")
+            label.setVisible(not quiet_lanes)
             label.setDefaultTextColor(QColor(COLOR_ACCENT_TEXT))
             font = label.font()
             font.setPointSize(8)
@@ -1392,7 +1606,79 @@ class ImageCanvas(QGraphicsView):
         for item in self._auto_band_items:
             item.set_editing_enabled(enabled)
         if not enabled:
+            self._quant_auto_review = False
+            self._clear_auto_background_strips()
+            self._drawing_new_auto_band = False
+            self._remove_new_auto_band_preview()
             self._scene.clearSelection()
+
+    def set_quant_auto_review(self, enabled: bool) -> None:
+        """Enter/leave densitometry auto-lane review (editable boxes + add by drag)."""
+        self._drawing_new_auto_band = False
+        self._remove_new_auto_band_preview()
+        self.set_auto_edit_mode(bool(enabled), "move")
+        self._quant_auto_review = bool(enabled)
+        self._refresh_auto_background_strips()
+
+    def is_quant_auto_review(self) -> bool:
+        return self._quant_auto_review
+
+    def refresh_auto_band_labels(self) -> None:
+        self._refresh_auto_band_labels()
+        self._refresh_auto_background_strips()
+
+    def auto_band_background_strips(self) -> list[tuple[QRectF, list[QRectF]]]:
+        """Each band box (in #N label order) with the background strips it uses."""
+        from core.measure import background_strips
+
+        size = self.image_scene_size()
+        if size is None:
+            return []
+        rects = [item.scene_rect() for item in self._ordered_auto_band_items_row_major()]
+        as_tuples = [(r.x(), r.y(), r.width(), r.height()) for r in rects]
+        result: list[tuple[QRectF, list[QRectF]]] = []
+        for index, rect in enumerate(rects):
+            others = as_tuples[:index] + as_tuples[index + 1:]
+            strips = background_strips(as_tuples[index], others, (size.width(), size.height()))
+            result.append((rect, [QRectF(*strip) for strip in strips]))
+        return result
+
+    def _clear_auto_background_strips(self) -> None:
+        for item in self._auto_bg_strip_items:
+            self._scene.removeItem(item)
+        self._auto_bg_strip_items.clear()
+
+    def _refresh_auto_background_strips(self) -> None:
+        """Outline the local-background strips of every box during auto review."""
+        self._clear_auto_background_strips()
+        if not self._quant_auto_review:
+            return
+        pen = QPen(QColor(90, 110, 130, 200), 1.0, Qt.PenStyle.DotLine)
+        pen.setCosmetic(True)
+        for _rect, strips in self.auto_band_background_strips():
+            for strip in strips:
+                item = self._scene.addRect(strip, pen, QBrush(QColor(90, 110, 130, 28)))
+                item.setZValue(10.8)
+                item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+                self._auto_bg_strip_items.append(item)
+
+    def ordered_auto_band_rects(self) -> list[tuple[QRectF, int | None]]:
+        """Band boxes with their lane index, in the same order as the #N labels."""
+        return [
+            (item.scene_rect(), self._lane_index_for_rect(item.scene_rect()))
+            for item in self._ordered_auto_band_items_row_major()
+        ]
+
+    def _remove_new_auto_band_preview(self) -> None:
+        if self._new_auto_band_preview is not None:
+            self._scene.removeItem(self._new_auto_band_preview)
+            self._new_auto_band_preview = None
+
+    def _editable_band_item_at(self, viewport_pos: QPoint) -> EditableBandRectItem | None:
+        for item in self.items(viewport_pos):
+            if isinstance(item, EditableBandRectItem):
+                return item
+        return None
 
     def get_auto_detections(self) -> list[dict]:
         detections = [
@@ -1440,8 +1726,19 @@ class ImageCanvas(QGraphicsView):
             font.setPointSize(8)
             font.setBold(True)
             label.setFont(font)
-            label_y = max(scene_top + 2.0, rect.y() - 14.0)
-            label.setPos(rect.x() + 2.0, label_y)
+            if self._auto_quiet_lanes:
+                # Constant on-screen size, sitting above the box and its
+                # background strip instead of on top of the band.
+                font.setPointSize(11)
+                label.setFont(font)
+                label.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+                label.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+                clearance = min(4.0, max(2.0, round(rect.height() / 4.0)))
+                label.setPos(rect.x(), max(scene_top, rect.y() - clearance))
+                label.setTransform(QTransform.fromTranslate(-4.0, -24.0))
+            else:
+                label_y = max(scene_top + 2.0, rect.y() - 14.0)
+                label.setPos(rect.x() + 2.0, label_y)
             label.setZValue(12)
             self._auto_band_labels.append(label)
 
@@ -1747,6 +2044,29 @@ class ImageCanvas(QGraphicsView):
                 super().mousePressEvent(event)
                 return
 
+        if (
+            self._quant_auto_review
+            and event.button() == Qt.MouseButton.LeftButton
+            and self._pixmap_item is not None
+            and self.dragMode() == QGraphicsView.DragMode.NoDrag
+        ):
+            if self._editable_band_item_at(event.pos()) is not None:
+                # Move / resize an existing box.
+                super().mousePressEvent(event)
+                return
+            if not self._lane_roi_contains_viewport_pos(event.pos()):
+                # Same rule as the manual workflow: clicking outside the
+                # lane ROI discards the current ROI set.
+                self.clear_roi()
+                self.roi_cleared.emit()
+                event.accept()
+                return
+            self._scene.clearSelection()
+            self._drawing_new_auto_band = True
+            self._draw_start = self._clamp_to_image(self.mapToScene(event.pos()))
+            event.accept()
+            return
+
         # After the first manual Lane ROI is complete, an out-of-frame click
         # cancels it instead of accidentally starting a Band ROI elsewhere.
         # The tolerance is measured in viewport pixels so it feels identical
@@ -1844,6 +2164,21 @@ class ImageCanvas(QGraphicsView):
             event.accept()
             return
 
+        if self._drawing_new_auto_band and self._pixmap_item:
+            sp = self._clamp_to_image(self.mapToScene(event.pos()))
+            rect = QRectF(self._draw_start, sp).normalized()
+            if self._new_auto_band_preview is None:
+                pen = QPen(QColor("#E8A87C"), 2, Qt.PenStyle.DashLine)
+                pen.setCosmetic(True)
+                self._new_auto_band_preview = self._scene.addRect(
+                    rect, pen, QBrush(QColor(232, 168, 124, 40))
+                )
+                self._new_auto_band_preview.setZValue(13)
+            else:
+                self._new_auto_band_preview.setRect(rect)
+            event.accept()
+            return
+
         if self._drawing and self._pixmap_item:
             sp = self._clamp_to_image(self.mapToScene(event.pos()))
             rect = QRectF(self._draw_start, sp).normalized()
@@ -1896,6 +2231,28 @@ class ImageCanvas(QGraphicsView):
                 self.roi_changed.emit(self._roi_item.rect())
             if self._fixed_band_roi_relative is not None and self._band_roi_item is not None:
                 self.band_roi_changed.emit(self._band_roi_item.rect())
+            event.accept()
+            return
+
+        if self._drawing_new_auto_band and event.button() == Qt.MouseButton.LeftButton:
+            self._drawing_new_auto_band = False
+            rect = (
+                self._new_auto_band_preview.rect()
+                if self._new_auto_band_preview is not None
+                else QRectF()
+            )
+            self._remove_new_auto_band_preview()
+            if rect.width() > 3 and rect.height() > 3 and self._pixmap_item is not None:
+                item = EditableBandRectItem(
+                    rect,
+                    self._pixmap_item.sceneBoundingRect(),
+                    self._emit_auto_rois_changed,
+                )
+                item.set_editing_enabled(True)
+                self._scene.addItem(item)
+                item.setSelected(True)
+                self._auto_band_items.append(item)
+                self._emit_auto_rois_changed()
             event.accept()
             return
 
@@ -1970,6 +2327,23 @@ class ImageCanvas(QGraphicsView):
                     self._auto_band_items.remove(item)
                     removed = True
             if removed:
+                self._emit_auto_rois_changed()
+                event.accept()
+                return
+        nudges = {
+            Qt.Key.Key_Left: (-1.0, 0.0),
+            Qt.Key.Key_Right: (1.0, 0.0),
+            Qt.Key.Key_Up: (0.0, -1.0),
+            Qt.Key.Key_Down: (0.0, 1.0),
+        }
+        if self._auto_edit_enabled and event.key() in nudges:
+            selected = [item for item in self._auto_band_items if item.isSelected()]
+            if selected:
+                dx, dy = nudges[event.key()]
+                step = 5.0 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1.0
+                for item in selected:
+                    # setPos runs through itemChange, which keeps the box inside the image.
+                    item.setPos(item.pos() + QPointF(dx * step, dy * step))
                 self._emit_auto_rois_changed()
                 event.accept()
                 return
