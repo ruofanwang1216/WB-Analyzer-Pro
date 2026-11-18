@@ -399,6 +399,10 @@ _ZH_CN = {
     "WB Figure tutorial complete": "WB 图像排版教程完成",
     "The two example WB images now fill the two tutorial blot frames. Click Done to return to normal interaction.": "两张示例 WB 图像现已填入两个教程图框。点击“完成”返回正常交互。",
     "Reset. Upload files to begin.": "已重置。请上传文件开始分析。",
+    "Bar Colors": "柱子配色",
+    "Bar Border": "柱子描边",
+    "Border Color": "描边颜色",
+    "Bold axis labels": "坐标轴标签加粗",
 }
 
 # Strings added by the 2026 interface redesign live in their own module.
