@@ -25,7 +25,6 @@ MAX_GAMMA = 10.0
 # pressed.  Verified against the display settings stored in .scn documents.
 IMAGE_LAB_AUTO_TRIM = 0.001
 # ImageJ "Brightness/Contrast" constants (ij.plugin.frame.ContrastAdjuster).
-IMAGEJ_AUTO_THRESHOLD = 5000
 IMAGEJ_SLIDER_RANGE = 256
 
 # TIFF ImageDescription key used to carry the display settings an Image Lab
@@ -541,51 +540,7 @@ def saturated_mask(pixels: np.ndarray) -> np.ndarray:
     return source >= saturation_ceiling(source)
 
 
-# ── ImageJ-compatible auto and brightness / contrast ────────────────────────
-
-
-def imagej_auto_range(
-    pixels: np.ndarray,
-    auto_threshold: int = 0,
-) -> tuple[int, int, int]:
-    """ImageJ's Brightness/Contrast "Auto" button.
-
-    Port of ``ContrastAdjuster.autoAdjust``.  Each press is more aggressive
-    than the last; pass the returned threshold back in to get the next step
-    (``0`` starts over).  Returns ``(low, high, auto_threshold)``.
-    """
-    source = np.asarray(pixels)
-    if source.size == 0:
-        return 0, MAX_16BIT_VALUE, 0
-    flat = source.reshape(-1)
-    data_min = float(flat.min())
-    data_max = float(flat.max())
-    if data_max <= data_min:
-        return int(data_min), int(data_min) + 1, 0
-
-    bins = 256
-    bin_size = (data_max - data_min) / bins
-    histogram, _ = np.histogram(flat, bins=bins, range=(data_min, data_max))
-    pixel_count = int(flat.size)
-
-    if auto_threshold < 10:
-        auto_threshold = IMAGEJ_AUTO_THRESHOLD
-    else:
-        auto_threshold //= 2
-    threshold = pixel_count // auto_threshold
-    limit = pixel_count // 10
-
-    counts = np.where(histogram > limit, 0, histogram)
-    found = np.flatnonzero(counts > threshold)
-    if found.size == 0:
-        return int(round(data_min)), int(round(data_max)), auto_threshold
-    hmin = int(found[0])
-    hmax = int(found[-1])
-    low = data_min + hmin * bin_size
-    high = data_min + hmax * bin_size
-    if high <= low:
-        low, high = data_min, data_max
-    return int(round(low)), int(round(high)), auto_threshold
+# ── ImageJ-compatible brightness / contrast ────────────────────────
 
 
 def imagej_adjust_brightness(

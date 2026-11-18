@@ -2,7 +2,7 @@
 
 The controls follow Bio-Rad Image Lab's "Image Transform" window (histogram,
 High / Low / Gamma, Auto Scale, invert, highlight saturated pixels, log
-histogram) and add ImageJ's Brightness / Contrast sliders and "Auto" button.
+histogram) and add ImageJ's Brightness / Contrast sliders.
 Everything here changes how the image is shown, never the data.
 """
 from __future__ import annotations
@@ -258,7 +258,6 @@ class HistogramView(QWidget):
 class ImageTransformDialog(QDialog):
     paramsChanged = Signal(object)
     autoScaleRequested = Signal()
-    imagejAutoRequested = Signal()
     resetRequested = Signal()
     applyToAllRequested = Signal()
     highlightSaturatedChanged = Signal(bool)
@@ -370,16 +369,12 @@ class ImageTransformDialog(QDialog):
         self._auto_btn.setToolTip(
             "Same as Auto Scale in Image Lab: ignores the darkest and brightest 0.1% of pixels."
         )
-        self._imagej_auto_btn = QPushButton("ImageJ Auto")
-        self._imagej_auto_btn.setToolTip(
-            "Same as Auto in ImageJ's Brightness/Contrast. Click again for a stronger stretch."
-        )
         self._reset_btn = QPushButton("Reset")
         self._reset_btn.setToolTip("Back to how the image looked when it was opened")
         self._apply_all_btn = QPushButton("Apply to All")
         self._apply_all_btn.setToolTip("Use these settings for every open image")
         self._close_btn = QPushButton("Close")
-        for btn in (self._auto_btn, self._imagej_auto_btn, self._reset_btn, self._apply_all_btn):
+        for btn in (self._auto_btn, self._reset_btn, self._apply_all_btn):
             buttons.addWidget(btn)
         buttons.addStretch(1)
         buttons.addWidget(self._close_btn)
@@ -399,7 +394,6 @@ class ImageTransformDialog(QDialog):
         self._saturated_checkbox.toggled.connect(self._on_saturated_toggled)
         self._log_checkbox.toggled.connect(self._histogram.set_log_scale)
         self._auto_btn.clicked.connect(self.autoScaleRequested.emit)
-        self._imagej_auto_btn.clicked.connect(self.imagejAutoRequested.emit)
         self._reset_btn.clicked.connect(self.resetRequested.emit)
         self._apply_all_btn.clicked.connect(self.applyToAllRequested.emit)
         self._close_btn.clicked.connect(self.close)
@@ -422,8 +416,6 @@ class ImageTransformDialog(QDialog):
             (self._log_checkbox, "Log histogram", ""),
             (self._auto_btn, "Auto Scale",
              "Same as Auto Scale in Image Lab: ignores the darkest and brightest 0.1% of pixels."),
-            (self._imagej_auto_btn, "ImageJ Auto",
-             "Same as Auto in ImageJ's Brightness/Contrast. Click again for a stronger stretch."),
             (self._reset_btn, "Reset", "Back to how the image looked when it was opened"),
             (self._apply_all_btn, "Apply to All", "Use these settings for every open image"),
             (self._close_btn, "Close", ""),
@@ -472,7 +464,6 @@ class ImageTransformDialog(QDialog):
             self._saturated_checkbox,
             self._log_checkbox,
             self._auto_btn,
-            self._imagej_auto_btn,
             self._reset_btn,
             self._apply_all_btn,
         ):

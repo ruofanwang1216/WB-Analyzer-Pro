@@ -24,7 +24,6 @@ from core.image_transform import (  # noqa: E402
     embedded_display_settings,
     imagej_adjust_brightness,
     imagej_adjust_contrast,
-    imagej_auto_range,
     imagej_slider_positions,
     saturated_mask,
 )
@@ -131,55 +130,6 @@ class ImageLabCompatibilityTests(unittest.TestCase):
 
 
 class ImageJCompatibilityTests(unittest.TestCase):
-    def _reference_auto(self, pixels: np.ndarray, auto_threshold: int):
-        """Line-by-line transcription of ContrastAdjuster.autoAdjust."""
-        flat = pixels.reshape(-1).astype(np.float64)
-        hist_min, hist_max = flat.min(), flat.max()
-        bin_size = (hist_max - hist_min) / 256
-        histogram = [0] * 256
-        for value in flat:
-            index = int((value - hist_min) / bin_size)
-            histogram[min(index, 255)] += 1
-        pixel_count = flat.size
-        limit = pixel_count // 10
-        auto_threshold = 5000 if auto_threshold < 10 else auto_threshold // 2
-        threshold = pixel_count // auto_threshold
-        i = -1
-        while True:
-            i += 1
-            count = histogram[i]
-            if count > limit:
-                count = 0
-            if count > threshold or i >= 255:
-                break
-        hmin = i
-        i = 256
-        while True:
-            i -= 1
-            count = histogram[i]
-            if count > limit:
-                count = 0
-            if count > threshold or i <= 0:
-                break
-        hmax = i
-        return (
-            int(round(hist_min + hmin * bin_size)),
-            int(round(hist_min + hmax * bin_size)),
-            auto_threshold,
-        )
-
-    def test_auto_matches_imagej_for_repeated_presses(self) -> None:
-        pixels = _blot()
-        threshold = 0
-        previous_width = None
-        for _press in range(4):
-            expected = self._reference_auto(pixels, threshold)
-            low, high, threshold = imagej_auto_range(pixels, threshold)
-            self.assertEqual((low, high, threshold), expected)
-            if previous_width is not None:
-                self.assertLessEqual(high - low, previous_width)
-            previous_width = high - low
-
     def test_brightness_moves_the_window_without_changing_its_width(self) -> None:
         low, high = imagej_adjust_brightness(2000, 6000, 192, 0, 8000)
         self.assertEqual((low, high), (0, 4000))
@@ -303,9 +253,6 @@ class CanvasDisplayTests(unittest.TestCase):
 
             auto = canvas.auto_scale_image_transform()
             self.assertEqual((auto.low, auto.high), auto_scale_range_16(_blot()))
-            first = canvas.imagej_auto_image_transform()
-            second = canvas.imagej_auto_image_transform()
-            self.assertLessEqual(second.high - second.low, first.high - first.low)
             self.assertEqual(canvas.reset_image_transform(), stored)
 
     def test_saturated_pixels_are_red_only_while_highlighting(self) -> None:
