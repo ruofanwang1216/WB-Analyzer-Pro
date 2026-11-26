@@ -3,7 +3,7 @@
 Mixed into MainWindow (gui.main_window); methods rely on its attributes.
 
 Flow: the user draws one large ROI and sets the lane count, then clicks
-"Auto-detect bands".  Detected boxes are shown as editable items (drag to
+"Detect bands".  Detected boxes are shown as editable items (drag to
 move/resize, Delete to remove, drag on empty space to add) and Analyze
 measures every remaining box.
 """
@@ -160,7 +160,7 @@ class AutoLaneMixin:
 
         if self._is_wb_plot_workspace_active():
             return
-        title = self._quant_auto_msg("Auto-detect bands", "自动识别条带")
+        title = self._quant_auto_msg("Detect bands", "识别条带")
         if self._active_slot_index is None or self._image_path is None:
             QMessageBox.information(
                 self, title,
@@ -178,8 +178,8 @@ class AutoLaneMixin:
                 self, title,
                 self._quant_auto_msg(
                     "Draw one large ROI around all the bands first, set the lane count, "
-                    "then click Auto-detect bands.",
-                    "请先在图上框一个包含所有条带的大区域，填好泳道数，再点“自动识别条带”。",
+                    "then click Detect bands.",
+                    "请先在图上框一个包含所有条带的大区域，填好泳道数，再点“识别条带”。",
                 ),
             )
             return

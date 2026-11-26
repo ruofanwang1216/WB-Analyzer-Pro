@@ -231,7 +231,7 @@ class ParamPanel(QWidget):
         header_row.addWidget(lane_inc)
         manual_layout.addLayout(header_row)
 
-        self._auto_lane_btn = QPushButton("Auto-detect bands")
+        self._auto_lane_btn = QPushButton("Detect bands")
         self._auto_lane_btn.setObjectName("auto_lane_btn")
         self._auto_lane_btn.setFixedHeight(26)
         self._auto_lane_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -352,7 +352,7 @@ class ParamPanel(QWidget):
         self._lanes_label.setText(tr("Lanes", language))
         self._fixed_label.setText(tr("Fixed ROI", language))
         self._fix_btn.setText(tr("Fix", language))
-        self._auto_lane_btn.setText(tr("Auto-detect bands", language))
+        self._auto_lane_btn.setText(tr("Detect bands", language))
         self._manual_roi_btn.setText(tr("Draw manually", language))
         self._manual_roi_btn.setToolTip(tr(
             "Clear the boxes on this image and draw your own: drag around the "
