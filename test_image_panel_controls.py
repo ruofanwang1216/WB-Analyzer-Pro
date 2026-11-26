@@ -100,6 +100,39 @@ class ImagePanelControlTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_analyze_keeps_its_label_in_a_narrow_panel(self) -> None:
+        from PySide6.QtGui import QAction
+
+        panel = _ImagePanelWidget()
+        try:
+            action = QAction("Analyze", panel)
+            panel.analyze_btn.setDefaultAction(action)
+            panel.analyze_btn.show()
+            panel.set_filename("04_MEK_vinculin_two_strips.tif")
+            for width, two_lines in ((290, True), (340, True), (900, False)):
+                panel.resize(width, 320)
+                panel.show()
+                self._app.processEvents()
+                button = panel.analyze_btn
+                text = button.fontMetrics().horizontalAdvance(button.text())
+                # The label always fits inside the button.
+                self.assertGreaterEqual(button.width(), text + 12, width)
+                # Every control stays inside the panel.
+                for widget in (button, panel.remove_btn, panel.fit_btn):
+                    right = widget.mapTo(panel, widget.rect().topRight()).x()
+                    self.assertLessEqual(right, panel.width(), (width, widget.objectName()))
+                self.assertEqual(panel.name_on_own_line(), two_lines, width)
+            # Back to narrow and wide again: the layout switches both ways.
+            panel.resize(290, 320)
+            self._app.processEvents()
+            self.assertTrue(panel.name_on_own_line())
+            panel.resize(900, 320)
+            self._app.processEvents()
+            self.assertFalse(panel.name_on_own_line())
+            self.assertEqual(panel.filename_label.shown_text(), "04_MEK_vinculin_two_strips.tif")
+        finally:
+            panel.close()
+
     def test_long_file_name_is_shortened_in_the_middle_not_cut_off(self) -> None:
         panel = _ImagePanelWidget()
         try:
