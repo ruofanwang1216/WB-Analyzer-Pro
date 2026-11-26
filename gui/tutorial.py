@@ -1119,7 +1119,7 @@ class TutorialController(QObject):
                 _Step(
                     "select_negative_control",
                     "Choose a normalization control",
-                    "Click Select Negative Control above the Column Table.",
+                    "The chart was drawn automatically, using the first group as the baseline. To choose the baseline yourself, click Select Negative Control under the Column Table.",
                     lambda: (
                         None
                         if host._embedded_column_table is None
@@ -1130,19 +1130,8 @@ class TutorialController(QObject):
                 _Step(
                     "select_control_group",
                     "Select Group A as the control",
-                    "Click the Group A column header. It will become the negative-control baseline for normalization.",
+                    "Click the Group A column header. The chart is redrawn at once, normalized to Group A.",
                     lambda: control_group_target(0),
-                    True,
-                ),
-                _Step(
-                    "generate_figure",
-                    "Generate the densitometry figure",
-                    "Click Plot. The completed table will be normalized to Group A and the figure preview will be generated.",
-                    lambda: (
-                        None
-                        if host._embedded_column_table is None
-                        else host._embedded_column_table._figures_btn
-                    ),
                     True,
                 ),
                 _Step(

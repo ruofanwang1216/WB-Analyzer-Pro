@@ -510,6 +510,44 @@ class LaneAutoDetectWindowTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_one_drag_outside_the_boxes_starts_the_next_box(self) -> None:
+        from PySide6.QtCore import QPoint, QPointF, Qt
+        from PySide6.QtTest import QTest
+
+        window = self._window_with_blot()
+        try:
+            window.show()
+            QApplication.processEvents()
+            canvas = window.canvas
+            window.param_panel.lane_count.setValue(6)
+            old_roi = QRectF(10.0, 25.0, 170.0, 30.0)
+            canvas._roi_item.setRect(old_roi)
+            window._on_roi_changed(old_roi)
+            self.assertTrue(canvas.is_quant_auto_review())
+
+            # Press well clear of the current box and drag: no separate click needed.
+            start = canvas.mapFromScene(QPointF(200.0, 62.0))
+            end = canvas.mapFromScene(QPointF(250.0, 84.0))
+            viewport = canvas.viewport()
+            QTest.mousePress(viewport, Qt.MouseButton.LeftButton, pos=start)
+            for step in range(1, 5):
+                QTest.mouseMove(
+                    viewport,
+                    QPoint(
+                        start.x() + (end.x() - start.x()) * step // 4,
+                        start.y() + (end.y() - start.y()) * step // 4,
+                    ),
+                )
+            QTest.mouseRelease(viewport, Qt.MouseButton.LeftButton, pos=end)
+            QApplication.processEvents()
+
+            new_roi = canvas.get_roi()
+            self.assertIsNotNone(new_roi)
+            self.assertGreater(new_roi.left(), old_roi.right())
+            self.assertTrue(canvas.is_quant_auto_review())
+        finally:
+            window.close()
+
     def test_blank_region_falls_back_to_an_even_split(self) -> None:
         window = self._window_with_blot()
         try:

@@ -2071,17 +2071,17 @@ class ImageCanvas(QGraphicsView):
                 super().mousePressEvent(event)
                 return
             if not self._lane_roi_contains_viewport_pos(event.pos()):
-                # Same rule as the manual workflow: clicking outside the
-                # lane ROI discards the current ROI set.
+                # A press outside the lane ROI discards the current boxes.
+                # It then carries on as the start of a new box, so the next
+                # row of bands needs one drag, not a click and then a drag.
                 self.clear_roi()
                 self.roi_cleared.emit()
+            else:
+                self._scene.clearSelection()
+                self._drawing_new_auto_band = True
+                self._draw_start = self._clamp_to_image(self.mapToScene(event.pos()))
                 event.accept()
                 return
-            self._scene.clearSelection()
-            self._drawing_new_auto_band = True
-            self._draw_start = self._clamp_to_image(self.mapToScene(event.pos()))
-            event.accept()
-            return
 
         # After the first manual Lane ROI is complete, an out-of-frame click
         # cancels it instead of accidentally starting a Band ROI elsewhere.

@@ -279,6 +279,10 @@ _ZH_CN = {
     "Expand Uploaded Files panel": "展开已上传文件面板",
     "New User Tutorial": "新手演示",
     "User Tutorial": "使用教程",
+    "The chart was drawn automatically, using the first group as the baseline. To choose the baseline yourself, click Select Negative Control under the Column Table.":
+        "图表已自动生成，默认以第一组作为基准。如需自己指定基准，请点击列式数据表下方的“选择阴性对照”。",
+    "Click the Group A column header. The chart is redrawn at once, normalized to Group A.":
+        "点击 Group A 列标题，图表会立即以 Group A 为基准重新绘制。",
     "Click ① Quantify & Plot at the top. The tutorial opens Column Setup with Samples = 3 and Replicates = 2. Confirm it before drawing any box.":
         "点击顶部的“① 定量与作图”。教程会打开列设置，Samples = 3、Replicates = 2。先确认，再开始框选。",
     "Target Protein: box the left bands": "Target Protein：框选左侧条带",

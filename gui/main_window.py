@@ -1468,9 +1468,8 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             self._tutorial_controller.notify_column_table_event
         )
         self._embedded_column_table = table_window
-        # Results flow straight into the table.  The chart is drawn automatically
-        # too, except during the tutorial, which ends on the Plot button.
-        table_window.set_auto_figure_enabled(not self._tutorial_controller.active)
+        # Results flow straight into the table and chart (also in the tutorial).
+        table_window.set_auto_figure_enabled(True)
         table_window.set_language(self._language)
         self._figure_windows = [table_window]
         self._remember_layout_sizes()

@@ -78,9 +78,9 @@ class TutorialWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(
             window._tutorial_controller.current_step_key,
-            "loading_left_lane_roi",
+            "target_left_lane_roi",
         )
-        self.assertTrue(window._image_path.endswith("tutorial_loading_control.tif"))
+        self.assertTrue(window._image_path.endswith("tutorial_target_protein.tif"))
         self.assertIsNotNone(window.canvas._tutorial_hint_item)
         self.assertTrue(window.canvas._tutorial_cursor_timer.isActive())
         lane_hint = window.canvas._tutorial_hint_rect
@@ -91,10 +91,14 @@ class TutorialWorkflowTests(unittest.TestCase):
             lane_hint.width(),
         )
 
+        # One box is the whole drawing step: the next step is Analyze, and
+        # there is no second (band) box to draw.
         window._tutorial_controller.notify_roi_changed()
-        band_hint = window.canvas._tutorial_hint_rect
-        self.assertLess(band_hint.width(), lane_hint.width() / 2.0)
-        self.assertLess(band_hint.right(), lane_hint.center().x())
+        self.assertEqual(
+            window._tutorial_controller.current_step_key,
+            "analyze_target_left",
+        )
+        self.assertIsNone(window.canvas._tutorial_hint_item)
 
         window._tutorial_controller.stop()
         self.assertEqual(window.param_panel.get_lane_count(), original_lanes)
@@ -247,108 +251,26 @@ class TutorialWorkflowTests(unittest.TestCase):
         workspace.set_tutorial_mode(False)
         self.assertEqual(workspace._roi_fill_mode, "auto")
 
-    def test_densitometry_tutorial_waits_for_result_autofill(self) -> None:
+    def test_densitometry_tutorial_follows_the_one_box_flow(self) -> None:
         window = self._make_window()
         window._tutorial_controller.start("densitometry")
         keys = [step.key for step in window._tutorial_controller._steps]
-        window._tutorial_controller._step_index = keys.index(
-            "select_loading_r1_row"
-        )
-        window._tutorial_controller._show_current_step()
 
-        window._tutorial_controller.notify_table_row_selected(0)
+        self.assertFalse([key for key in keys if key.endswith("_band_roi")])
+        self.assertFalse([key for key in keys if key.startswith("autofill_")])
+        self.assertFalse([key for key in keys if key.startswith("select_") and key.endswith("_row")])
+        start = keys.index("target_left_lane_roi")
+        # Same order as the table fills itself: target then loading, per replicate.
         self.assertEqual(
-            window._tutorial_controller.current_step_key,
-            "select_loading_r1_row",
+            keys[start:start + 8],
+            [
+                "target_left_lane_roi", "analyze_target_left",
+                "loading_left_lane_roi", "analyze_loading_left",
+                "target_right_lane_roi", "analyze_target_right",
+                "loading_right_lane_roi", "analyze_loading_right",
+            ],
         )
-        window._tutorial_controller.notify_table_row_selected(1)
-        self.assertEqual(
-            window._tutorial_controller.current_step_key,
-            "autofill_loading_r1",
-        )
-        window._tutorial_controller.notify_autofill_completed()
-        self.assertEqual(
-            window._tutorial_controller.current_step_key,
-            "select_loading_r2_row",
-        )
-        for row, autofill_key in (
-            (4, "autofill_loading_r2"),
-            (0, "autofill_target_r1"),
-            (3, "autofill_target_r2"),
-        ):
-            window._tutorial_controller.notify_table_row_selected(row)
-            self.assertEqual(
-                window._tutorial_controller.current_step_key,
-                autofill_key,
-            )
-            window._tutorial_controller.notify_autofill_completed()
-
-        self.assertEqual(
-            window._tutorial_controller.current_step_key,
-            "select_negative_control",
-        )
-        window._tutorial_controller.notify_column_table_event(
-            "negative_control_requested"
-        )
-        self.assertEqual(
-            window._tutorial_controller.current_step_key,
-            "select_control_group",
-        )
-        window._tutorial_controller.notify_column_table_event(
-            "negative_control_selected"
-        )
-        self.assertEqual(
-            window._tutorial_controller.current_step_key,
-            "generate_figure",
-        )
-        window._tutorial_controller.notify_column_table_event(
-            "figure_generated"
-        )
-        self.assertEqual(window._tutorial_controller.current_step_key, "complete")
-
-    def test_each_autofill_step_animates_its_three_mean_cells(self) -> None:
-        window = self._make_window()
-        window._tutorial_controller.start("densitometry")
-        for run_index in range(1, 5):
-            window.results_panel.show_results(
-                pd.DataFrame(
-                    [
-                        {"Band": f"B{lane}", "Lane": lane, "Mean": 10 * run_index + lane}
-                        for lane in range(1, 4)
-                    ]
-                )
-            )
-
-        keys = [step.key for step in window._tutorial_controller._steps]
-        for step_key in (
-            "autofill_loading_r1",
-            "autofill_loading_r2",
-            "autofill_target_r1",
-            "autofill_target_r2",
-        ):
-            window._tutorial_controller._step_index = keys.index(step_key)
-            window._tutorial_controller._show_current_step()
-            hint = window._tutorial_controller._table_drag_hint
-            self.assertTrue(hint._timer.isActive())
-            self.assertGreater(hint._target.width(), 0)
-            self.assertGreater(hint._target.height(), 0)
-
-        window._tutorial_controller._step_index = keys.index(
-            "autofill_loading_r1"
-        )
-        window._tutorial_controller._show_current_step()
-        table = window.results_panel._table
-        table.setRangeSelected(
-            QTableWidgetSelectionRange(1, 1, 1, 3),
-            True,
-        )
-        self.assertFalse(
-            window._tutorial_controller._table_drag_hint._enter_prompt.isHidden()
-        )
-        self.assertIn(
-            "Enter/Return",
-            window._tutorial_controller._table_drag_hint._enter_prompt.text(),
-        )
+        self.assertEqual(keys[start + 8], "select_negative_control")
 
     def test_densitometry_tutorial_completes_table_control_and_figure(self) -> None:
         window = self._make_window()
@@ -357,25 +279,38 @@ class TutorialWorkflowTests(unittest.TestCase):
         window._on_figure_generation_clicked()
         controller = window._tutorial_controller
         keys = [step.key for step in controller._steps]
-        controller._step_index = keys.index("select_loading_r1_row")
+        controller._step_index = keys.index("target_left_lane_roi")
         controller._show_current_step()
         table_window = window._embedded_column_table
+        self.assertTrue(table_window.auto_fill_enabled())
 
-        for row, values in (
-            (1, ["10", "20", "30"]),
-            (4, ["12", "22", "32"]),
-            (0, ["20", "40", "60"]),
-            (3, ["24", "44", "64"]),
+        for values in (
+            [20.0, 40.0, 60.0],
+            [10.0, 20.0, 30.0],
+            [24.0, 44.0, 64.0],
+            [12.0, 22.0, 32.0],
         ):
-            table_window.set_active_target_row(row)
-            window._on_mean_autofill_requested(values)
+            controller.notify_roi_changed()
+            self.assertTrue(controller.current_step_key.startswith("analyze_"))
+            # Analyze sends the run straight into the next table row.
+            window._auto_fill_table_from_results(
+                pd.DataFrame(
+                    [
+                        {"Band": 1, "Lane": lane, "Mean": value}
+                        for lane, value in enumerate(values, start=1)
+                    ]
+                )
+            )
+            controller.notify_analysis_started()
 
         self.assertEqual(controller.current_step_key, "select_negative_control")
+        self.assertEqual(float(table_window._table.item(0, 2).text()), 20.0)
+        self.assertEqual(float(table_window._table.item(1, 2).text()), 10.0)
+        self.assertEqual(float(table_window._table.item(3, 2).text()), 24.0)
+        self.assertEqual(float(table_window._table.item(4, 2).text()), 12.0)
         table_window._on_select_negative_control_clicked()
         table_window._on_group_header_clicked(0)
-        self.assertEqual(controller.current_step_key, "generate_figure")
-        table_window._on_figures_generation_clicked()
-
+        # Choosing the baseline redraws the chart; there is no Plot step.
         self.assertEqual(controller.current_step_key, "complete")
         self.assertTrue(table_window.has_generated_figure())
         self.assertTrue(table_window._table.item(2, 2).text())

@@ -217,7 +217,7 @@ class QuantWorkspaceTests(unittest.TestCase):
             "分析完成：已把 3 个数值填入“重复 1 — 目的蛋白条带”。",
         )
 
-    def test_tutorial_keeps_the_manual_transfer(self) -> None:
+    def test_tutorial_also_fills_the_table_automatically(self) -> None:
         window = MainWindowFactory.make()
         window._tutorial_controller.start("densitometry")
         table = ColumnTableWindow(samples=3, replicates=2, parent=window)
@@ -225,8 +225,8 @@ class QuantWorkspaceTests(unittest.TestCase):
 
         window._on_measurement_done(self._results([10.0, 20.0, 30.0]))
 
-        self.assertFalse(table.auto_fill_enabled())
-        self.assertEqual(_cell(table, 0, 0), "")
+        self.assertTrue(table.auto_fill_enabled())
+        self.assertNotEqual(_cell(table, 0, 0), "")
         window._tutorial_controller.stop()
 
     @staticmethod
