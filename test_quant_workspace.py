@@ -364,11 +364,12 @@ class QuantWorkspaceTests(unittest.TestCase):
                 "Drag around the lanes, then drag around the band, then Analyze.",
             )
 
-            # Drawing by hand then works as before: lanes, then the band.
+            # Drawing a box now always yields adjustable per-lane boxes.
             with patch.object(canvas, "get_roi", return_value=roi):
                 window._on_roi_changed(roi)
             self.assertEqual(len(window._lane_rects), 4)
-            self.assertFalse(canvas.is_quant_auto_review())
+            self.assertTrue(canvas.is_quant_auto_review())
+            self.assertEqual(len(canvas._auto_band_items), 4)
         window.close()
 
     def test_draw_manually_is_translated(self) -> None:

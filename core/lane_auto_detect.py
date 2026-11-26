@@ -30,6 +30,10 @@ log = get_logger(__name__)
 Rect = tuple[float, float, float, float]  # x, y, width, height
 
 MAX_BAND_ROWS = 8
+# Brightest signal in a region, relative to its background noise, below which
+# the region is treated as empty. Blank membrane measures 4-12 on the sample
+# blots; the faintest real bands measure 23 and up.
+MIN_SIGNAL_TO_NOISE = 14.0
 
 
 # ── Pixel preparation ─────────────────────────────────────────────────────────
@@ -90,6 +94,10 @@ def _prepare_signal(region: np.ndarray, light_on_dark: bool) -> np.ndarray:
     if scale <= 0:
         scale = signal.max()
     if scale <= 0:
+        return np.zeros_like(signal)
+    if noise > 0 and scale < MIN_SIGNAL_TO_NOISE * noise:
+        # Only membrane noise in this region. Stretching it to full range
+        # would invent "bands"; report no signal so callers can fall back.
         return np.zeros_like(signal)
     return np.clip(signal / scale, 0.0, 1.5)
 

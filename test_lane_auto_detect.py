@@ -339,7 +339,6 @@ class LaneAutoDetectWindowTests(unittest.TestCase):
         window = self._window_with_blot()
         try:
             window.param_panel.lane_count.setValue(6)
-            self.assertFalse(window._act_analyze.isEnabled())
 
             window.param_panel._auto_lane_btn.click()
 
@@ -437,7 +436,6 @@ class LaneAutoDetectWindowTests(unittest.TestCase):
         try:
             panel = window.param_panel
             panel.lane_count.setValue(6)
-            self.assertFalse(panel.adjacent_band_option_available())
 
             panel._auto_lane_btn.click()
 
@@ -451,9 +449,13 @@ class LaneAutoDetectWindowTests(unittest.TestCase):
             merged_height = window.canvas._auto_band_items[0].scene_rect().height()
             self.assertGreater(merged_height, main_height + 3.0)
 
-            window._on_roi_changed(QRectF(20, 20, 120, 40))
-            self.assertFalse(panel.adjacent_band_option_available())
+            # A newly drawn box starts again from the default: main band only.
+            window._on_roi_changed(QRectF(10, 10, 240, 70))
+            self.assertTrue(panel.adjacent_band_option_available())
             self.assertFalse(panel._adjacent_band_check.isChecked())
+            self.assertAlmostEqual(
+                window.canvas._auto_band_items[0].scene_rect().height(), main_height
+            )
         finally:
             window.close()
 
@@ -492,18 +494,68 @@ class LaneAutoDetectWindowTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_new_roi_returns_to_the_manual_workflow(self) -> None:
+    def test_drawing_one_box_gives_boxes_without_pressing_the_button(self) -> None:
+        window = self._window_with_blot()
+        try:
+            window.param_panel.lane_count.setValue(6)
+            self.assertEqual(len(window.canvas._auto_band_items), 6)
+
+            # Drawing the box again (same as releasing the mouse) is all it takes.
+            window._on_roi_changed(QRectF(10, 10, 240, 70))
+
+            self.assertTrue(window.canvas.is_quant_auto_review())
+            self.assertEqual(len(window.canvas._auto_band_items), 6)
+            self.assertTrue(window._act_analyze.isEnabled())
+        finally:
+            window.close()
+
+    def test_blank_region_falls_back_to_an_even_split(self) -> None:
+        window = self._window_with_blot()
+        try:
+            window.param_panel.lane_count.setValue(4)
+            blank = QRectF(180.0, 60.0, 60.0, 20.0)   # no bands here
+            window.canvas._roi_item.setRect(blank)
+
+            window._on_roi_changed(blank)
+
+            rects = [item.scene_rect() for item in window.canvas._auto_band_items]
+            self.assertEqual(len(rects), 4)
+            self.assertEqual({(r.width(), r.height(), r.y()) for r in rects}, {(15.0, 20.0, 60.0)})
+            self.assertEqual(sorted(r.x() for r in rects), [180.0, 195.0, 210.0, 225.0])
+            self.assertTrue(window._act_analyze.isEnabled())
+        finally:
+            window.close()
+
+    def test_fixed_roi_placement_keeps_its_own_flow(self) -> None:
+        window = self._window_with_blot()
+        try:
+            window.canvas.set_quant_auto_review(False)
+            window.canvas.clear_auto_overlays()
+            with patch.object(window.canvas, "is_fixed_roi_mode", return_value=True):
+                window._on_roi_changed(QRectF(10, 10, 240, 70))
+            self.assertFalse(window.canvas.is_quant_auto_review())
+            self.assertEqual(len(window._lane_rects), window.param_panel.get_lane_count())
+        finally:
+            window.close()
+
+    def test_new_roi_replaces_the_boxes_with_ones_for_the_new_region(self) -> None:
         window = self._window_with_blot()
         try:
             window.param_panel.lane_count.setValue(6)
             window.param_panel._auto_lane_btn.click()
+            smaller = QRectF(28, 25, 72, 30)   # only the first three lanes
+            window.canvas._roi_item.setRect(smaller)
+            window.param_panel.lane_count.blockSignals(True)
+            window.param_panel.lane_count.setValue(3)
+            window.param_panel.lane_count.blockSignals(False)
 
-            window._on_roi_changed(QRectF(20, 20, 120, 40))
+            window._on_roi_changed(smaller)
 
-            self.assertFalse(window.canvas.is_quant_auto_review())
-            self.assertEqual(window._auto_detections, [])
-            self.assertEqual(len(window._lane_rects), 6)
-            self.assertFalse(window._act_analyze.isEnabled())
+            self.assertTrue(window.canvas.is_quant_auto_review())
+            rects = [item.scene_rect() for item in window.canvas._auto_band_items]
+            self.assertEqual(len(rects), 3)
+            self.assertTrue(all(smaller.left() - 1 <= r.left() and r.right() <= smaller.right() + 1 for r in rects))
+            self.assertTrue(window._act_analyze.isEnabled())
         finally:
             window.close()
 

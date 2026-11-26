@@ -255,6 +255,9 @@ class ParamPanel(QWidget):
         )
         self._manual_roi_btn.clicked.connect(self.manual_roi_requested)
         manual_layout.addWidget(self._manual_roi_btn)
+        # Drawing one box now yields adjustable per-lane boxes directly, so the
+        # separate by-hand route is no longer offered.
+        self._manual_roi_btn.setVisible(False)
 
         # Shown only when auto-detect finds a faint band right next to a main
         # band.  Off: boxes wrap the main band only.  On: both bands together.

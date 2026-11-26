@@ -2499,6 +2499,9 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             f"Lane ROI set ({roi.width():.0f} × {roi.height():.0f} px) — "
             f"now draw a band ROI to continue."
         )
+        # With an image loaded, one box is the whole step: per-lane boxes are
+        # found (or evenly split) right away and can be adjusted before Analyze.
+        self._auto_boxes_for_new_roi()
 
     def _on_band_roi_changed(self, band_roi: QRectF) -> None:
         """User drew band ROI → ready to analyze."""

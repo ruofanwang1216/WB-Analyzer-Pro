@@ -268,7 +268,7 @@ class ImageLoadWorker(QObject):
 
 
 class EditableBandRectItem(QGraphicsRectItem):
-    _HANDLE_MARGIN = 7.0
+    _HANDLE_MARGIN = 5.0
     _MIN_SIZE = 4.0
 
     def __init__(self, rect: QRectF, image_rect: QRectF, notify_change, parent=None) -> None:
@@ -310,8 +310,8 @@ class EditableBandRectItem(QGraphicsRectItem):
         scene = self.scene()
         if scene is not None and scene.views():
             zoom = max(1e-6, abs(scene.views()[0].transform().m11()))
-        margin_x = min(self._HANDLE_MARGIN / zoom, rect.width() * 0.25)
-        margin_y = min(self._HANDLE_MARGIN / zoom, rect.height() * 0.25)
+        margin_x = min(self._HANDLE_MARGIN / zoom, rect.width() * 0.2)
+        margin_y = min(self._HANDLE_MARGIN / zoom, rect.height() * 0.2)
         left = abs(pos.x() - rect.left()) <= margin_x
         right = abs(pos.x() - rect.right()) <= margin_x
         top = abs(pos.y() - rect.top()) <= margin_y
@@ -1622,6 +1622,9 @@ class ImageCanvas(QGraphicsView):
 
     def is_quant_auto_review(self) -> bool:
         return self._quant_auto_review
+
+    def is_fixed_roi_mode(self) -> bool:
+        return bool(self._fixed_roi_enabled)
 
     def refresh_auto_band_labels(self) -> None:
         self._refresh_auto_band_labels()

@@ -118,6 +118,42 @@ class AutoLaneMixin:
         }
         return detections, metadata
 
+    @staticmethod
+    def _equal_split_detections(roi: QRectF, lane_count: int) -> list[dict]:
+        """One box per lane: the drawn box divided evenly, at its full height."""
+        count = max(1, int(lane_count))
+        width = roi.width() / count
+        return [
+            {
+                "lane_index": index + 1,
+                "lane_rect": QRectF(roi.x() + index * width, roi.y(), width, roi.height()),
+                "bands": [
+                    {
+                        "band_rect": QRectF(roi.x() + index * width, roi.y(), width, roi.height()),
+                        "band_index": 1,
+                        "row_index": 1,
+                    }
+                ],
+            }
+            for index in range(count)
+        ]
+
+    def _auto_boxes_for_new_roi(self) -> None:
+        """A box was just drawn in densitometry: find the bands in it straight away.
+
+        This makes drawing one box the whole manual step: the per-lane boxes
+        appear at once (detected, or an even split when nothing is
+        recognised) and can be adjusted before Analyze.  Fixed-ROI placement
+        keeps its own two-step flow.
+        """
+        if self._is_wb_plot_workspace_active() or self.canvas.is_fixed_roi_mode():
+            return
+        if self._active_slot_index is None or self._image_path is None:
+            return
+        if self.canvas.get_roi() is None or self.canvas.current_analysis_pixels() is None:
+            return
+        self._run_quant_auto_lane_detect()
+
     def _run_quant_auto_lane_detect(self) -> None:
         """Detect lanes + bands inside the drawn lane ROI and show editable boxes."""
         from core.lane_auto_detect import detect_lanes_in_roi
@@ -187,15 +223,13 @@ class AutoLaneMixin:
             for lane in result["lanes"]
         ]
         total_bands = sum(len(lane["bands"]) for lane in detections)
+        used_equal_split = False
         if not detections or total_bands == 0:
-            self._status_bar.showMessage(
-                self._quant_auto_msg(
-                    "No bands found in the ROI — adjust the ROI, or draw the band ROI manually.",
-                    "在框选区域里没有找到条带——请调整区域，或手动框选条带 ROI。",
-                ),
-                6000,
-            )
-            return
+            # Nothing recognised: still give the user boxes to work with, by
+            # splitting the drawn box evenly into the requested lanes.
+            detections = self._equal_split_detections(roi, lane_count)
+            result = {"rows": [{}], "adjacent_rows": [], "light_on_dark": result.get("light_on_dark", True)}
+            used_equal_split = True
 
         self._quant_auto_light_on_dark = bool(result.get("light_on_dark", True))
         self._band_roi = None
@@ -209,6 +243,15 @@ class AutoLaneMixin:
         rows = len(result.get("rows", []))
         adjacent_rows = result.get("adjacent_rows", [])
         self.param_panel.set_adjacent_band_option(bool(adjacent_rows))
+        if used_equal_split:
+            self._status_bar.showMessage(
+                self._quant_auto_msg(
+                    f"No bands were recognised, so the box was split into {len(detections)} equal lanes. "
+                    "Drag the boxes onto the bands, then Analyze.",
+                    f"没有识别到条带，已把框平均分成 {len(detections)} 条泳道。把框拖到条带上，再点“定量分析”。",
+                )
+            )
+            return
         if adjacent_rows:
             # The choice changes what is measured, so say which way it is set.
             if result.get("include_adjacent"):
