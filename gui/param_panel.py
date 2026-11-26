@@ -321,8 +321,9 @@ class ParamPanel(QWidget):
         # ── Help ───────────────────────────────────────────────────────────────
         # The how-to lives in the "?" tooltip; the label only holds the text.
         self._help_note = QLabel(
-            "Manual: draw lane ROI → draw band ROI → Analyze\n"
-            "Auto: draw one large ROI → set Lanes → Auto-detect lanes → adjust → Analyze\n"
+            "Set Lanes → draw one box around the bands → adjust the boxes if needed → Analyze\n"
+            "Drag a box to move it, drag an edge to resize, arrow keys nudge, Delete removes, "
+            "drag on empty space inside the box you drew to add one.\n"
             "Hold Space + drag to pan. Scroll to zoom."
         )
         self._help_note.setVisible(False)
@@ -371,8 +372,9 @@ class ParamPanel(QWidget):
         self._fix_btn.setToolTip(tr("Capture the current lane ROI size, or arm the next drawn ROI as the fixed size.", language))
         self._cancel_fixed_btn.setToolTip(tr("Return Manual mode to freehand ROI drawing.", language))
         self._help_note.setText(tr(
-            "Manual: draw lane ROI → draw band ROI → Analyze\n"
-            "Auto: draw one large ROI → set Lanes → Auto-detect lanes → adjust → Analyze\n"
+            "Set Lanes → draw one box around the bands → adjust the boxes if needed → Analyze\n"
+            "Drag a box to move it, drag an edge to resize, arrow keys nudge, Delete removes, "
+            "drag on empty space inside the box you drew to add one.\n"
             "Hold Space + drag to pan. Scroll to zoom.",
             language,
         ))
