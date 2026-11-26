@@ -331,6 +331,9 @@ class _ImagePanelWidget(QFrame):
         self.analyze_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.analyze_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.analyze_btn.pressed.connect(self.canvas_interacted)
+        # Never squeezed below its text: with four images side by side the
+        # layout used to shrink it to an empty pill.
+        self.analyze_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.analyze_btn.hide()
         top_row.addWidget(self.analyze_btn)
         self.remove_btn = QPushButton("ⓧ")
@@ -338,6 +341,9 @@ class _ImagePanelWidget(QFrame):
         self.remove_btn.setToolTip("Remove image")
         top_row.addWidget(self.remove_btn)
         root.addLayout(top_row)
+        self._top_row = top_row
+        self._root_layout = root
+        self._name_on_own_line = False
 
         self.canvas = ImageCanvas()
         self.canvas.setCursor(Qt.CursorShape.CrossCursor)
@@ -346,6 +352,89 @@ class _ImagePanelWidget(QFrame):
     def set_filename(self, name: str) -> None:
         self.filename_label.setText(name)
         self.filename_label.setToolTip(name)
+
+    # Room the file name needs beside the buttons before it moves to a line
+    # of its own.
+    _MIN_INLINE_NAME_WIDTH = 160
+
+    def _buttons_width(self) -> int:
+        """Width the one-line toolbar needs, without the file name."""
+        row = self._top_row
+        widths = [
+            row.itemAt(i).widget().sizeHint().width()
+            for i in range(row.count())
+            if row.itemAt(i).widget() is not None
+            and row.itemAt(i).widget() is not self.filename_label
+            and row.itemAt(i).widget() is not self.analyze_btn
+            and not row.itemAt(i).widget().isHidden()
+        ]
+        if not self.analyze_btn.isHidden():
+            # Analyze shares the line with the buttons when there is room.
+            widths.append(self.analyze_btn.sizeHint().width())
+        margins = self._root_layout.contentsMargins()
+        return (
+            sum(widths)
+            + row.spacing() * len(widths)
+            + margins.left()
+            + margins.right()
+            + 4  # the 2px selection frame on each side
+        )
+
+    def _update_toolbar_layout(self) -> None:
+        """Split the toolbar over two lines when the panel is narrow.
+
+        With four images side by side each panel is only about 300px wide,
+        not enough for the buttons, Analyze and the file name on one line;
+        Analyze used to be squeezed into an empty pill.  In a narrow panel
+        the image buttons keep the first line and the file name and Analyze
+        move to a second line under it.
+        """
+        narrow = self.width() < self._buttons_width() + self._MIN_INLINE_NAME_WIDTH
+        if narrow == self._name_on_own_line:
+            return
+        self._name_on_own_line = narrow
+        label = self.filename_label
+        top = self._top_row
+        top.removeWidget(label)
+        top.removeWidget(self.analyze_btn)
+        if narrow:
+            second = QHBoxLayout()
+            second.setContentsMargins(0, 0, 0, 0)
+            second.setSpacing(6)
+            label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            second.addWidget(label, 1)
+            second.addWidget(self.analyze_btn)
+            # Keep the close button at the far right of the first line.
+            top.insertStretch(top.indexOf(self.remove_btn), 1)
+            self._root_layout.insertLayout(1, second)
+            self._second_row = second
+        else:
+            second = getattr(self, "_second_row", None)
+            if second is not None:
+                second.removeWidget(label)
+                second.removeWidget(self.analyze_btn)
+                self._root_layout.removeItem(second)
+                second.deleteLater()
+                self._second_row = None
+            stretch_index = top.indexOf(self.remove_btn) - 1
+            item = top.itemAt(stretch_index)
+            if item is not None and item.spacerItem() is not None:
+                top.takeAt(stretch_index)
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            index = top.indexOf(self.remove_btn)
+            top.insertWidget(index, label)
+            top.insertWidget(index + 1, self.analyze_btn)
+
+    def name_on_own_line(self) -> bool:
+        return self._name_on_own_line
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt API
+        super().resizeEvent(event)
+        self._update_toolbar_layout()
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt API
+        super().showEvent(event)
+        self._update_toolbar_layout()
 
     def is_shown_selected(self) -> bool:
         return self.property("selected") == "true"

@@ -1019,6 +1019,8 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             panel.zoom_out_btn.setToolTip(tr("Zoom out image", language))
             panel.zoom_in_btn.setToolTip(tr("Zoom in image", language))
             panel.fit_btn.setText(tr("Fit", language))
+            # Button labels change width with the language.
+            panel._update_toolbar_layout()
             panel.fit_btn.setToolTip(tr("Fit the whole image to this panel", language))
             panel.remove_btn.setToolTip(tr("Remove image", language))
             panel.rotate_custom_action.setText(tr("Custom", language))
@@ -1244,6 +1246,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._analyze_visible = bool(visible)
         for panel in self._image_panels:
             panel.analyze_btn.setVisible(self._analyze_visible)
+            panel._update_toolbar_layout()
 
     @property
     def _analyze_toolbar_btn(self) -> QToolButton:
