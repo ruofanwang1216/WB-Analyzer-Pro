@@ -279,6 +279,30 @@ _ZH_CN = {
     "Expand Uploaded Files panel": "展开已上传文件面板",
     "New User Tutorial": "新手演示",
     "User Tutorial": "使用教程",
+    "Click ① Quantify & Plot at the top. The tutorial opens Column Setup with Samples = 3 and Replicates = 2. Confirm it before drawing any box.":
+        "点击顶部的“① 定量与作图”。教程会打开列设置，Samples = 3、Replicates = 2。先确认，再开始框选。",
+    "Target Protein: box the left bands": "Target Protein：框选左侧条带",
+    "Target Protein: box the right bands": "Target Protein：框选右侧条带",
+    "Loading Control: box the left bands": "Loading Control：框选左侧条带",
+    "Loading Control: box the right bands": "Loading Control：框选右侧条带",
+    "The Target Protein image is selected. Drag one box around the left group of three bands, following the animated rectangle. The moment you let go, a box appears on each band. You can drag any box to adjust it.":
+        "已选中 Target Protein 图像。跟随动态矩形，拖一个框把左侧三条条带框住。松开鼠标后，每条条带上会自动出现一个框；任何一个框都可以拖动调整。",
+    "The Target Protein image is selected. Drag one box around the right group of three bands. A box appears on each band as soon as you let go.":
+        "已选中 Target Protein 图像。拖一个框把右侧三条条带框住，松开鼠标后每条条带上会自动出现一个框。",
+    "The Loading Control image is selected. Drag one box around the left group of three bands. A box appears on each band as soon as you let go.":
+        "已选中 Loading Control 图像。拖一个框把左侧三条条带框住，松开鼠标后每条条带上会自动出现一个框。",
+    "The Loading Control image is selected. Drag one box around the right group of three bands. A box appears on each band as soon as you let go.":
+        "已选中 Loading Control 图像。拖一个框把右侧三条条带框住，松开鼠标后每条条带上会自动出现一个框。",
+    "Click Analyze on this image, or press Enter/Return. The three values go straight into the Target band row of Replicate 1 in the Column Table.":
+        "点击这张图像上的“定量分析”，或按 Enter/Return。三个数值会直接填入列式数据表中重复 1 的 Target band 行。",
+    "Click Analyze on this image, or press Enter/Return. The three values go straight into the Loading control row of Replicate 1 in the Column Table.":
+        "点击这张图像上的“定量分析”，或按 Enter/Return。三个数值会直接填入列式数据表中重复 1 的 Loading control 行。",
+    "Click Analyze on this image, or press Enter/Return. The three values go straight into the Target band row of Replicate 2 in the Column Table.":
+        "点击这张图像上的“定量分析”，或按 Enter/Return。三个数值会直接填入列式数据表中重复 2 的 Target band 行。",
+    "Click Analyze on this image, or press Enter/Return. The three values go straight into the Loading control row of Replicate 2 in the Column Table.":
+        "点击这张图像上的“定量分析”，或按 Enter/Return。三个数值会直接填入列式数据表中重复 2 的 Loading control 行。",
+    "All four runs were measured and filled into the table, Group A was selected as the control, and the normalized figure was generated. Click Done to return to the fresh Home page.":
+        "四次测量都已完成并填入数据表，Group A 已设为对照，归一化图已生成。点击“完成”返回全新的主页。",
     "Hands-on practice": "动手练习",
     "Close the video and practise step by step with two built-in images.":
         "关闭视频，用两张内置图像一步一步动手练习。",

@@ -1468,8 +1468,8 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             self._tutorial_controller.notify_column_table_event
         )
         self._embedded_column_table = table_window
-        # Results flow straight into the table and chart, except during the
-        # tutorial, which teaches the manual transfer step by step.
+        # Results flow straight into the table.  The chart is drawn automatically
+        # too, except during the tutorial, which ends on the Plot button.
         table_window.set_auto_figure_enabled(not self._tutorial_controller.active)
         table_window.set_language(self._language)
         self._figure_windows = [table_window]
@@ -2867,7 +2867,6 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         table = self._embedded_column_table
         if (
             table is None
-            or self._tutorial_controller.active
             or not table.auto_fill_enabled()
             or "Mean" not in df.columns
         ):
