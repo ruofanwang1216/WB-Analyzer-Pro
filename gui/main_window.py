@@ -287,6 +287,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             )
         self._build_ui()
         self._tutorial_controller = TutorialController(self)
+        self._video_tutorial_window = None
         self._apply_persisted_ui_preferences()
         self._connect_signals()
         self._register_shortcuts()
@@ -453,7 +454,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._theme_toolbar_action = tb.addWidget(self._theme_toggle_btn)
         self._refresh_theme_toggle()
 
-        self._tutorial_btn = QPushButton("New User Tutorial")
+        self._tutorial_btn = QPushButton("User Tutorial")
         self._tutorial_btn.setObjectName("tutorial_btn")
         self._tutorial_btn.setFixedHeight(30)
         self._tutorial_toolbar_action = tb.addWidget(self._tutorial_btn)
@@ -991,7 +992,9 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._wb_plot_generation_btn.setText(tr("② Figure Layout", language))
         self._fit_workspace_tab_widths()
         self._refresh_empty_state_text()
-        self._tutorial_btn.setText(tr("New User Tutorial", language))
+        self._tutorial_btn.setText(tr("User Tutorial", language))
+        if self._video_tutorial_window is not None:
+            self._video_tutorial_window.set_language(language)
         self._files_title.setText(tr("Uploaded Files", language))
         self._export_all_tiffs_btn.setText(tr("Export All TIFFs", language))
         if self._embedded_column_table is None:
@@ -1082,6 +1085,16 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
     def _on_language_changed(self, index: int) -> None:
         language = self._language_combo.itemData(index)
         self._set_language(str(language))
+
+    def _show_video_tutorial(self) -> None:
+        """Open the quick-start video with clickable steps."""
+        from gui.video_tutorial import VideoTutorialWindow
+
+        if self._video_tutorial_window is None:
+            window = VideoTutorialWindow(self, language=self._language)
+            window.practiceRequested.connect(self._show_tutorial_selector)
+            self._video_tutorial_window = window
+        self._video_tutorial_window.start()
 
     def _show_tutorial_selector(self) -> None:
         chooser = TutorialModeDialog(self, language=self._language)
@@ -2297,7 +2310,7 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
         self._act_open.triggered.connect(self._upload_files)
         self._act_image_transform.triggered.connect(self._show_image_transform_dialog)
         self._act_analyze.triggered.connect(self._run_analysis)
-        self._tutorial_btn.clicked.connect(self._show_tutorial_selector)
+        self._tutorial_btn.clicked.connect(self._show_video_tutorial)
         self._language_combo.currentIndexChanged.connect(self._on_language_changed)
 
         for idx, panel in enumerate(self._image_panels):

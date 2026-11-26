@@ -278,6 +278,16 @@ _ZH_CN = {
     "Collapse Uploaded Files panel": "收起已上传文件面板",
     "Expand Uploaded Files panel": "展开已上传文件面板",
     "New User Tutorial": "新手演示",
+    "User Tutorial": "使用教程",
+    "Click any step on the left of the video to jump to it. Click the video or press Space to pause.":
+        "点击视频左侧的任一步骤可直接跳到该步；点击视频或按空格键可暂停。",
+    "Hands-on practice": "动手练习",
+    "Close the video and practise step by step with two built-in images.":
+        "关闭视频，用两张内置图像一步一步动手练习。",
+    "Play / Pause": "播放 / 暂停",
+    "Mute / Unmute": "静音 / 取消静音",
+    "The tutorial video file is missing from this installation.": "当前安装中缺少教程视频文件。",
+    "The tutorial video could not be played.": "教程视频无法播放。",
     "Choose a tutorial": "选择演示教程",
     "Practise with two built-in WB images. Tutorial-only defaults do not change the normal workflows.": "使用两张内置 WB 图像练习；教程专属默认值不会改变正常工作流程。",
     "Densitometry\nROI and column-table workflow": "灰度定量分析\nROI 与列式数据表流程",
