@@ -31,8 +31,7 @@ STEP_TITLES = (
     "Import",
     "Straighten",
     "Adjust display",
-    "Frame the bands",
-    "Auto-detect",
+    "Box the bands",
     "Analyze",
     "Loading control",
     "Replicates",
@@ -41,9 +40,9 @@ STEP_TITLES = (
     "Export",
 )
 # Second at which each step starts in the video.
-STEP_STARTS = (4.5, 8.2, 11.0, 15.2, 18.9, 22.0, 26.2, 33.8, 40.8, 44.4, 62.6)
+STEP_STARTS = (4.5, 8.2, 11.0, 15.2, 20.8, 25.0, 31.8, 38.2, 41.8, 60.0)
 # The step list is on screen between these two times.
-STEPS_VISIBLE = (4.5, 68.6)
+STEPS_VISIBLE = (4.5, 66.0)
 # Step rows in video pixels: x, first row y, width, row height, row pitch.
 _STEP_X, _STEP_Y0, _STEP_W, _STEP_H, _STEP_PITCH = 44.0, 156.0, 370.0, 58.0, 64.0
 # Land slightly inside the step so its caption and highlight are already shown.

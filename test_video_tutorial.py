@@ -24,11 +24,11 @@ def test_video_file_is_bundled():
 
 
 def test_steps_match_the_video():
-    assert len(vt.STEP_TITLES) == len(vt.STEP_STARTS) == 11
+    assert len(vt.STEP_TITLES) == len(vt.STEP_STARTS) == 10
     assert list(vt.STEP_STARTS) == sorted(vt.STEP_STARTS)
     assert vt.step_at_time(0.0) == -1
     assert vt.step_at_time(vt.STEP_STARTS[5] + 0.1) == 5
-    assert vt.step_at_time(70.0) == 10
+    assert vt.step_at_time(69.0) == 9
 
 
 def test_clicking_a_step_emits_its_index_and_hover_shows_hand():
