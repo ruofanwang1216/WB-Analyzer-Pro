@@ -2297,6 +2297,10 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
             if self._figure_mode_window.apply_roi_to_selected_slot():
                 self._status_bar.showMessage("Applied active WB ROI to the selected plot target.", 3000)
             return
+        if self._quant_auto_active() and self._act_analyze.isEnabled():
+            # Boxes are on the image (also inside a fixed ROI): Enter measures them.
+            self._act_analyze.trigger()
+            return
         if (
             self.param_panel.get_mode() == "manual"
             and self.canvas.finish_fixed_lane_roi_placement()

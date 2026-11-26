@@ -236,12 +236,13 @@ class ParamPanel(QWidget):
         self._auto_lane_btn.setFixedHeight(26)
         self._auto_lane_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._auto_lane_btn.setToolTip(
-            "Detect the bands again inside the box you drew, for example after moving "
-            "or deleting boxes. Detection also runs by itself when you draw a box or "
-            "change the lane count."
+            "Detect the bands inside the box on the image: after placing a fixed ROI, "
+            "or again after moving or deleting boxes. A box you draw yourself is "
+            "detected automatically."
         )
         self._auto_lane_btn.clicked.connect(self.auto_lane_detect_requested)
-        manual_layout.addWidget(self._auto_lane_btn)
+        # Added to the layout below the Fixed ROI section: after placing a
+        # fixed ROI, this is the button that finds the bands inside it.
 
         # The by-hand route gets its own button so it is as visible as the
         # automatic one: it clears the boxes and waits for the user's drags.
@@ -272,7 +273,6 @@ class ParamPanel(QWidget):
         self._adjacent_band_check.setVisible(False)
         self._adjacent_band_available = False
         self._adjacent_band_check.toggled.connect(lambda _checked: self.auto_lane_detect_requested.emit())
-        manual_layout.addWidget(self._adjacent_band_check)
 
         self._fixed_label = QLabel("Fixed ROI")
         self._fixed_label.setObjectName("fixed_roi_label")
@@ -312,6 +312,9 @@ class ParamPanel(QWidget):
         self._fixed_roi_list.itemDoubleClicked.connect(self._on_fixed_roi_item_double_clicked)
         self._fixed_roi_list.setVisible(False)
         manual_layout.addWidget(self._fixed_roi_list)
+
+        manual_layout.addWidget(self._auto_lane_btn)
+        manual_layout.addWidget(self._adjacent_band_check)
 
         roi_layout.addWidget(self._manual_widget)
 
@@ -363,9 +366,9 @@ class ParamPanel(QWidget):
             language,
         ))
         self._auto_lane_btn.setToolTip(tr(
-            "Detect the bands again inside the box you drew, for example after moving "
-            "or deleting boxes. Detection also runs by itself when you draw a box or "
-            "change the lane count.",
+            "Detect the bands inside the box on the image: after placing a fixed ROI, "
+            "or again after moving or deleting boxes. A box you draw yourself is "
+            "detected automatically.",
             language,
         ))
         self._cancel_fixed_btn.setText(tr("Cancel", language))

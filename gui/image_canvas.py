@@ -1998,6 +1998,19 @@ class ImageCanvas(QGraphicsView):
             event.accept()
             return
 
+        if (
+            self._quant_auto_review
+            and self._fixed_roi_enabled
+            and self._pixmap_item
+            and event.button() == Qt.MouseButton.LeftButton
+            and self.dragMode() == QGraphicsView.DragMode.NoDrag
+            and self._editable_band_item_at(event.pos()) is not None
+        ):
+            # Bands were detected inside a fixed ROI: a press on a box adjusts
+            # that box; a press anywhere else still moves the fixed ROI.
+            super().mousePressEvent(event)
+            return
+
         if self._fixed_roi_enabled and self._pixmap_item and event.button() == Qt.MouseButton.LeftButton:
             sp = self._clamp_to_image(self.mapToScene(event.pos()))
             current_fixed_size = self._current_fixed_roi_scene_size()

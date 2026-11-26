@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from core.lane_auto_detect import detect_lanes_in_roi
 from core.measure import background_strips, local_background_level, measure_all_lanes_in_array
 from gui.main_window import MainWindow
+from gui.param_panel import ParamPanel
 
 
 def _synthetic_blot(
@@ -523,6 +524,36 @@ class LaneAutoDetectWindowTests(unittest.TestCase):
             self.assertEqual({(r.width(), r.height(), r.y()) for r in rects}, {(15.0, 20.0, 60.0)})
             self.assertEqual(sorted(r.x() for r in rects), [180.0, 195.0, 210.0, 225.0])
             self.assertTrue(window._act_analyze.isEnabled())
+        finally:
+            window.close()
+
+    def test_detect_button_sits_below_the_fixed_roi_section(self) -> None:
+        panel = ParamPanel()
+        try:
+            layout = panel._manual_widget.layout()
+            order = [layout.itemAt(i).widget() for i in range(layout.count())]
+            self.assertLess(order.index(panel._fixed_roi_list), order.index(panel._auto_lane_btn))
+            self.assertEqual(panel._auto_lane_btn.text(), "Auto-detect bands")
+        finally:
+            panel.close()
+
+    def test_detect_button_finds_bands_inside_a_fixed_roi_and_enter_measures_them(self) -> None:
+        window = self._window_with_blot()
+        try:
+            window.param_panel.lane_count.setValue(6)
+            window.canvas.set_quant_auto_review(False)
+            window.canvas.clear_auto_overlays()
+            with patch.object(window.canvas, "is_fixed_roi_mode", return_value=True):
+                # Placing a fixed ROI does not detect by itself...
+                window._on_roi_changed(QRectF(10, 10, 240, 70))
+                self.assertFalse(window.canvas.is_quant_auto_review())
+                # ...the button does.
+                window.param_panel._auto_lane_btn.click()
+                self.assertTrue(window.canvas.is_quant_auto_review())
+                self.assertEqual(len(window.canvas._auto_band_items), 6)
+                with patch.object(window, "_run_analysis") as analyze:
+                    window._trigger_analyze_from_return_shortcut()
+                analyze.assert_called_once()
         finally:
             window.close()
 

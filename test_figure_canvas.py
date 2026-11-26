@@ -1630,7 +1630,7 @@ class FigureModeStructureTests(unittest.TestCase):
 
         self.assertEqual(window._manual_detect_radio.text(), "Manual")
         self.assertFalse(window._auto_disclosure.isHidden())
-        self.assertFalse(window._auto_disclosure.is_expanded())
+        self.assertTrue(window._auto_disclosure.is_expanded())
         self.assertEqual(window._auto_disclosure._header.height(), 30)
         self.assertTrue(window._fixed_roi_disclosure.isHidden())
         self.assertTrue(window._selected_slot_lbl.isHidden())

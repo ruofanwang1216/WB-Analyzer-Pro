@@ -854,6 +854,8 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         options_layout.addRow(h_margin_lbl, self._auto_fit_h_margin)
         options_layout.addRow(v_margin_lbl, self._auto_fit_v_margin)
         self._auto_disclosure.body_layout().addWidget(self._auto_fit_options)
+        # The H/V margins are adjusted often enough to be shown from the start.
+        self._auto_disclosure.set_expanded(True)
 
         self._fixed_roi_disclosure = _InlineDisclosure("Fix ROI")
         self._fixed_roi_disclosure.setVisible(False)
@@ -2257,7 +2259,7 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         self._auto_fit_review_pending = False
         self._auto_detect_radio.setChecked(True)
         self._auto_disclosure.setVisible(True)
-        self._auto_disclosure.set_expanded(False)
+        self._auto_disclosure.set_expanded(True)
         self._fixed_roi_disclosure.setVisible(False)
         self._fixed_roi_disclosure.set_expanded(False)
         if self._auto_fit_overlay_handler is not None:

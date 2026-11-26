@@ -215,10 +215,10 @@ _ZH_CN = {
     "Unticked: measure the main band only. Ticked: measure both bands in one box.": (
         "在主条带旁边紧挨着发现了一条淡条带。不勾选：只测主条带；勾选：把两条带放在同一个框里一起测。"
     ),
-    "Detect the bands again inside the box you drew, for example after moving "
-    "or deleting boxes. Detection also runs by itself when you draw a box or "
-    "change the lane count.": (
-        "在你画的框内重新识别条带，比如移动或删除过小框之后。画框或修改泳道数时也会自动识别。"
+    "Detect the bands inside the box on the image: after placing a fixed ROI, "
+    "or again after moving or deleting boxes. A box you draw yourself is "
+    "detected automatically.": (
+        "在图上的框内识别条带：放好固定 ROI 之后点一下，或者移动、删除过小框后重新识别。自己画的框会自动识别。"
     ),
     "Image Transform": "图像显示调整",
     "Analyze follows the current Low / High / Gamma. Invert remains preview-only.": (
