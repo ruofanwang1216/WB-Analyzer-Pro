@@ -209,7 +209,7 @@ _ZH_CN = {
         "拖动小框可移动，拖边缘可改大小，方向键微调，Delete 删除，在你画的大框内空白处拖拽可补一个。\n"
         "按住空格键拖动可平移；滚动鼠标滚轮可缩放。"
     ),
-    "Auto-detect bands": "自动识别条带",
+    "Detect bands": "识别条带",
     "Include adjacent band": "包含相邻条带",
     "A faint second band was found right next to the main band. "
     "Unticked: measure the main band only. Ticked: measure both bands in one box.": (
@@ -263,7 +263,7 @@ _ZH_CN = {
     "Image Transform: Low / High / Gamma": "图像显示调整：低值／高值／伽马",
     "Rotate Image": "旋转图像",
     "Auto Straighten": "自动调正",
-    "Detect how tilted the bands are and level them": "自动识别条带的倾斜角度并调正",
+    "Detect how tilted the bands are and level them": "识别条带的倾斜角度并调正",
     "Auto-straighten: level tilted bands in one click (arrow: more rotate options)":
         "自动调正：一键把倾斜的条带调平（点右侧小箭头查看更多旋转选项）",
     "Auto-straighten: the bands are already level.": "自动调正：条带已经是水平的。",

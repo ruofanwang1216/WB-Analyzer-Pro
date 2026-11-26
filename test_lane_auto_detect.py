@@ -533,7 +533,7 @@ class LaneAutoDetectWindowTests(unittest.TestCase):
             layout = panel._manual_widget.layout()
             order = [layout.itemAt(i).widget() for i in range(layout.count())]
             self.assertLess(order.index(panel._fixed_roi_list), order.index(panel._auto_lane_btn))
-            self.assertEqual(panel._auto_lane_btn.text(), "Auto-detect bands")
+            self.assertEqual(panel._auto_lane_btn.text(), "Detect bands")
         finally:
             panel.close()
 
