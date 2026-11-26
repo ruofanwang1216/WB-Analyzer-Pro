@@ -209,17 +209,16 @@ _ZH_CN = {
         "拖动小框可移动，拖边缘可改大小，方向键微调，Delete 删除，在你画的大框内空白处拖拽可补一个。\n"
         "按住空格键拖动可平移；滚动鼠标滚轮可缩放。"
     ),
-    "Auto-detect lanes": "自动识别泳道",
+    "Auto-detect bands": "自动识别条带",
     "Include adjacent band": "包含相邻条带",
     "A faint second band was found right next to the main band. "
     "Unticked: measure the main band only. Ticked: measure both bands in one box.": (
         "在主条带旁边紧挨着发现了一条淡条带。不勾选：只测主条带；勾选：把两条带放在同一个框里一起测。"
     ),
-    "Draw one large ROI around the bands, set the lane count, then click to "
-    "find every lane and band automatically. Drag boxes to adjust, Delete to "
-    "remove, drag on empty space to add.": (
-        "先框一个包含所有条带的大区域并填好泳道数，再点此按钮自动找出每条泳道和条带。"
-        "拖动框可调整，Delete 键删除，在空白处拖拽可补画。"
+    "Detect the bands again inside the box you drew, for example after moving "
+    "or deleting boxes. Detection also runs by itself when you draw a box or "
+    "change the lane count.": (
+        "在你画的框内重新识别条带，比如移动或删除过小框之后。画框或修改泳道数时也会自动识别。"
     ),
     "Image Transform": "图像显示调整",
     "Analyze follows the current Low / High / Gamma. Invert remains preview-only.": (

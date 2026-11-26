@@ -231,14 +231,14 @@ class ParamPanel(QWidget):
         header_row.addWidget(lane_inc)
         manual_layout.addLayout(header_row)
 
-        self._auto_lane_btn = QPushButton("Auto-detect lanes")
+        self._auto_lane_btn = QPushButton("Auto-detect bands")
         self._auto_lane_btn.setObjectName("auto_lane_btn")
         self._auto_lane_btn.setFixedHeight(26)
         self._auto_lane_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._auto_lane_btn.setToolTip(
-            "Draw one large ROI around the bands, set the lane count, then click to "
-            "find every lane and band automatically. Drag boxes to adjust, Delete to "
-            "remove, drag on empty space to add."
+            "Detect the bands again inside the box you drew, for example after moving "
+            "or deleting boxes. Detection also runs by itself when you draw a box or "
+            "change the lane count."
         )
         self._auto_lane_btn.clicked.connect(self.auto_lane_detect_requested)
         manual_layout.addWidget(self._auto_lane_btn)
@@ -349,7 +349,7 @@ class ParamPanel(QWidget):
         self._lanes_label.setText(tr("Lanes", language))
         self._fixed_label.setText(tr("Fixed ROI", language))
         self._fix_btn.setText(tr("Fix", language))
-        self._auto_lane_btn.setText(tr("Auto-detect lanes", language))
+        self._auto_lane_btn.setText(tr("Auto-detect bands", language))
         self._manual_roi_btn.setText(tr("Draw manually", language))
         self._manual_roi_btn.setToolTip(tr(
             "Clear the boxes on this image and draw your own: drag around the "
@@ -363,9 +363,9 @@ class ParamPanel(QWidget):
             language,
         ))
         self._auto_lane_btn.setToolTip(tr(
-            "Draw one large ROI around the bands, set the lane count, then click to "
-            "find every lane and band automatically. Drag boxes to adjust, Delete to "
-            "remove, drag on empty space to add.",
+            "Detect the bands again inside the box you drew, for example after moving "
+            "or deleting boxes. Detection also runs by itself when you draw a box or "
+            "change the lane count.",
             language,
         ))
         self._cancel_fixed_btn.setText(tr("Cancel", language))
