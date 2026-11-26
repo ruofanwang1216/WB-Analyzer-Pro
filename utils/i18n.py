@@ -279,8 +279,6 @@ _ZH_CN = {
     "Expand Uploaded Files panel": "展开已上传文件面板",
     "New User Tutorial": "新手演示",
     "User Tutorial": "使用教程",
-    "Click any step on the left of the video to jump to it. Click the video or press Space to pause.":
-        "点击视频左侧的任一步骤可直接跳到该步；点击视频或按空格键可暂停。",
     "Hands-on practice": "动手练习",
     "Close the video and practise step by step with two built-in images.":
         "关闭视频，用两张内置图像一步一步动手练习。",

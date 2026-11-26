@@ -234,17 +234,11 @@ class VideoTutorialWindow(QDialog):
         self._mute_btn.setFixedWidth(40)
         self._mute_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         bar.addWidget(self._mute_btn)
-        self._hint = QLabel()
-        self._hint.setStyleSheet("color:#8FA3A3; font-size:11px;")
-        hint_row = QHBoxLayout()
-        hint_row.setContentsMargins(14, 8, 14, 0)
-        hint_row.addWidget(self._hint)
-        hint_row.addStretch(1)
         self._practice_btn = QPushButton()
         self._practice_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._practice_btn.clicked.connect(self._on_practice)
-        hint_row.addWidget(self._practice_btn)
-        root.addLayout(hint_row)
+        bar.addWidget(self._practice_btn)
+        root.addSpacing(8)
         root.addLayout(bar)
 
         # Imported here so the rest of the app never depends on multimedia.
@@ -298,12 +292,6 @@ class VideoTutorialWindow(QDialog):
     def set_language(self, language: str) -> None:
         self._language = language
         self.setWindowTitle(tr("User Tutorial", language))
-        self._hint.setText(
-            tr(
-                "Click any step on the left of the video to jump to it. Click the video or press Space to pause.",
-                language,
-            )
-        )
         self._practice_btn.setText(tr("Hands-on practice", language))
         self._practice_btn.setToolTip(
             tr("Close the video and practise step by step with two built-in images.", language)
