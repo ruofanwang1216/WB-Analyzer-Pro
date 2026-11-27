@@ -1090,13 +1090,27 @@ class MainWindow(AutoLaneMixin, FixedRoiMixin, ImageOperationsMixin, UploadMixin
 
     def _show_video_tutorial(self) -> None:
         """Open the quick-start video with clickable steps."""
-        from gui.video_tutorial import VideoTutorialWindow
+        try:
+            from gui.video_tutorial import VideoTutorialWindow
 
-        if self._video_tutorial_window is None:
-            window = VideoTutorialWindow(self, language=self._language)
-            window.practiceRequested.connect(self._show_tutorial_selector)
-            self._video_tutorial_window = window
-        self._video_tutorial_window.start()
+            if self._video_tutorial_window is None:
+                window = VideoTutorialWindow(self, language=self._language)
+                window.practiceRequested.connect(self._show_tutorial_selector)
+                self._video_tutorial_window = window
+            self._video_tutorial_window.start()
+        except Exception:
+            # Never leave the button dead: without the video player, go to
+            # the hands-on practice instead and say why.
+            log.exception("The tutorial video could not be opened")
+            self._video_tutorial_window = None
+            self._status_bar.showMessage(
+                tr(
+                    "The tutorial video could not be opened on this computer. Opening the hands-on practice instead.",
+                    self._language,
+                ),
+                8000,
+            )
+            self._show_tutorial_selector()
 
     def _show_tutorial_selector(self) -> None:
         chooser = TutorialModeDialog(self, language=self._language)

@@ -279,6 +279,8 @@ _ZH_CN = {
     "Expand Uploaded Files panel": "展开已上传文件面板",
     "New User Tutorial": "新手演示",
     "User Tutorial": "使用教程",
+    "The tutorial video could not be opened on this computer. Opening the hands-on practice instead.":
+        "这台电脑无法打开教程视频，已改为打开动手练习。",
     "The chart was drawn automatically, using the first group as the baseline. To choose the baseline yourself, click Select Negative Control under the Column Table.":
         "图表已自动生成，默认以第一组作为基准。如需自己指定基准，请点击列式数据表下方的“选择阴性对照”。",
     "Click the Group A column header. The chart is redrawn at once, normalized to Group A.":

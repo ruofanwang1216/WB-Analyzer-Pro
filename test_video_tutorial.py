@@ -75,3 +75,32 @@ def test_toolbar_button_opens_the_video_tutorial():
     assert window._video_tutorial_window.isVisible()
     window._video_tutorial_window.close()
     window.close()
+
+
+def test_packaged_app_keeps_what_the_video_player_needs():
+    """QtMultimedia fails to import in the installer when QtNetwork is excluded."""
+    from pathlib import Path
+
+    spec = (Path(__file__).resolve().parent / "pyinstaller.spec").read_text(encoding="utf-8")
+    excludes = spec.split("excludes=[", 1)[1].split("]", 1)[0]
+    assert "PySide6.QtNetwork" not in excludes
+    assert "PySide6.QtMultimedia" not in excludes
+    assert '"PySide6.QtMultimedia"' in spec
+
+
+def test_a_broken_video_player_falls_back_to_hands_on_practice(monkeypatch):
+    _app()
+    from gui.main_window import MainWindow
+
+    window = MainWindow()
+    opened = []
+    monkeypatch.setattr(window, "_show_tutorial_selector", lambda: opened.append(True))
+
+    def broken(*_args, **_kwargs):
+        raise ImportError("could not import module 'PySide6.QtNetwork'")
+
+    monkeypatch.setattr(vt, "VideoTutorialWindow", broken)
+    window._show_video_tutorial()
+    assert opened == [True]
+    assert window._video_tutorial_window is None
+    window.close()
