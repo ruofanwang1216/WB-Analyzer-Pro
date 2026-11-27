@@ -40,9 +40,9 @@ STEP_TITLES = (
     "Export",
 )
 # Second at which each step starts in the video.
-STEP_STARTS = (4.5, 8.2, 11.0, 15.2, 20.8, 25.0, 31.8, 38.2, 41.8, 60.0)
+STEP_STARTS = (4.5, 8.2, 11.0, 15.2, 21.8, 26.0, 32.8, 39.2, 42.8, 61.0)
 # The step list is on screen between these two times.
-STEPS_VISIBLE = (4.5, 66.0)
+STEPS_VISIBLE = (4.5, 67.0)
 # Step rows in video pixels: x, first row y, width, row height, row pitch.
 _STEP_X, _STEP_Y0, _STEP_W, _STEP_H, _STEP_PITCH = 44.0, 156.0, 370.0, 58.0, 64.0
 # Land slightly inside the step so its caption and highlight are already shown.
