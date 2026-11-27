@@ -125,4 +125,5 @@ ZH_CN_REDESIGN: dict[str, str] = {
     "Import an image first.": "请先导入图像。",
     "Click an image to select it first.": "请先点击选中一张图像。",
     "Drag around the lanes, then drag around the band, then Analyze.": "先拖动框选泳道，再拖动框选条带，然后定量分析。",
+    "Saved Blots": "已保存印迹图",
 }

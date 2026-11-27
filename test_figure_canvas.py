@@ -1520,7 +1520,7 @@ class FigureModeStructureTests(unittest.TestCase):
         self.assertFalse(hasattr(window, "_step_next_btn"))
         # Saved Blot Files open from a button, not an always-on list.
         self.assertFalse(window._step_panel.isAncestorOf(window._blot_file_list))
-        self.assertEqual(window._saved_blot_files_btn.text(), "Blots")
+        self.assertEqual(window._saved_blot_files_btn.text(), "Saved Blots")
         # Annotation tools sit above the preview, outside the panel.
         self.assertFalse(window._step_panel.isAncestorOf(window._bold_btn))
         self.assertTrue(window._annotation_panel.isAncestorOf(window._bold_btn))
@@ -1537,7 +1537,7 @@ class FigureModeStructureTests(unittest.TestCase):
         # Step 1: two full-width buttons, then three small ones in a row.
         self.assertEqual(
             button_texts,
-            ["New Blot Frames", "Add Conditions", "Templates", "+ Frame", "Blots"],
+            ["New Blot Frames", "Add Conditions", "Saved Templates", "+ Frame", "Saved Blots"],
         )
         self.assertNotIn("Apply Template", button_texts)
         self.assertNotIn("Apply Structure", button_texts)
@@ -1598,21 +1598,23 @@ class FigureModeStructureTests(unittest.TestCase):
         self.assertEqual(create_frame.height(), 36)
         self.assertEqual(window._saved_templates_btn.height(), 30)
         self.assertEqual(add_extra.height(), 30)
-        # The first two buttons span the row; the small three share one.
+        # The first two buttons span the row; the two saved libraries share
+        # the next one; + Frame has the last.
         conditions = next(
             button for button in window._grp1.findChildren(QPushButton)
             if button.text() == "Add Conditions"
         )
         grid = create_frame.parentWidget().layout()
-        self.assertEqual(grid.getItemPosition(grid.indexOf(create_frame)), (0, 0, 1, 3))
-        self.assertEqual(grid.getItemPosition(grid.indexOf(conditions)), (1, 0, 1, 3))
+        self.assertEqual(grid.getItemPosition(grid.indexOf(create_frame)), (0, 0, 1, 2))
+        self.assertEqual(grid.getItemPosition(grid.indexOf(conditions)), (1, 0, 1, 2))
         self.assertEqual(
             [
                 grid.getItemPosition(grid.indexOf(button))[:2]
-                for button in (window._saved_templates_btn, add_extra, window._saved_blot_files_btn)
+                for button in (window._saved_templates_btn, window._saved_blot_files_btn)
             ],
-            [(2, 0), (2, 1), (2, 2)],
+            [(2, 0), (2, 1)],
         )
+        self.assertEqual(grid.getItemPosition(grid.indexOf(add_extra)), (3, 0, 1, 2))
         self.assertEqual(create_frame.objectName(), "step1PrimaryButton")
         self.assertEqual(add_extra.objectName(), "step1TextButton")
         create_condition = next(
@@ -3205,13 +3207,13 @@ class FigureModeStructureTests(unittest.TestCase):
             ["布局", "填充", "导出"],
         )
         self.assertIn("按 Enter/Return", window._fill_help_btn.toolTip())
-        self.assertEqual(window._saved_blot_files_btn.text(), "已存文件")
+        self.assertEqual(window._saved_blot_files_btn.text(), "已保存印迹图")
         window.set_language("en")
         self.assertEqual(
             [heading.text() for heading in window._step_headings],
             ["Layout", "Fill", "Export"],
         )
-        self.assertEqual(window._saved_blot_files_btn.text(), "Blots")
+        self.assertEqual(window._saved_blot_files_btn.text(), "Saved Blots")
         self.assertIn("Press Enter/Return", window._fill_help_btn.toolTip())
 
     def test_saved_blot_files_open_in_a_dialog_and_return_the_list(self) -> None:
@@ -3231,6 +3233,53 @@ class FigureModeStructureTests(unittest.TestCase):
         # The list is handed back so the next opening works too.
         self.assertTrue(window.isAncestorOf(window._blot_file_list))
         self.assertTrue(window._grp5.isHidden())
+
+    def test_saved_blot_files_dialog_previews_the_selected_file(self) -> None:
+        old_dir = figure_mode_module.USER_BLOT_FILES_DIR
+        try:
+            with TemporaryDirectory() as tmp:
+                figure_mode_module.USER_BLOT_FILES_DIR = Path(tmp) / "blot_files"
+                window = FigureModeWindow()
+                window._project = TemplateEngine.build_project("normal_wb", 1, 3, 5)
+                window._write_blot_file("blot_three", "Three frames")
+                window._project = TemplateEngine.build_project("normal_wb", 1, 1, 4)
+                window._write_blot_file("blot_one", "One frame")
+                window._project = None
+                seen = []
+
+                def inspect_and_close() -> None:
+                    dialog = self._app.activeModalWidget()
+                    canvas = window._blot_file_preview_canvas
+                    seen.append(dialog.isAncestorOf(canvas))
+                    seen.append(canvas.isVisibleTo(dialog))
+                    # The newest file is selected and drawn with its frames.
+                    frames_first = len(canvas._blot_frames)
+                    items = [
+                        window._blot_file_list.item(i)
+                        for i in range(window._blot_file_list.count())
+                    ]
+                    other = next(
+                        item for item in items
+                        if item.data(Qt.ItemDataRole.UserRole)
+                        != window._current_blot_file_selection()
+                    )
+                    window._blot_file_list.setCurrentItem(other)
+                    self._app.processEvents()
+                    seen.append((frames_first, len(canvas._blot_frames)))
+                    dialog.reject()
+
+                QTimer.singleShot(0, inspect_and_close)
+                window._saved_blot_files_btn.click()
+
+                self.assertEqual(seen[:2], [True, True])
+                # One file has one frame, the other three; the preview follows
+                # the selection.
+                self.assertEqual(sorted(seen[2]), [1, 3])
+                self.assertIsNone(window._blot_file_preview_canvas)
+                # The real figure was not touched by previewing.
+                self.assertIsNone(window._project)
+        finally:
+            figure_mode_module.USER_BLOT_FILES_DIR = old_dir
 
     def test_new_overlay_text_is_selected_and_enables_font_controls(self) -> None:
         window = FigureModeWindow()

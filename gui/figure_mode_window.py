@@ -31,7 +31,7 @@ from pathlib import Path
 from statistics import median
 from typing import Callable
 
-from PySide6.QtCore import Qt, QRectF, QSize, QSizeF, Signal
+from PySide6.QtCore import Qt, QRectF, QSize, QSizeF, Signal, QTimer
 from PySide6.QtGui import (
     QAction, QKeySequence, QShortcut,
 )
@@ -40,7 +40,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QHBoxLayout, QLabel, QMessageBox, QPushButton,
     QFileDialog,  # noqa: F401 - used by the mixins; kept importable from here
     QInputDialog, QListWidget, QListWidgetItem,
-    QComboBox, QRadioButton, QScrollArea, QSizePolicy, QSpinBox, QDoubleSpinBox, QStackedWidget,
+    QComboBox, QRadioButton, QScrollArea, QSizePolicy, QSplitter, QSpinBox, QDoubleSpinBox, QStackedWidget,
     QToolButton, QToolTip, QVBoxLayout, QWidget,
 )
 
@@ -79,6 +79,7 @@ from gui.figure_mode_widgets import (
     _FramePreviewWidget,
     _InlineDisclosure,
     _TemplateNameLabel,
+    _TemplatePreviewCanvas,
 )
 from gui.figure_mode_templates import TemplateLibraryMixin
 from gui.figure_mode_toolbar import CanvasToolbarMixin
@@ -475,10 +476,8 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             heading.setText(tr(self._STEP_TITLES[index - 1], self._language))
         self._step_desc_lbl.setText(tr(self._STEP_DESCRIPTIONS[1], self._language))
         self._fill_help_btn.setToolTip(self._step_desc_lbl.text())
-        # "Blots" alone already means something else in Chinese.
-        self._saved_blot_files_btn.setText(
-            "Blots" if self._language != "zh_CN" else tr("Blot Files", self._language)
-        )
+        self._saved_blot_files_btn.setText(tr("Saved Blots", self._language))
+        self._saved_templates_btn.setText(tr("Saved Templates", self._language))
 
     def _show_fill_help(self) -> None:
         QToolTip.showText(
@@ -488,20 +487,56 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
         )
 
     def _show_saved_blot_files_dialog(self) -> None:
-        """Pick a saved Blot File from a list, the way Saved Templates works."""
+        """Pick a saved Blot File, with a preview, the way Saved Templates works."""
         dialog = QDialog(self)
-        dialog.setWindowTitle(tr("Saved Blot Files", self._language))
+        dialog.setWindowTitle(tr("Saved Blots", self._language))
         dialog.setModal(True)
-        dialog.setMinimumSize(380, 420)
-        dialog.setStyleSheet("QDialog { background:#FFFFFF; }")
+        dialog.resize(720, 440)
+        dialog.setMinimumSize(560, 360)
+        dialog.setStyleSheet(
+            "QDialog { background:#FFFFFF; }"
+            "QLabel#templateBrowserTitle { color:#26382F; font-size:12px; font-weight:700; }"
+        )
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(16, 16, 16, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(7)
+
         self._blot_file_list.setMaximumHeight(16777215)
-        self._grp5.setParent(dialog)
-        layout.addWidget(self._grp5, 1)
+        self._grp5.setParent(splitter)
+        splitter.addWidget(self._grp5)
         self._grp5.show()
+
+        preview_panel = QWidget()
+        preview_layout = QVBoxLayout(preview_panel)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.setSpacing(5)
+        preview_title = QLabel(tr("Preview", self._language))
+        preview_title.setObjectName("templateBrowserTitle")
+        preview_layout.addWidget(preview_title)
+        preview_canvas = _TemplatePreviewCanvas(preview_panel)
+        preview_canvas.setInteractive(False)
+        preview_canvas.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        preview_canvas.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        preview_canvas.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        preview_canvas.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        preview_canvas.setStyleSheet(
+            "QGraphicsView { background:#FFFFFF; border:1px solid #D1DDD7; border-radius:7px; }"
+        )
+        preview_layout.addWidget(preview_canvas, 1)
+        splitter.addWidget(preview_panel)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([240, 460])
+        layout.addWidget(splitter, 1)
+
+        self._blot_file_preview_canvas = preview_canvas
+        preview_on_select = lambda current, _previous: self._refresh_blot_file_preview(current)
+        self._blot_file_list.currentItemChanged.connect(preview_on_select)
         self._populate_blot_file_list()
+        self._refresh_blot_file_preview(self._blot_file_list.currentItem())
 
         def close_if_opened() -> None:
             selected = self._current_blot_file_selection()
@@ -516,11 +551,53 @@ class FigureModeWindow(FigureExportMixin, FigureStructureMixin, CanvasToolbarMix
             dialog.exec()
         finally:
             open_btn.clicked.disconnect(close_if_opened)
+            self._blot_file_list.currentItemChanged.disconnect(preview_on_select)
+            self._blot_file_preview_canvas = None
             # Hand the list back before the dialog is destroyed.
             self._grp5.setParent(self)
             self._grp5.hide()
             self._blot_file_dialog = None
             dialog.deleteLater()
+
+    def _refresh_blot_file_preview(self, item: QListWidgetItem | None) -> None:
+        """Draw the selected saved Blot File, images included, in the preview."""
+        canvas = getattr(self, "_blot_file_preview_canvas", None)
+        if canvas is None:
+            return
+        canvas.clear_all()
+        canvas.setToolTip("")
+        if item is None:
+            return
+        blot_file_id = str(item.data(Qt.ItemDataRole.UserRole) or "")
+        if not blot_file_id:
+            return
+        try:
+            data = json.loads(self._blot_file_path(blot_file_id).read_text(encoding="utf-8"))
+            if data.get("format") != "wb_blot_file":
+                raise ValueError("not a Blot File")
+            project = self._project_from_blot_file_data(data.get("project", {}))
+            styles = TemplateEngine._decode_text_style_overrides(
+                data.get("text_style_overrides", [])
+            )
+            canvas_state = data.get("canvas_state") or {}
+            if canvas_state:
+                canvas.restore_state_snapshot(canvas_state, repopulate_scene=False)
+            layout = LayoutEngine().compute(project)
+            self._apply_text_styles_to_layout(layout, styles)
+            hidden = canvas.hidden_text_keys()
+            if hidden:
+                layout.items = [
+                    layout_item
+                    for layout_item in layout.items
+                    if layout_item.source_ref is None
+                    or layout_item.source_ref.key() not in hidden
+                ]
+            canvas.render(layout, project)
+            self._fit_template_preview(canvas)
+            QTimer.singleShot(0, lambda: self._fit_template_preview(canvas))
+        except Exception as exc:
+            canvas.clear_all()
+            canvas.setToolTip(f"Unable to preview this Blot File: {exc}")
 
     # ── Saved template library ────────────────────────────────────────────
 

@@ -64,7 +64,7 @@ class ChineseLocalizationTests(unittest.TestCase):
         ]
         self.assertEqual(
             step1_buttons,
-            ["新建印迹图框", "添加条件", "模板", "+ 图框", "已存文件"],
+            ["新建印迹图框", "添加条件", "已保存模板", "+ 图框", "已保存印迹图"],
         )
 
         workspace.set_language(LANG_EN)

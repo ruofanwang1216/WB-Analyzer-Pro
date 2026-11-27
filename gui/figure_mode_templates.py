@@ -63,8 +63,9 @@ class TemplateLibraryMixin:
         self._template_list.setParent(self)
         self._template_list.hide()
 
-        # Two full-width buttons start a layout; one row of three small
-        # buttons reuses or extends one.
+        # Two full-width buttons start a layout.  Under them, the two saved
+        # libraries side by side (named so a new user knows they hold saved
+        # work), then + Frame.
         actions = QWidget()
         actions.setObjectName("step1Flow")
         actions.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -73,7 +74,7 @@ class TemplateLibraryMixin:
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setHorizontalSpacing(6)
         actions_layout.setVerticalSpacing(8)
-        for column in range(3):
+        for column in range(2):
             actions_layout.setColumnStretch(column, 1)
 
         def styled(
@@ -114,17 +115,17 @@ class TemplateLibraryMixin:
             "New layout: choose how many blot frames and lanes", 36,
         )
         create_btn.clicked.connect(self._on_create_template)
-        actions_layout.addWidget(create_btn, 0, 0, 1, 3)
+        actions_layout.addWidget(create_btn, 0, 0, 1, 2)
 
         create_condition_btn = styled(
             QPushButton("Add Conditions"), "step1SecondaryButton", "outline",
             "Add the +/− condition labels above the lanes", 36,
         )
         create_condition_btn.clicked.connect(self._on_create_condition_template)
-        actions_layout.addWidget(create_condition_btn, 1, 0, 1, 3)
+        actions_layout.addWidget(create_condition_btn, 1, 0, 1, 2)
 
         self._saved_templates_btn = styled(
-            QPushButton("Templates"), "step1SavedTemplatesButton", "plain",
+            QPushButton("Saved Templates"), "step1SavedTemplatesButton", "plain",
             "Reuse a saved layout", 30,
         )
         self._saved_templates_btn.clicked.connect(self._show_saved_templates_dialog)
@@ -136,14 +137,14 @@ class TemplateLibraryMixin:
             30,
         )
         add_blot_btn.clicked.connect(self._on_add_blot_frame)
-        actions_layout.addWidget(add_blot_btn, 2, 1)
+        actions_layout.addWidget(add_blot_btn, 3, 0, 1, 2)
 
         self._saved_blot_files_btn = styled(
-            QPushButton("Blots"), "step1SavedBlotFilesButton", "plain",
+            QPushButton("Saved Blots"), "step1SavedBlotFilesButton", "plain",
             "Reopen a figure you saved earlier", 30,
         )
         self._saved_blot_files_btn.clicked.connect(self._show_saved_blot_files_dialog)
-        actions_layout.addWidget(self._saved_blot_files_btn, 2, 2)
+        actions_layout.addWidget(self._saved_blot_files_btn, 2, 1)
         bl.addWidget(actions)
 
         # Hidden state controls keep structure values in sync with loaded or
