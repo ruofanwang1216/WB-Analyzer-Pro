@@ -69,6 +69,10 @@ hiddenimports = [
     "PySide6.QtCore",
     "PySide6.QtGui",
     "PySide6.QtWidgets",
+    # User Tutorial video.  QtMultimedia cannot be imported without QtNetwork,
+    # so QtNetwork must not be excluded below.
+    "PySide6.QtNetwork",
+    "PySide6.QtMultimedia",
     "pandas",
     "numpy",
     "scipy",
@@ -93,7 +97,6 @@ a = Analysis(
         "tkinter",
         "PySide6.QtQml",
         "PySide6.QtQuick",
-        "PySide6.QtNetwork",
         "PySide6.QtWebEngineCore",
         "PySide6.QtWebEngineWidgets",
     ],

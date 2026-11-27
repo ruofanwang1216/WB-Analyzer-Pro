@@ -110,6 +110,8 @@ class _OverlayScene(QGraphicsScene):
 class ResizableBlotFrameItem(QGraphicsRectItem):
     _HANDLE_MARGIN = 7.0
     _MIN_SIZE = 18.0
+    # Screen pixels the pointer must travel before a press becomes a move.
+    _MOVE_START_DISTANCE_PX = 6
 
     def __init__(
         self,
@@ -129,6 +131,8 @@ class ResizableBlotFrameItem(QGraphicsRectItem):
         self._active_handle: str | None = None
         self._start_rect = QRectF()
         self._start_scene_pos = QPointF()
+        self._start_screen_pos = QPointF()
+        self._hover_cursor_shape: Qt.CursorShape | None = None
         self._moved_during_drag = False
         self._selected = False
         self._apply_style()
@@ -158,15 +162,24 @@ class ResizableBlotFrameItem(QGraphicsRectItem):
         return None
 
     def hoverMoveEvent(self, event) -> None:
+        # Only cursors that macOS provides natively are used.  Qt draws the
+        # Size* cursors from bitmaps, and building one of those while the
+        # pointer moved over a frame crashed the app inside CoreGraphics
+        # (segfault in QImage::toCGImage, macOS 27 / Qt 6.11).
         handle = self._handle_for_pos(event.pos())
         if handle == "bottom_right":
-            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+            shape = Qt.CursorShape.CrossCursor
         elif handle == "right":
-            self.setCursor(Qt.CursorShape.SizeHorCursor)
+            shape = Qt.CursorShape.SplitHCursor
         elif handle == "bottom":
-            self.setCursor(Qt.CursorShape.SizeVerCursor)
+            shape = Qt.CursorShape.SplitVCursor
         else:
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            shape = Qt.CursorShape.PointingHandCursor
+        # Hover events arrive on every pointer move; touch the cursor only
+        # when it actually changes.
+        if shape != self._hover_cursor_shape:
+            self._hover_cursor_shape = shape
+            self.setCursor(shape)
         super().hoverMoveEvent(event)
 
     def mousePressEvent(self, event) -> None:
@@ -185,6 +198,7 @@ class ResizableBlotFrameItem(QGraphicsRectItem):
         self._active_handle = self._handle_for_pos(event.pos())
         self._start_rect = QRectF(self.rect())
         self._start_scene_pos = event.scenePos()
+        self._start_screen_pos = self._event_screen_pos(event)
         self._moved_during_drag = False
         if self._active_handle is None:
             self._active_handle = "move"
@@ -194,12 +208,29 @@ class ResizableBlotFrameItem(QGraphicsRectItem):
             self._canvas._notify_state_about_to_change()
         event.accept()
 
+    @staticmethod
+    def _event_screen_pos(event) -> QPointF:
+        """Pointer position in screen pixels (scene units as a fallback)."""
+        screen_pos = getattr(event, "screenPos", None)
+        point = screen_pos() if callable(screen_pos) else event.scenePos()
+        return QPointF(point)
+
     def mouseMoveEvent(self, event) -> None:
         if self._active_handle is None:
             event.accept()
             return
         delta = event.scenePos() - self._start_scene_pos
         if self._active_handle == "move":
+            if not self._moved_during_drag:
+                # A click that wobbles a few pixels is still a click: the
+                # frame only starts to move after a deliberate drag.
+                travelled = self._event_screen_pos(event) - self._start_screen_pos
+                if (
+                    abs(travelled.x()) + abs(travelled.y())
+                    < self._MOVE_START_DISTANCE_PX
+                ):
+                    event.accept()
+                    return
             self._canvas._preview_blot_frame_move(delta)
             self._moved_during_drag = True
             event.accept()

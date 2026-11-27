@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
+import json
 from pathlib import Path
 import re
-import struct
 from typing import Callable
 from xml.etree import ElementTree as ET
 
@@ -412,12 +412,17 @@ def _extract_biorad_raw_image_candidate_from_metadata(
     if endian not in {"little", "big"}:
         endian = "little"
 
+    # The pixel data is written exactly as acquired.  Image Lab's own display
+    # settings (Low / High / Gamma / Invert) travel next to it as metadata so
+    # the image opens looking the same, while every measurement still reads
+    # the untouched signal.  Baking the stretch into the pixels would clip
+    # anything brighter than the High setting.
     raw_pixels = image_payload[:expected_raw_bytes]
+    image_description = None
     if display_transform is not None:
-        raw_pixels = _apply_display_transform_to_raw_pixels(
-            raw_pixels,
-            byteorder=endian,
-            transform=display_transform,
+        image_description = _display_settings_description(
+            display_transform,
+            white_is_zero=white_is_zero,
         )
 
     if debug:
@@ -437,8 +442,8 @@ def _extract_biorad_raw_image_candidate_from_metadata(
     extraction_note = f"wrapped raw {width}x{height} 16-bit payload into TIFF"
     if display_transform is not None:
         extraction_note += (
-            f" with Image Lab display stretch {display_transform.low}-"
-            f"{display_transform.high}"
+            f"; Image Lab display range {display_transform.low}-"
+            f"{display_transform.high} kept as metadata"
         )
 
     return TiffCandidate(
@@ -454,9 +459,33 @@ def _extract_biorad_raw_image_candidate_from_metadata(
             height=height,
             byteorder=endian,
             white_is_zero=white_is_zero,
+            image_description=image_description,
         ),
         extraction_note=extraction_note,
     )
+
+
+def _display_settings_description(
+    transform: _DisplayTransform,
+    *,
+    white_is_zero: bool,
+) -> str:
+    """Serialise Image Lab display settings for the TIFF ImageDescription tag.
+
+    ``inverted`` follows WB Analyzer's convention (True = strong signal is
+    drawn dark).  Image Lab's default view of a white-is-zero image is dark
+    bands on a light background; its "invert" option flips that.
+    """
+    payload = {
+        "wb_analyzer_display": {
+            "low": int(transform.low),
+            "high": int(transform.high),
+            "gamma": float(transform.gamma),
+            "inverted": bool(white_is_zero) != bool(transform.inverted),
+            "source": "Image Lab",
+        }
+    }
+    return json.dumps(payload, separators=(",", ":"))
 
 
 def _extract_display_transform_from_parts(parts: list[_PartPayload]) -> _DisplayTransform | None:
@@ -510,33 +539,6 @@ def _extract_display_transform_from_xml(xml_payload: bytes) -> _DisplayTransform
     inverted = transform_element.attrib.get("invert", "false").strip().lower() == "true"
 
     return _DisplayTransform(low=low, high=high, gamma=gamma, inverted=inverted)
-
-
-def _apply_display_transform_to_raw_pixels(
-    pixel_bytes: bytes,
-    *,
-    byteorder: str,
-    transform: _DisplayTransform,
-) -> bytes:
-    if byteorder not in {"little", "big"}:
-        byteorder = "little"
-    if len(pixel_bytes) % 2 != 0:
-        return pixel_bytes
-
-    pack_prefix = "<" if byteorder == "little" else ">"
-    count = len(pixel_bytes) // 2
-    values = struct.unpack(f"{pack_prefix}{count}H", pixel_bytes)
-    span = max(1, transform.high - transform.low)
-    out = bytearray(len(pixel_bytes))
-    for index, value in enumerate(values):
-        normalized = (min(max(value, transform.low), transform.high) - transform.low) / span
-        if abs(transform.gamma - 1.0) > 1e-6:
-            normalized = normalized ** transform.gamma
-        if transform.inverted:
-            normalized = 1.0 - normalized
-        scaled = int(round(normalized * 65535.0))
-        struct.pack_into(f"{pack_prefix}H", out, index * 2, max(0, min(65535, scaled)))
-    return bytes(out)
 
 
 def _build_candidates_from_offsets(

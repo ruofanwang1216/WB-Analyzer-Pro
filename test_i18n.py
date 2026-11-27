@@ -59,10 +59,13 @@ class ChineseLocalizationTests(unittest.TestCase):
         self.assertFalse(hasattr(workspace, "_text_rotation_spin"))
         self.assertEqual(workspace._export_pdf_btn.toolTip(), "将图形导出为 PDF")
         self.assertEqual(workspace._export_tiff_btn.toolTip(), "将图形导出为 TIFF")
-        step1_labels = [label.text() for label in workspace._grp1.findChildren(QLabel)]
-        self.assertIn("印迹图框", step1_labels)
-        self.assertIn("印迹条件", step1_labels)
-        self.assertIn("复用之前的布局", step1_labels)
+        step1_buttons = [
+            button.text() for button in workspace._grp1.findChildren(QPushButton)
+        ]
+        self.assertEqual(
+            step1_buttons,
+            ["新建印迹图框", "添加条件", "已保存模板", "+ 图框", "已保存印迹图"],
+        )
 
         workspace.set_language(LANG_EN)
         self.assertEqual(workspace._grp1._title_label.text(), "Step 1: Choose Layout")
@@ -78,7 +81,7 @@ class ChineseLocalizationTests(unittest.TestCase):
         self.assertEqual(workspace._grp1.title_text(), "步骤 1：选择布局")
         self.assertEqual(workspace._grp4.title_text(), "步骤 2：填充印迹图框")
         self.assertEqual(workspace._annot_undo_btn.text(), "撤销")
-        self.assertEqual(workspace._fit_center_btn.text(), "适配并居中")
+        self.assertEqual(workspace._fit_center_btn.text(), "适应")
 
     def test_wb_figure_dialog_created_after_language_change_is_chinese(self) -> None:
         workspace = FigureModeWindow()
@@ -114,9 +117,9 @@ class ChineseLocalizationTests(unittest.TestCase):
 
         self.assertEqual(chooser.windowTitle(), "灰度定量图生成")
         self.assertEqual(setup.windowTitle(), "列式表设置")
-        self.assertEqual(table.windowTitle(), "列式数据表")
+        self.assertEqual(table.windowTitle(), "数据表")
         self.assertEqual(table._table.horizontalHeaderItem(0).text(), "重复")
-        self.assertEqual(table._table.item(0, 1).text(), "目的蛋白条带")
+        self.assertEqual(table._table.item(0, 1).text(), "目的蛋白")
 
 
 if __name__ == "__main__":

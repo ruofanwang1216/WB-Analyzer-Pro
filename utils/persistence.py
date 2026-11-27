@@ -67,7 +67,7 @@ class AppPersistence:
             },
             "ui": {
                 "mode": "manual",
-                "files_panel_collapsed": False,
+                "sidebar_collapsed": False,
                 "language": "en",
             },
             "debug": {
@@ -145,14 +145,19 @@ class AppPersistence:
         mode: str | None = None,
         files_panel_collapsed: bool | None = None,
         language: str | None = None,
+        theme: str | None = None,
     ) -> None:
         ui_payload: dict[str, Any] = {}
         if mode is not None:
             ui_payload["mode"] = mode
         if files_panel_collapsed is not None:
-            ui_payload["files_panel_collapsed"] = bool(files_panel_collapsed)
+            # New key: the redesigned sidebar must not inherit the old rail's
+            # collapsed state, which used to be the way to reach lane settings.
+            ui_payload["sidebar_collapsed"] = bool(files_panel_collapsed)
         if language in {"en", "zh_CN"}:
             ui_payload["language"] = language
+        if theme in {"light", "dark"}:
+            ui_payload["theme"] = theme
         if ui_payload:
             self.update_config(ui=ui_payload)
 

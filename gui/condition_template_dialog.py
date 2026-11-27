@@ -11,8 +11,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypedDict
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QSignalBlocker, QTimer
-from PySide6.QtGui import QAction, QColor, QFont, QPainter, QPen
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QSignalBlocker, QTimer
+from PySide6.QtGui import QAction, QColor, QFont, QPainter, QPen, QRegion
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QGridLayout,
     QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QSpinBox,
@@ -58,7 +58,7 @@ class LaneGroupControl(TypedDict, total=False):
     custom_action: QAction
     custom_btn: QPushButton
     selector_column: QWidget
-    selector_layout: QVBoxLayout
+    selector_layout: QHBoxLayout
     individual_remove_btn: QToolButton
     custom_ranges: list[tuple[int, int]] | None
     custom_lane_count: int | None
@@ -249,6 +249,52 @@ def request_custom_panel_lane_ranges(
     return result
 
 
+class _MagnifiedPreview(QWidget):
+    """Shows the condition preview enlarged, as the dialog's main element.
+
+    The real preview widget keeps its own size, which the figure layout
+    depends on; this view redraws it through a scaled painter so the text
+    stays sharp.
+    """
+
+    def __init__(self, source: QWidget, zoom: float, parent=None) -> None:
+        super().__init__(parent)
+        self._source = source
+        self._zoom = float(zoom)
+        source.installEventFilter(self)
+        self._sync_size()
+
+    def zoom(self) -> float:
+        return self._zoom
+
+    def _sync_size(self) -> None:
+        self.setFixedSize(
+            int(round(self._source.width() * self._zoom)),
+            int(round(self._source.height() * self._zoom)),
+        )
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt API
+        # Resize only: rendering the source raises paint events on it, so
+        # reacting to those here would repaint forever.
+        if watched is self._source and event.type() == QEvent.Type.Resize:
+            self._sync_size()
+            self.update()
+        return super().eventFilter(watched, event)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802 - Qt API
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        painter.scale(self._zoom, self._zoom)
+        self._source.render(
+            painter,
+            QPoint(0, 0),
+            QRegion(),
+            QWidget.RenderFlag.DrawChildren,
+        )
+        painter.end()
+
+
 class ConditionTemplateDialogController:
     """Own the condition dialog, draft state, synchronization, and signals.
 
@@ -293,13 +339,12 @@ class ConditionTemplateDialogController:
         self.shared_lane_count = max(1, min(self.lane_counts))
         self.dialog = QDialog(self._parent)
         self.dialog.setObjectName('modernConditionDialog')
-        self.dialog.setWindowTitle('Create Blot Condition Template')
+        self.dialog.setWindowTitle('Add Conditions')
         self.dialog.setModal(True)
         self.dialog.setMinimumWidth(620)
         self.dialog.setStyleSheet(
-            "QDialog#modernConditionDialog { background:#F3F6F5; "
-            "color:#26322D; font-family:'Avenir Next','Helvetica Neue',Arial; "
-            "font-size:12px; } "
+            "QDialog#modernConditionDialog { background:#EEF2F0; "
+            "color:#1C2622; font-size:13px; } "
             "QDialog#modernConditionDialog QLabel, "
             "QDialog#modernConditionDialog QWidget#conditionRowsHost, "
             "QDialog#modernConditionDialog QWidget#conditionRowsShared, "
@@ -313,56 +358,82 @@ class ConditionTemplateDialogController:
             "QDialog#modernConditionDialog "
             "QWidget#conditionLaneDistributionColumn { "
             "background:transparent; border:none; } "
-            "QFrame#conditionRowsCard, QFrame#conditionLaneGroupsCard { "
-            "background:#FFFFFF; border:1px solid #D6E0DB; "
-            "border-radius:10px; } "
-            "QLabel#conditionSectionTitle { color:#214B39; font-size:12px; "
+            # The two sections read as one white card split by a hairline.
+            "QFrame#conditionRowsCard { background:#FFFFFF; "
+            "border:1px solid #D9E0DC; border-bottom:1px solid #E4E9E6; "
+            "border-top-left-radius:10px; border-top-right-radius:10px; "
+            "border-bottom-left-radius:0px; border-bottom-right-radius:0px; } "
+            "QFrame#conditionLaneGroupsCard { background:#FFFFFF; "
+            "border:1px solid #D9E0DC; border-top:none; "
+            "border-top-left-radius:0px; border-top-right-radius:0px; "
+            "border-bottom-left-radius:10px; border-bottom-right-radius:10px; } "
+            "QLabel#conditionSectionTitle { color:#1C2622; font-size:13px; "
             "font-weight:600; } "
-            "QLabel#conditionFieldLabel { color:#34423B; font-size:11px; } "
-            "QLabel#conditionGroupHeading { color:#285A44; font-size:11px; "
+            "QLabel#conditionFieldLabel { color:#3B4A43; font-size:13px; } "
+            "QLabel#conditionGroupHeading { color:#4A5A53; font-size:12px; "
             "font-weight:600; } "
-            "QLabel#conditionPanelLabel { color:#34423B; font-size:11px; } "
-            "QLabel#conditionHint { color:#6C7B74; font-size:10px; } "
-            "QSpinBox, QComboBox { background:#FFFFFF; color:#26322D; "
-            "border:1px solid #BCC9C3; border-radius:5px; padding:3px 6px; "
-            "min-height:20px; } "
-            "QSpinBox:focus, QComboBox:focus { border:1px solid #5E9A7F; } "
+            "QLabel#conditionPanelLabel { color:#3B4A43; font-size:12px; } "
+            "QLabel#conditionHint { color:#5A6B63; font-size:12px; } "
+            "QSpinBox, QComboBox { background:#FFFFFF; color:#1C2622; "
+            "border:1px solid #C9D3CE; border-radius:6px; padding:3px 6px; "
+            "min-height:22px; font-size:14px; font-weight:600; } "
+            "QSpinBox:focus, QComboBox:focus { border:1px solid #1F6B4A; } "
             "QToolButton[conditionModeSelector=\"true\"] { "
-            "background:#F7FAF8; border:1px solid #C5D1CB; "
-            "border-radius:4px; padding:2px 5px; color:#34423B; "
-            "font-size:10px; text-align:center; } "
+            "background:#FFFFFF; border:1px solid #C9D3CE; "
+            "border-radius:6px; padding:2px 6px; color:#3B4A43; "
+            "font-size:12px; text-align:center; } "
             "QToolButton[conditionModeSelector=\"true\"]:hover { "
-            "border-color:#7FA590; background:#EDF5F1; } "
+            "border-color:#1F6B4A; background:#E3EFE8; } "
             "QToolButton[conditionModeSelector=\"true\"]::menu-indicator { "
             "image:none; width:0px; } "
-            "QMenu#conditionModeMenu { background:#FFFFFF; color:#26322D; "
-            "border:1px solid #C5D1CB; padding:4px; } "
-            "QMenu#conditionModeMenu::item { padding:5px 20px 5px 8px; "
+            "QMenu#conditionModeMenu { background:#FFFFFF; color:#1C2622; "
+            "border:1px solid #C9D3CE; padding:4px; } "
+            "QMenu#conditionModeMenu::item { padding:6px 20px 6px 8px; "
             "border-radius:4px; } "
-            "QMenu#conditionModeMenu::item:selected { background:#E4F0EA; "
-            "color:#214B39; } "
-            "QPushButton#conditionCreateButton { background:#315F4B; "
-            "border:1px solid #315F4B; border-radius:6px; padding:6px 18px; "
-            "color:#FFFFFF; font-weight:600; } "
-            "QPushButton#conditionCreateButton:hover { background:#274E3D; } "
+            "QMenu#conditionModeMenu::item:selected { background:#E3EFE8; "
+            "color:#134A32; } "
+            "QPushButton#conditionCreateButton { background:#1F6B4A; "
+            "border:1px solid #1F6B4A; border-radius:8px; padding:8px 22px; "
+            "color:#FFFFFF; font-size:13px; font-weight:600; } "
+            "QPushButton#conditionCreateButton:hover { background:#134A32; } "
             "QPushButton#conditionCancelButton { background:#FFFFFF; "
-            "border:1px solid #C5D1CB; border-radius:6px; padding:6px 18px; "
-            "color:#34423B; }"
+            "border:1px solid #C9D3CE; border-radius:8px; padding:8px 22px; "
+            "color:#3B4A43; font-size:13px; } "
+            "QPushButton#conditionCancelButton:hover { background:#E3EFE8; "
+            "border-color:#1F6B4A; }"
         )
         self.outer = QVBoxLayout(self.dialog)
-        self.outer.setContentsMargins(22, 20, 22, 18)
-        self.outer.setSpacing(14)
+        self.outer.setContentsMargins(20, 20, 20, 18)
+        # Spacing is added explicitly so the two form sections can touch.
+        self.outer.setSpacing(0)
         self.state = ConditionGroupingState()
 
     def _build_rows_section(self) -> None:
         rows_card = QFrame()
         rows_card.setObjectName('conditionRowsCard')
         rows_card_layout = QVBoxLayout(rows_card)
-        rows_card_layout.setContentsMargins(16, 14, 16, 14)
-        rows_card_layout.setSpacing(9)
+        rows_card_layout.setContentsMargins(16, 10, 16, 10)
+        rows_card_layout.setSpacing(8)
+        # One line: the label, the number, and (several panels only) the
+        # all-panels / per-panel switch.
         rows_header = QHBoxLayout()
-        rows_header.setSpacing(9)
-        rows_header.addWidget(self.section_title('Condition rows'))
+        rows_header.setSpacing(12)
+        rows_title = self.section_title('Rows')
+        rows_title.setMinimumWidth(self._FORM_LABEL_WIDTH)
+        rows_title.setToolTip(tr('Number of condition rows above the lanes', self._language))
+        rows_header.addWidget(rows_title)
+        self.rows_shared = QWidget()
+        self.rows_shared.setObjectName('conditionRowsShared')
+        rows_shared_layout = QHBoxLayout(self.rows_shared)
+        rows_shared_layout.setContentsMargins(0, 0, 0, 0)
+        rows_shared_layout.setSpacing(8)
+        self.shared_rows_spin = self._make_spin(1, 20, 1)
+        self.finish_spin_input_on_return(self.shared_rows_spin)
+        self.shared_rows_spin.setObjectName('conditionRowsSpin_common')
+        self.shared_rows_spin.setFixedWidth(self._SPIN_WIDTH)
+        self.shared_rows_spin.setFixedHeight(self._CONTROL_HEIGHT)
+        rows_shared_layout.addWidget(self.shared_rows_spin)
+        rows_header.addWidget(self.rows_shared)
         (
             self.rows_mode_selector,
             self.rows_apply_action,
@@ -371,37 +442,19 @@ class ConditionTemplateDialogController:
         rows_header.addWidget(self.rows_mode_selector)
         rows_header.addStretch(1)
         rows_card_layout.addLayout(rows_header)
-        self.rows_shared = QWidget()
-        self.rows_shared.setObjectName('conditionRowsShared')
-        rows_shared_layout = QHBoxLayout(self.rows_shared)
-        rows_shared_layout.setContentsMargins(0, 0, 0, 0)
-        rows_shared_layout.setSpacing(8)
-        rows_shared_layout.addWidget(self.group_heading_label('Condition rows #:'))
-        self.shared_rows_spin = self._make_spin(1, 20, 1)
-        self.finish_spin_input_on_return(self.shared_rows_spin)
-        self.shared_rows_spin.setObjectName('conditionRowsSpin_common')
-        rows_shared_layout.addWidget(self.shared_rows_spin)
-        rows_shared_layout.addStretch(1)
-        rows_card_layout.addWidget(self.rows_shared)
         self.rows_individual = QWidget()
         self.rows_individual.setObjectName('conditionRowsIndividual')
         rows_individual_layout = QGridLayout(self.rows_individual)
         rows_individual_layout.setContentsMargins(0, 0, 0, 0)
         rows_individual_layout.setHorizontalSpacing(8)
         rows_individual_layout.setVerticalSpacing(6)
-        rows_individual_layout.addWidget(
-            self.group_heading_label('Condition rows #:'),
-            0,
-            0,
-            1,
-            2,
-            Qt.AlignmentFlag.AlignLeft,
-        )
         self.panel_rows_spins: list[QSpinBox] = []
         for panel_position in range(self.panel_count):
             spin = self._make_spin(1, 20, 1)
             self.finish_spin_input_on_return(spin)
             spin.setObjectName(f'conditionRowsSpin_panel_{panel_position + 1}')
+            spin.setFixedWidth(self._SPIN_WIDTH)
+            spin.setFixedHeight(self._CONTROL_HEIGHT)
             rows_individual_layout.addWidget(self.panel_label(panel_position), panel_position + 1, 0)
             rows_individual_layout.addWidget(spin, panel_position + 1, 1, Qt.AlignmentFlag.AlignLeft)
             self.panel_rows_spins.append(spin)
@@ -414,8 +467,8 @@ class ConditionTemplateDialogController:
         self.lane_card = QFrame()
         self.lane_card.setObjectName('conditionLaneGroupsCard')
         lane_layout = QVBoxLayout(self.lane_card)
-        lane_layout.setContentsMargins(16, 14, 16, 14)
-        lane_layout.setSpacing(10)
+        lane_layout.setContentsMargins(16, 10, 16, 12)
+        lane_layout.setSpacing(6)
         lane_header = QHBoxLayout()
         lane_header.setSpacing(9)
         lane_header.addWidget(self.section_title('Lane groups'))
@@ -467,7 +520,13 @@ class ConditionTemplateDialogController:
         self.levels_layout.addStretch(1)
         self.preview = self._preview_factory(self.dialog)
         self.preview.setFixedWidth(430 if self.panel_count == 1 else min(810, self.panel_count * 270))
-        self.preview.setStyleSheet('background:#FFFFFF; border:1px solid #D6E0DB; border-radius:8px;')
+        self.preview.setStyleSheet('background:transparent; border:none;')
+
+    # Shared measurements so the form lines up.
+    _FORM_LABEL_WIDTH = 96
+    _SPIN_WIDTH = 72
+    _CONTROL_HEIGHT = 28
+    _SELECTOR_WIDTH = 76
 
     def section_title(self, text: str) -> QLabel:
         label = QLabel(tr(text, self._language))
@@ -494,14 +553,14 @@ class ConditionTemplateDialogController:
         selector.setText(tr(text, self._language))
         selector.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         selector.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        selector.setFixedSize(width, 22)
+        selector.setFixedSize(width, self._CONTROL_HEIGHT)
         menu = QMenu(selector)
         menu.setObjectName('conditionModeMenu')
         selector.setMenu(menu)
         return (selector, menu)
 
     def section_mode_selector(self, object_name: str) -> tuple[QToolButton, QAction, QAction]:
-        selector, menu = self.popup_selector(object_name, 'Apply to all panels', 146)
+        selector, menu = self.popup_selector(object_name, 'Apply to all panels', 176)
         apply_all = menu.addAction(tr('Apply to all panels', self._language))
         individual = menu.addAction(tr('Set individual panels', self._language))
         apply_all.setCheckable(True)
@@ -517,18 +576,21 @@ class ConditionTemplateDialogController:
             spin.interpretText()
             editor.deselect()
             spin.clearFocus()
+            # Park focus on the dialog so it does not bounce back to the
+            # first field.
+            self.dialog.setFocus(Qt.FocusReason.OtherFocusReason)
         editor.returnPressed.connect(lambda: QTimer.singleShot(0, finish_input))
 
     def make_add_level_button(self) -> QToolButton:
         button = QToolButton()
         button.setText('+')
         button.setToolTip(tr('Add another lane-group level', self._language))
-        button.setFixedSize(22, 22)
+        button.setFixedSize(self._CONTROL_HEIGHT, self._CONTROL_HEIGHT)
         button.setStyleSheet(
-            'QToolButton { border:1px solid #8FB7A6; border-radius:5px; '
-            'background:#E8F3EE; color:#24513D; font-size:13px; '
-            'font-weight:700; } '
-            'QToolButton:hover { background:#D3E9DF; }'
+            'QToolButton { border:1px solid #1F6B4A; border-radius:6px; '
+            'background:#FFFFFF; color:#1F6B4A; font-size:16px; '
+            'font-weight:600; } '
+            'QToolButton:hover { background:#E3EFE8; }'
         )
         return button
 
@@ -602,28 +664,37 @@ class ConditionTemplateDialogController:
         preview_project.global_layout.show_condition_table = True
         preview_project.global_layout.condition_table_row_height_pt = 13.0
         self.preview.set_layout_project(preview_project)
+        mirror = getattr(self, 'preview_view', None)
+        if mirror is not None:
+            mirror._sync_size()
+            mirror.update()
 
     def update_control(self, control: LaneGroupControl, lanes: int) -> None:
         control['group_spin'].setMaximum(max(1, lanes))
         has_groups = control['group_spin'].value() > 0
         control['group_mode'].setEnabled(True)
         evenly = control['group_mode'].currentData() != 'custom'
-        control['selector_layout'].setContentsMargins(0, 12 if evenly else 0, 0, 0)
+        control['selector_layout'].setContentsMargins(0, 0, 0, 0)
+        # Edit sits beside the selector, so the row height never changes.
+        control['selector_column'].setFixedSize(
+            self._SELECTOR_WIDTH
+            if evenly or not has_groups
+            else self._SELECTOR_WIDTH * 2 + 4,
+            self._CONTROL_HEIGHT,
+        )
         control['mode_selector'].setEnabled(True)
-        selector_width = 53
-        control['mode_selector'].setFixedSize(selector_width, 22)
+        selector_width = self._SELECTOR_WIDTH
+        control['mode_selector'].setFixedSize(selector_width, self._CONTROL_HEIGHT)
         control['mode_selector'].setText(tr('Evenly', self._language) if evenly else tr('Custom', self._language))
         control['mode_selector'].setToolTip(
             tr('Divide lanes evenly', self._language)
             if evenly
             else tr('Custom lane ranges…', self._language)
         )
-        control['custom_btn'].setFixedSize(selector_width, 22)
+        control['custom_btn'].setFixedSize(selector_width, self._CONTROL_HEIGHT)
         control['layout'].setAlignment(
             control['individual_remove_btn'],
-            Qt.AlignmentFlag.AlignVCenter
-            if evenly
-            else Qt.AlignmentFlag.AlignTop,
+            Qt.AlignmentFlag.AlignTop,
         )
         control['default_action'].setChecked(evenly)
         control['custom_action'].setChecked(not evenly)
@@ -669,9 +740,7 @@ class ConditionTemplateDialogController:
                     max(0, target_layout.count() - 1),
                     button,
                     0,
-                    Qt.AlignmentFlag.AlignVCenter
-                    if target_control['group_mode'].currentData() != 'custom'
-                    else Qt.AlignmentFlag.AlignTop,
+                    Qt.AlignmentFlag.AlignTop,
                 )
                 button.show()
         else:
@@ -680,18 +749,13 @@ class ConditionTemplateDialogController:
                 max(0, target_layout.count() - 1),
                 self.add_level_btn,
                 0,
-                Qt.AlignmentFlag.AlignVCenter
-                if (
-                    last_level['shared_control']['group_mode'].currentData()
-                    != 'custom'
-                )
-                else Qt.AlignmentFlag.AlignTop,
+                Qt.AlignmentFlag.AlignTop,
             )
             self.add_level_btn.show()
 
     def update_level_names(self) -> None:
         for level_index, level in enumerate(self.levels, start=1):
-            level['heading'].setText(tr('Group Level {number}', self._language, number=level_index))
+            level['heading'].setText(tr('Level {number}', self._language, number=level_index))
             level['remove_btn'].setObjectName(f'removeLaneGroupLevel_common_level{level_index}')
             level['remove_btn'].setToolTip(tr('Remove Group Level {number}', self._language, number=level_index))
             shared = level['shared_control']
@@ -818,12 +882,15 @@ class ConditionTemplateDialogController:
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
         group_spin = self._make_spin(0, lanes, min(1, lanes))
+        group_spin.setFixedWidth(self._SPIN_WIDTH)
+        group_spin.setFixedHeight(self._CONTROL_HEIGHT)
+        group_spin.setToolTip(tr('Number of lane groups', self._language))
         self.finish_spin_input_on_return(group_spin)
         group_mode = QComboBox(parent)
         group_mode.addItem(tr('Divide lanes evenly', self._language), 'default')
         group_mode.addItem(tr('Custom lane ranges…', self._language), 'custom')
         group_mode.hide()
-        mode_selector, mode_menu = self.popup_selector('', 'Evenly', 53)
+        mode_selector, mode_menu = self.popup_selector('', 'Evenly', self._SELECTOR_WIDTH)
         default_action = mode_menu.addAction(tr('Divide lanes evenly', self._language))
         custom_action = mode_menu.addAction(tr('Custom lane ranges…', self._language))
         default_action.setCheckable(True)
@@ -832,29 +899,29 @@ class ConditionTemplateDialogController:
         custom_btn = QPushButton(tr('Edit', self._language))
         custom_btn.setToolTip(tr('Edit Custom Ranges…', self._language))
         custom_btn.setStyleSheet(_SMALL_BTN_STYLE)
-        custom_btn.setFixedSize(53, 22)
+        custom_btn.setFixedSize(self._SELECTOR_WIDTH, self._CONTROL_HEIGHT)
         custom_btn.hide()
         selector_column = QWidget(row)
         selector_column.setObjectName('conditionLaneDistributionColumn')
-        selector_column.setFixedSize(53, 47)
-        selector_layout = QVBoxLayout(selector_column)
+        selector_column.setFixedHeight(self._CONTROL_HEIGHT)
+        selector_layout = QHBoxLayout(selector_column)
         selector_layout.setContentsMargins(0, 0, 0, 0)
-        selector_layout.setSpacing(3)
+        selector_layout.setSpacing(4)
         selector_layout.addWidget(mode_selector)
         selector_layout.addWidget(custom_btn)
         selector_layout.addStretch(1)
         individual_remove_btn = QToolButton()
         individual_remove_btn.setText('×')
         individual_remove_btn.setToolTip(tr("Remove this panel's group level", self._language))
-        individual_remove_btn.setFixedSize(20, 20)
+        individual_remove_btn.setFixedSize(24, 24)
         individual_remove_btn.setStyleSheet(
-            'QToolButton { border:1px solid #B8C5BF; border-radius:5px; '
-            'background:#F7FAF8; color:#52625A; font-weight:700; } '
-            'QToolButton:hover { border-color:#C98282; '
-            'background:#FBECEC; color:#9B3F3F; }'
+            'QToolButton { border:none; border-radius:6px; '
+            'background:transparent; color:#7A8A83; font-size:14px; '
+            'font-weight:600; } '
+            'QToolButton:hover { background:#FBECEC; color:#9B3F3F; }'
         )
         individual_remove_btn.hide()
-        layout.addWidget(group_spin)
+        layout.addWidget(group_spin, 0, Qt.AlignmentFlag.AlignTop)
         layout.addWidget(selector_column, 0, Qt.AlignmentFlag.AlignTop)
         layout.addWidget(individual_remove_btn, 0, Qt.AlignmentFlag.AlignTop)
         layout.addStretch(1)
@@ -953,12 +1020,12 @@ class ConditionTemplateDialogController:
         heading = self.group_heading_label()
         remove_btn = QToolButton()
         remove_btn.setText('×')
-        remove_btn.setFixedSize(20, 20)
+        remove_btn.setFixedSize(24, 24)
         remove_btn.setStyleSheet(
-            'QToolButton { border:1px solid #B8C5BF; border-radius:5px; '
-            'background:#F7FAF8; color:#52625A; font-weight:700; } '
-            'QToolButton:hover { border-color:#C98282; '
-            'background:#FBECEC; color:#9B3F3F; }'
+            'QToolButton { border:none; border-radius:6px; '
+            'background:transparent; color:#7A8A83; font-size:14px; '
+            'font-weight:600; } '
+            'QToolButton:hover { background:#FBECEC; color:#9B3F3F; }'
         )
         heading_layout.addWidget(heading)
         heading_layout.addWidget(remove_btn)
@@ -1089,10 +1156,34 @@ class ConditionTemplateDialogController:
         self.shared_rows_spin.valueChanged.connect(self.refresh_preview)
         for spin in self.panel_rows_spins:
             spin.valueChanged.connect(self.refresh_preview)
+        # The preview leads the dialog, enlarged; the real preview widget
+        # stays at its working size out of sight and is mirrored here.
+        self.preview.setParent(self.dialog)
+        self.preview.hide()
+        self.preview_view = _MagnifiedPreview(
+            self.preview,
+            1.5 if self.panel_count == 1 else 1.15,
+            self.dialog,
+        )
+        self.preview_view.setObjectName('conditionPreviewView')
+        preview_card = QFrame()
+        preview_card.setObjectName('conditionPreviewCard')
+        preview_card.setStyleSheet(
+            'QFrame#conditionPreviewCard { background:#FFFFFF; '
+            'border:1px solid #BFD3C8; border-radius:12px; }'
+        )
+        preview_card_layout = QVBoxLayout(preview_card)
+        preview_card_layout.setContentsMargins(18, 14, 18, 18)
+        preview_card_layout.setSpacing(8)
+        preview_title = self.group_heading_label(tr('Preview', self._language))
+        preview_card_layout.addWidget(preview_title)
+        preview_card_layout.addWidget(self.preview_view, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.outer.insertWidget(0, preview_card)
+        self.outer.insertSpacing(1, 14)
         self.outer.addWidget(self.lane_card)
-        self.outer.addWidget(self.section_title('Condition Preview'))
-        self.outer.addWidget(self.preview, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.outer.addSpacing(16)
         button_row = QHBoxLayout()
+        button_row.setSpacing(10)
         button_row.addStretch(1)
         cancel_btn = QPushButton('Cancel')
         cancel_btn.setObjectName('conditionCancelButton')

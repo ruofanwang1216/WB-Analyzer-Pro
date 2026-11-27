@@ -183,6 +183,9 @@ _ZH_CN = {
     "Max": "最大灰度",
     "IntDen": "积分密度",
     "RawIntDen": "原始积分密度",
+    "Background": "局部背景（每像素）",
+    "Net Mean": "扣背景平均灰度",
+    "Net IntDen": "扣背景积分密度",
     "Delete": "删除",
     "Export Results": "导出结果",
     "Clear": "清除",
@@ -198,9 +201,24 @@ _ZH_CN = {
     "Cancel fixed ROI": "取消固定 ROI",
     "Capture the current lane ROI size, or arm the next drawn ROI as the fixed size.": "记录当前泳道 ROI 尺寸；或将下一次绘制的 ROI 设为固定尺寸。",
     "Return Manual mode to freehand ROI drawing.": "恢复为手动自由绘制 ROI。",
-    "Manual: draw lane ROI → draw band ROI → Analyze\nHold Space + drag to pan. Scroll to zoom.": (
-        "手动模式：框选泳道 ROI → 框选条带 ROI → 定量分析\n"
+    "Set Lanes → draw one box around the bands → adjust the boxes if needed → Analyze\n"
+    "Drag a box to move it, drag an edge to resize, arrow keys nudge, Delete removes, "
+    "drag on empty space inside the box you drew to add one.\n"
+    "Hold Space + drag to pan. Scroll to zoom.": (
+        "填泳道数 → 框住条带画一个框 → 需要时微调各个小框 → 定量分析\n"
+        "拖动小框可移动，拖边缘可改大小，方向键微调，Delete 删除，在你画的大框内空白处拖拽可补一个。\n"
         "按住空格键拖动可平移；滚动鼠标滚轮可缩放。"
+    ),
+    "Detect bands": "识别条带",
+    "Include adjacent band": "包含相邻条带",
+    "A faint second band was found right next to the main band. "
+    "Unticked: measure the main band only. Ticked: measure both bands in one box.": (
+        "在主条带旁边紧挨着发现了一条淡条带。不勾选：只测主条带；勾选：把两条带放在同一个框里一起测。"
+    ),
+    "Detect the bands inside the box on the image: after placing a fixed ROI, "
+    "or again after moving or deleting boxes. A box you draw yourself is "
+    "detected automatically.": (
+        "在图上的框内识别条带：放好固定 ROI 之后点一下，或者移动、删除过小框后重新识别。自己画的框会自动识别。"
     ),
     "Image Transform": "图像显示调整",
     "Analyze follows the current Low / High / Gamma. Invert remains preview-only.": (
@@ -209,6 +227,22 @@ _ZH_CN = {
     "Invert display": "反相显示",
     "Show bright signal as dark bands on a light background": "在浅色背景上将高亮信号显示为深色条带",
     "Auto Scale": "自动缩放",
+    "Apply to All": "应用到全部图像",
+    "Brightness": "亮度",
+    "Contrast": "对比度",
+    "Highlight saturated pixels": "标出过曝像素",
+    "Log histogram": "对数直方图",
+    "Values in image: {low} to {high}": "图像数值范围：{low} 至 {high}",
+    "Saturated: {percent}%": "过曝：{percent}%",
+    "Show pixels at the top of the measurable range in red. "
+    "Saturated bands cannot be quantified accurately.": (
+        "把达到可测上限的像素标成红色。过曝的条带无法准确定量。"
+    ),
+    "Same as Auto Scale in Image Lab: ignores the darkest and brightest 0.1% of pixels.": (
+        "与 Image Lab 的 Auto Scale 相同：忽略最暗和最亮各 0.1% 的像素。"
+    ),
+    "Back to how the image looked when it was opened": "恢复到图像刚打开时的显示效果",
+    "Use these settings for every open image": "把这组设置用到所有已打开的图像",
     "Close": "关闭",
     "Low": "低值",
     "High": "高值",
@@ -228,6 +262,15 @@ _ZH_CN = {
     "Undo Image Operation": "撤销图像操作",
     "Image Transform: Low / High / Gamma": "图像显示调整：低值／高值／伽马",
     "Rotate Image": "旋转图像",
+    "Auto Straighten": "自动调正",
+    "Detect how tilted the bands are and level them": "识别条带的倾斜角度并调正",
+    "Auto-straighten: level tilted bands in one click (arrow: more rotate options)":
+        "自动调正：一键把倾斜的条带调平（点右侧小箭头查看更多旋转选项）",
+    "Auto-straighten: the bands are already level.": "自动调正：条带已经是水平的。",
+    "Auto-straighten: the image is still loading, try again in a moment.":
+        "自动调正：图像还在载入，请稍后再试。",
+    "Auto-straighten: no clear bands to measure, image left unchanged. Use Rotate → Custom to rotate by hand.":
+        "自动调正：没有找到足够清晰的条带，图像未改动。可以用“旋转 → 自定义”手动调整。",
     "Select this image": "选择此图像",
     "Zoom out image": "缩小图像",
     "Zoom in image": "放大图像",
@@ -235,6 +278,44 @@ _ZH_CN = {
     "Collapse Uploaded Files panel": "收起已上传文件面板",
     "Expand Uploaded Files panel": "展开已上传文件面板",
     "New User Tutorial": "新手演示",
+    "User Tutorial": "使用教程",
+    "The tutorial video could not be opened on this computer. Opening the hands-on practice instead.":
+        "这台电脑无法打开教程视频，已改为打开动手练习。",
+    "The chart was drawn automatically, using the first group as the baseline. To choose the baseline yourself, click Select Negative Control under the Column Table.":
+        "图表已自动生成，默认以第一组作为基准。如需自己指定基准，请点击列式数据表下方的“选择阴性对照”。",
+    "Click the Group A column header. The chart is redrawn at once, normalized to Group A.":
+        "点击 Group A 列标题，图表会立即以 Group A 为基准重新绘制。",
+    "Click ① Quantify & Plot at the top. The tutorial opens Column Setup with Samples = 3 and Replicates = 2. Confirm it before drawing any box.":
+        "点击顶部的“① 定量与作图”。教程会打开列设置，Samples = 3、Replicates = 2。先确认，再开始框选。",
+    "Target Protein: box the left bands": "Target Protein：框选左侧条带",
+    "Target Protein: box the right bands": "Target Protein：框选右侧条带",
+    "Loading Control: box the left bands": "Loading Control：框选左侧条带",
+    "Loading Control: box the right bands": "Loading Control：框选右侧条带",
+    "The Target Protein image is selected. Drag one box around the left group of three bands, following the animated rectangle. The moment you let go, a box appears on each band. You can drag any box to adjust it.":
+        "已选中 Target Protein 图像。跟随动态矩形，拖一个框把左侧三条条带框住。松开鼠标后，每条条带上会自动出现一个框；任何一个框都可以拖动调整。",
+    "The Target Protein image is selected. Drag one box around the right group of three bands. A box appears on each band as soon as you let go.":
+        "已选中 Target Protein 图像。拖一个框把右侧三条条带框住，松开鼠标后每条条带上会自动出现一个框。",
+    "The Loading Control image is selected. Drag one box around the left group of three bands. A box appears on each band as soon as you let go.":
+        "已选中 Loading Control 图像。拖一个框把左侧三条条带框住，松开鼠标后每条条带上会自动出现一个框。",
+    "The Loading Control image is selected. Drag one box around the right group of three bands. A box appears on each band as soon as you let go.":
+        "已选中 Loading Control 图像。拖一个框把右侧三条条带框住，松开鼠标后每条条带上会自动出现一个框。",
+    "Click Analyze on this image, or press Enter/Return. The three values go straight into the Target band row of Replicate 1 in the Column Table.":
+        "点击这张图像上的“定量分析”，或按 Enter/Return。三个数值会直接填入列式数据表中重复 1 的 Target band 行。",
+    "Click Analyze on this image, or press Enter/Return. The three values go straight into the Loading control row of Replicate 1 in the Column Table.":
+        "点击这张图像上的“定量分析”，或按 Enter/Return。三个数值会直接填入列式数据表中重复 1 的 Loading control 行。",
+    "Click Analyze on this image, or press Enter/Return. The three values go straight into the Target band row of Replicate 2 in the Column Table.":
+        "点击这张图像上的“定量分析”，或按 Enter/Return。三个数值会直接填入列式数据表中重复 2 的 Target band 行。",
+    "Click Analyze on this image, or press Enter/Return. The three values go straight into the Loading control row of Replicate 2 in the Column Table.":
+        "点击这张图像上的“定量分析”，或按 Enter/Return。三个数值会直接填入列式数据表中重复 2 的 Loading control 行。",
+    "All four runs were measured and filled into the table, Group A was selected as the control, and the normalized figure was generated. Click Done to return to the fresh Home page.":
+        "四次测量都已完成并填入数据表，Group A 已设为对照，归一化图已生成。点击“完成”返回全新的主页。",
+    "Hands-on practice": "动手练习",
+    "Close the video and practise step by step with two built-in images.":
+        "关闭视频，用两张内置图像一步一步动手练习。",
+    "Play / Pause": "播放 / 暂停",
+    "Mute / Unmute": "静音 / 取消静音",
+    "The tutorial video file is missing from this installation.": "当前安装中缺少教程视频文件。",
+    "The tutorial video could not be played.": "教程视频无法播放。",
     "Choose a tutorial": "选择演示教程",
     "Practise with two built-in WB images. Tutorial-only defaults do not change the normal workflows.": "使用两张内置 WB 图像练习；教程专属默认值不会改变正常工作流程。",
     "Densitometry\nROI and column-table workflow": "灰度定量分析\nROI 与列式数据表流程",
@@ -322,7 +403,7 @@ _ZH_CN = {
     "Select Group A as the control": "选择 Group A 作为 control",
     "Click the Group A column header. It will become the negative-control baseline for normalization.": "点击 Group A 列标题；它将成为归一化所用的阴性对照基线。",
     "Generate the densitometry figure": "生成灰度定量图",
-    "Click Figures Generation. The completed table will be normalized to Group A and the figure preview will be generated.": "点击 Figures Generation；完整数据表将以 Group A 归一化并生成图形预览。",
+    "Click Plot. The completed table will be normalized to Group A and the figure preview will be generated.": "点击“作图”；完整数据表将以 Group A 归一化并生成图形预览。",
     "All four analysis runs have been entered, Group A was selected as the control, and the normalized figure was generated. Click Done to return to the fresh Home page.": "四次分析结果均已填写，Group A 已设为 control，并已生成归一化图形。点击“完成”返回软件初始主页面。",
     "Create the column table": "创建列式数据表",
     "Click Densitometry Figure Generation, choose Column, and continue. During this tutorial only, Column Setup starts with Samples = 3 and Replicates = 2.": "点击“灰度定量图生成”，选择“列式表”并继续。仅在本教程中，列式表设置默认为样本数 3、重复数 2。",
@@ -356,7 +437,16 @@ _ZH_CN = {
     "WB Figure tutorial complete": "WB 图像排版教程完成",
     "The two example WB images now fill the two tutorial blot frames. Click Done to return to normal interaction.": "两张示例 WB 图像现已填入两个教程图框。点击“完成”返回正常交互。",
     "Reset. Upload files to begin.": "已重置。请上传文件开始分析。",
+    "Bar Colors": "柱子配色",
+    "Bar Border": "柱子描边",
+    "Border Color": "描边颜色",
+    "Bold axis labels": "坐标轴标签加粗",
 }
+
+# Strings added by the 2026 interface redesign live in their own module.
+from utils.i18n_redesign import ZH_CN_REDESIGN  # noqa: E402
+
+_ZH_CN.update(ZH_CN_REDESIGN)
 
 
 def tr(text: str, language: str = LANG_EN, **values: object) -> str:

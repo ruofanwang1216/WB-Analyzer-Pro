@@ -1488,20 +1488,43 @@ class FigureModeStructureTests(unittest.TestCase):
 
         self.assertEqual(window._grp1.title_text(), "Step 1: Choose Layout")
         self.assertEqual(window._grp4.title_text(), "Step 2: Fill Blot Frames")
-        self.assertEqual(window._SIDEBAR_WIDTH, 210)
+        self.assertEqual(window._SIDEBAR_WIDTH, 248)
+        self.assertEqual(window._step_panel.width(), 248)
         self.assertTrue(window._auto_detect_radio.isChecked())
         self.assertEqual(window._auto_fit_h_margin.value(), 4)
         self.assertEqual(window._auto_fit_v_margin.value(), 4)
-        self.assertEqual(window._auto_fit_h_margin.singleStep(), 4)
-        self.assertEqual(window._auto_fit_v_margin.singleStep(), 4)
+        self.assertEqual(window._auto_fit_h_margin.singleStep(), 1)
+        self.assertEqual(window._auto_fit_v_margin.singleStep(), 1)
         self.assertEqual(window._grp5.title_text(), "Saved Blot Files")
         self.assertEqual(window._grp5._step_badge.text(), "3")
         self.assertEqual(window._grp6._step_badge.text(), "4")
 
-        self.assertIs(window._sidebar_layout.itemAt(1).widget(), window._grp1)
-        self.assertIs(window._sidebar_layout.itemAt(2).widget(), window._grp4)
-        self.assertIs(window._sidebar_layout.itemAt(3).widget(), window._grp5)
-        self.assertIs(window._sidebar_layout.itemAt(4).widget(), window._grp6)
+        # All three stages are stacked on one screen in the right panel.
+        sections = window._step_pages
+        self.assertEqual(len(sections), 3)
+        self.assertEqual(
+            [heading.text() for heading in window._step_headings],
+            ["Layout", "Fill", "Export"],
+        )
+        self.assertEqual(
+            [badge.text() for badge in window._step_badges], ["1", "2", "3"]
+        )
+        self.assertTrue(sections[0].isAncestorOf(window._grp1))
+        self.assertTrue(sections[0].isAncestorOf(window._saved_blot_files_btn))
+        self.assertTrue(sections[1].isAncestorOf(window._grp4))
+        self.assertTrue(sections[2].isAncestorOf(window._grp6))
+        self.assertTrue(sections[2].isAncestorOf(window._save_panel))
+        self.assertFalse(any(section.isHidden() for section in sections))
+        # No paging controls are left.
+        self.assertFalse(hasattr(window, "_step_buttons"))
+        self.assertFalse(hasattr(window, "_step_next_btn"))
+        # Saved Blot Files open from a button, not an always-on list.
+        self.assertFalse(window._step_panel.isAncestorOf(window._blot_file_list))
+        self.assertEqual(window._saved_blot_files_btn.text(), "Saved Blots")
+        # Annotation tools sit above the preview, outside the panel.
+        self.assertFalse(window._step_panel.isAncestorOf(window._bold_btn))
+        self.assertTrue(window._annotation_panel.isAncestorOf(window._bold_btn))
+        self.assertEqual(window.current_step(), 1)
         self.assertFalse(window._grp4.isHidden())
         self.assertFalse(window._grp4._expanded)
 
@@ -1511,10 +1534,11 @@ class FigureModeStructureTests(unittest.TestCase):
         button_texts = [
             button.text() for button in window._grp1.findChildren(QPushButton)
         ]
-        self.assertIn("Create Blot Frame Template", button_texts)
-        self.assertIn("Create Blot Condition Template", button_texts)
-        self.assertIn("Add Extra Blot Frame", button_texts)
-        self.assertIn("Saved Templates   ›", button_texts)
+        # Step 1: two full-width buttons, then three small ones in a row.
+        self.assertEqual(
+            button_texts,
+            ["New Blot Frames", "Add Conditions", "Saved Templates", "+ Frame", "Saved Blots"],
+        )
         self.assertNotIn("Apply Template", button_texts)
         self.assertNotIn("Apply Structure", button_texts)
         self.assertEqual(window._export_pdf_btn.text(), "PDF")
@@ -1534,7 +1558,7 @@ class FigureModeStructureTests(unittest.TestCase):
                 window._export_tiff_btn.height(),
                 window._export_pptx_btn.height(),
             },
-            {25},
+            {34},
         )
         self.assertEqual(
             {
@@ -1549,45 +1573,53 @@ class FigureModeStructureTests(unittest.TestCase):
         ])
         self.assertTrue(window._template_list.isHidden())
         self.assertEqual(window._grp1.findChildren(QGroupBox), [])
-        label_texts = [label.text() for label in window._grp1.findChildren(QLabel)]
-        self.assertIn("Blot Frame", label_texts)
-        self.assertIn("Blot Conditions", label_texts)
-        self.assertIn("Reuse a previous layout", label_texts)
-        self.assertNotIn("Set up the blot frame first, then add conditions.", label_texts)
-        self.assertNotIn("Define the area for lanes and bands.", label_texts)
-        self.assertNotIn("Add condition labels to the frame.", label_texts)
-        self.assertNotIn("Required", label_texts)
-        self.assertNotIn("Next", label_texts)
-        task_badges = [
-            label for label in window._grp1.findChildren(QLabel)
-            if label.objectName() == "step1TaskBadge"
+        # No numbered rail, nested cards or helper sentences.
+        visible_labels = [
+            label.text() for label in window._grp1.findChildren(QLabel)
+            if label is not window._grp1._title_label
+            and label is not window._grp1._step_badge
         ]
-        self.assertEqual([badge.text() for badge in task_badges], ["1", "2"])
-        self.assertTrue(all("background:#FFFFFF" in badge.styleSheet() for badge in task_badges))
-        self.assertTrue(all("color:#176B50" in badge.styleSheet() for badge in task_badges))
+        self.assertEqual(visible_labels, [])
         self.assertEqual(
-            len([
-                frame for frame in window._grp1.findChildren(QFrame)
-                if frame.objectName() == "step1Connector"
-            ]),
-            2,
+            [
+                frame.objectName() for frame in window._grp1.findChildren(QFrame)
+                if frame.objectName().startswith("step1")
+            ],
+            [],
         )
         create_frame = next(
             button for button in window._grp1.findChildren(QPushButton)
-            if button.text() == "Create Blot Frame Template"
+            if button.text() == "New Blot Frames"
         )
         add_extra = next(
             button for button in window._grp1.findChildren(QPushButton)
-            if button.text() == "Add Extra Blot Frame"
+            if button.text() == "+ Frame"
         )
-        self.assertEqual(create_frame.height(), 28)
-        self.assertEqual(window._saved_templates_btn.height(), 25)
-        self.assertEqual(add_extra.height(), 24)
+        self.assertEqual(create_frame.height(), 36)
+        self.assertEqual(window._saved_templates_btn.height(), 30)
+        self.assertEqual(add_extra.height(), 30)
+        # The first two buttons span the row; the two saved libraries share
+        # the next one; + Frame has the last.
+        conditions = next(
+            button for button in window._grp1.findChildren(QPushButton)
+            if button.text() == "Add Conditions"
+        )
+        grid = create_frame.parentWidget().layout()
+        self.assertEqual(grid.getItemPosition(grid.indexOf(create_frame)), (0, 0, 1, 2))
+        self.assertEqual(grid.getItemPosition(grid.indexOf(conditions)), (1, 0, 1, 2))
+        self.assertEqual(
+            [
+                grid.getItemPosition(grid.indexOf(button))[:2]
+                for button in (window._saved_templates_btn, window._saved_blot_files_btn)
+            ],
+            [(2, 0), (2, 1)],
+        )
+        self.assertEqual(grid.getItemPosition(grid.indexOf(add_extra)), (3, 0, 1, 2))
         self.assertEqual(create_frame.objectName(), "step1PrimaryButton")
         self.assertEqual(add_extra.objectName(), "step1TextButton")
         create_condition = next(
             button for button in window._grp1.findChildren(QPushButton)
-            if button.text() == "Create Blot Condition Template"
+            if button.text() == "Add Conditions"
         )
         self.assertEqual(create_condition.objectName(), "step1SecondaryButton")
         self.assertLessEqual(
@@ -1600,16 +1632,22 @@ class FigureModeStructureTests(unittest.TestCase):
 
         self.assertEqual(window._manual_detect_radio.text(), "Manual")
         self.assertFalse(window._auto_disclosure.isHidden())
-        self.assertFalse(window._auto_disclosure.is_expanded())
-        self.assertEqual(window._auto_disclosure._header.height(), 26)
+        self.assertTrue(window._auto_disclosure.is_expanded())
+        self.assertEqual(window._auto_disclosure._header.height(), 30)
         self.assertTrue(window._fixed_roi_disclosure.isHidden())
         self.assertTrue(window._selected_slot_lbl.isHidden())
         self.assertTrue(window._auto_fit_alignment.isHidden())
         self.assertEqual(window._auto_fit_alignment.currentData(), "auto")
-        self.assertIn(
-            "select then hit Enter/Return",
-            [label.text() for label in window._grp4.findChildren(QLabel)],
-        )
+        # The how-to sits behind a "?" next to the Fill heading, not as text.
+        fill_labels = [label.text() for label in window._grp4.findChildren(QLabel)]
+        self.assertNotIn("select then hit Enter/Return", fill_labels)
+        self.assertNotIn("Detection", fill_labels)
+        self.assertTrue(window._step_desc_lbl.isHidden())
+        self.assertFalse(window._step_pages[1].isAncestorOf(window._step_desc_lbl))
+        self.assertTrue(window._step_pages[1].isAncestorOf(window._fill_help_btn))
+        self.assertEqual(window._fill_help_btn.text(), "?")
+        self.assertIn("Press Enter/Return", window._fill_help_btn.toolTip())
+        self.assertEqual(window._auto_detect_radio.text(), "Auto")
 
         window._manual_detect_radio.setChecked(True)
 
@@ -1910,27 +1948,27 @@ class FigureModeStructureTests(unittest.TestCase):
                     label.text(): label
                     for label in dialog.findChildren(QLabel)
                     if (
-                        label.text() in {"Group Level 1", "Group Level 2"}
+                        label.text() in {"Level 1", "Level 2"}
                         and label.isVisible()
                     )
                 }
                 self.assertEqual(
                     set(level_headings),
-                    {"Group Level 1", "Group Level 2"},
+                    {"Level 1", "Level 2"},
                 )
                 self.assertLess(
-                    level_headings["Group Level 1"].mapTo(
+                    level_headings["Level 1"].mapTo(
                         dialog, QPoint()
                     ).x(),
-                    level_headings["Group Level 2"].mapTo(
+                    level_headings["Level 2"].mapTo(
                         dialog, QPoint()
                     ).x(),
                 )
                 self.assertAlmostEqual(
-                    level_headings["Group Level 1"].mapTo(
+                    level_headings["Level 1"].mapTo(
                         dialog, QPoint()
                     ).y(),
-                    level_headings["Group Level 2"].mapTo(
+                    level_headings["Level 2"].mapTo(
                         dialog, QPoint()
                     ).y(),
                     delta=2,
@@ -2025,7 +2063,7 @@ class FigureModeStructureTests(unittest.TestCase):
                 level_heading = next(
                     label
                     for label in dialog.findChildren(QLabel)
-                    if label.text() == "Group Level 1" and label.isVisible()
+                    if label.text() == "Level 1" and label.isVisible()
                 )
                 self.assertLessEqual(
                     level_heading.mapTo(dialog, QPoint()).x(),
@@ -2043,7 +2081,7 @@ class FigureModeStructureTests(unittest.TestCase):
                 )
                 self.assertEqual(mode_selector.text(), "Evenly")
                 self.assertTrue(mode_selector.isVisible())
-                self.assertEqual(mode_selector.size(), QSize(53, 22))
+                self.assertEqual(mode_selector.size(), QSize(76, 28))
                 self.assertAlmostEqual(
                     mode_selector.mapTo(dialog, QPoint()).y()
                     + mode_selector.height() / 2.0,
@@ -2269,13 +2307,13 @@ class FigureModeStructureTests(unittest.TestCase):
                     label.text()
                     for label in dialog.findChildren(QLabel)
                     if (
-                        label.text().startswith("Group Level ")
+                        label.text().startswith("Level ")
                         and label.isVisible()
                     )
                 ]
                 self.assertEqual(
                     visible_headings,
-                    ["Group Level 1", "Group Level 2"],
+                    ["Level 1", "Level 2"],
                 )
             except BaseException as error:
                 errors.append(error)
@@ -2357,13 +2395,15 @@ class FigureModeStructureTests(unittest.TestCase):
             self.assertEqual(custom_button.width(), mode_selector.width())
             self.assertEqual(custom_button.size(), evenly_size)
             self.assertEqual(dialog.size(), dialog_size)
+            # Edit sits beside the selector on the same line, so choosing
+            # Custom never changes the row height.
             self.assertGreater(
-                custom_button.mapTo(dialog, QPoint()).y(),
-                mode_selector.mapTo(dialog, QPoint()).y(),
-            )
-            self.assertAlmostEqual(
                 custom_button.mapTo(dialog, QPoint()).x(),
                 mode_selector.mapTo(dialog, QPoint()).x(),
+            )
+            self.assertAlmostEqual(
+                custom_button.mapTo(dialog, QPoint()).y(),
+                mode_selector.mapTo(dialog, QPoint()).y(),
                 delta=2,
             )
             dialog.reject()
@@ -2392,7 +2432,7 @@ class FigureModeStructureTests(unittest.TestCase):
                     "Create independent condition panel",
                     visible_text,
                 )
-                self.assertIn("Condition rows", visible_text)
+                self.assertIn("Rows", visible_text)
                 self.assertIn("Lane groups", visible_text)
                 self.assertFalse(dialog.findChild(
                     QToolButton, "conditionRowsModeSelector"
@@ -2659,52 +2699,47 @@ class FigureModeStructureTests(unittest.TestCase):
                     button is not None and button.isVisible()
                     for button in panel_buttons
                 ))
-                condition_rows_heading = next(
+                rows_title = next(
                     label
                     for label in dialog.findChildren(QLabel)
-                    if (
-                        label.text() == "Condition rows #:"
-                        and label.isVisible()
-                    )
+                    if label.text() == "Rows" and label.isVisible()
                 )
-                level_one_heading = next(
+                lane_groups_title = next(
                     label
                     for label in dialog.findChildren(QLabel)
-                    if (
-                        label.text() == "Group Level 1"
-                        and label.isVisible()
-                    )
+                    if label.text() == "Lane groups" and label.isVisible()
                 )
+                # The two section labels share one style and one left edge.
+                self.assertEqual(rows_title.objectName(), "conditionSectionTitle")
                 self.assertEqual(
-                    condition_rows_heading.objectName(),
-                    "conditionGroupHeading",
-                )
-                self.assertEqual(
-                    condition_rows_heading.font().bold(),
-                    level_one_heading.font().bold(),
+                    rows_title.objectName(), lane_groups_title.objectName()
                 )
                 self.assertAlmostEqual(
-                    condition_rows_heading.mapTo(dialog, QPoint()).x(),
-                    level_one_heading.mapTo(dialog, QPoint()).x(),
+                    rows_title.mapTo(dialog, QPoint()).x(),
+                    lane_groups_title.mapTo(dialog, QPoint()).x(),
                     delta=2,
                 )
+                self.assertFalse(any(
+                    label.text() == "Condition rows #:"
+                    for label in dialog.findChildren(QLabel)
+                ))
                 panel_buttons[1].click()
                 self._app.processEvents()
                 headings = {
                     label.text(): label
                     for label in dialog.findChildren(QLabel)
                     if (
-                        label.text() in {"Group Level 1", "Group Level 2"}
+                        label.text() in {"Level 1", "Level 2"}
                         and label.isVisible()
                     )
                 }
                 self.assertLess(
-                    headings["Group Level 1"].mapTo(dialog, QPoint()).x(),
-                    headings["Group Level 2"].mapTo(dialog, QPoint()).x(),
+                    headings["Level 1"].mapTo(dialog, QPoint()).x(),
+                    headings["Level 2"].mapTo(dialog, QPoint()).x(),
                 )
                 self.assertAlmostEqual(
-                    headings["Group Level 1"].mapTo(dialog, QPoint()).y(),
-                    headings["Group Level 2"].mapTo(dialog, QPoint()).y(),
+                    headings["Level 1"].mapTo(dialog, QPoint()).y(),
+                    headings["Level 2"].mapTo(dialog, QPoint()).y(),
                     delta=2,
                 )
                 self.assertTrue(dialog.findChild(
@@ -2798,7 +2833,7 @@ class FigureModeStructureTests(unittest.TestCase):
                     2,
                 )
                 self.assertFalse(any(
-                    label.text() == "Group Level 2" and label.isVisible()
+                    label.text() == "Level 2" and label.isVisible()
                     for label in dialog.findChildren(QLabel)
                 ))
                 preview = dialog.findChild(_ConditionPreviewWidget)
@@ -3096,6 +3131,156 @@ class FigureModeStructureTests(unittest.TestCase):
         window._on_canvas_blot_selection_cleared()
         self.assertFalse(window._grp4._expanded)
 
+    def test_clicking_a_blot_frame_does_not_nudge_it(self) -> None:
+        window = FigureModeWindow()
+        window._on_apply_structure()
+        frame = next(iter(window._canvas._blot_frames.values()))
+        start = QPointF(frame.pos())
+        press = frame.mapToScene(frame.rect().center())
+
+        # A click whose pointer wobbles a few pixels leaves the frame alone.
+        frame.mousePressEvent(_FakeMouseEvent(press, pos=frame.rect().center()))
+        frame.mouseMoveEvent(_FakeMouseEvent(press + QPointF(3.0, 2.0)))
+        self.assertEqual(frame.pos(), start)
+        frame.mouseReleaseEvent(_FakeMouseEvent(press + QPointF(3.0, 2.0)))
+        self._app.processEvents()
+        frame = next(iter(window._canvas._blot_frames.values()))
+        self.assertEqual(frame.pos(), start)
+
+        # A deliberate drag still moves it.
+        frame.mousePressEvent(_FakeMouseEvent(press, pos=frame.rect().center()))
+        frame.mouseMoveEvent(_FakeMouseEvent(press + QPointF(40.0, 0.0)))
+        self.assertNotEqual(frame.pos(), start)
+        frame.mouseReleaseEvent(_FakeMouseEvent(press + QPointF(40.0, 0.0)))
+
+    def test_all_stages_are_visible_and_go_to_step_only_scrolls(self) -> None:
+        window = FigureModeWindow()
+        window.resize(900, 700)
+        window.show()
+        self._app.processEvents()
+
+        for step in (3, 1, 2, 99):
+            window.go_to_step(step)
+            self.assertEqual(window.current_step(), min(step, 3))
+            self.assertTrue(all(section.isVisible() for section in window._step_pages))
+        self.assertTrue(window._export_pdf_btn.isVisible())
+        self.assertTrue(window._auto_detect_radio.isVisible())
+        window.close()
+
+    def test_annotation_tools_work_whatever_stage_is_in_view(self) -> None:
+        window = FigureModeWindow()
+        window._on_apply_structure()
+        window.go_to_step(2)
+        self.assertFalse(window._annotation_panel.isHidden())
+
+        window._canvas.add_overlay_text_box()
+        self._app.processEvents()
+
+        self.assertTrue(window._bold_btn.isEnabled())
+        self.assertEqual(window.current_step(), 2)
+
+    def test_selecting_a_frame_points_at_the_fill_stage(self) -> None:
+        window = FigureModeWindow()
+        window._on_apply_structure()
+        self.assertEqual(window.current_step(), 1)
+
+        window._on_canvas_blot_selected(SourceRef(panel_idx=0, slot_idx=0))
+        self.assertEqual(window.current_step(), 2)
+        self.assertIsNotNone(window._project)
+
+    def test_reveal_widget_finds_the_stage_that_holds_a_control(self) -> None:
+        window = FigureModeWindow()
+
+        window.reveal_widget(window._export_pdf_btn)
+        self.assertEqual(window.current_step(), 3)
+        window.reveal_widget(window._saved_blot_files_btn)
+        self.assertEqual(window.current_step(), 1)
+        # Controls outside the panel leave it alone.
+        window.reveal_widget(window._bold_btn)
+        self.assertEqual(window.current_step(), 1)
+
+    def test_step_panel_follows_the_language(self) -> None:
+        window = FigureModeWindow()
+        window.set_language("zh_CN")
+        self.assertEqual(
+            [heading.text() for heading in window._step_headings],
+            ["布局", "填充", "导出"],
+        )
+        self.assertIn("按 Enter/Return", window._fill_help_btn.toolTip())
+        self.assertEqual(window._saved_blot_files_btn.text(), "已保存印迹图")
+        window.set_language("en")
+        self.assertEqual(
+            [heading.text() for heading in window._step_headings],
+            ["Layout", "Fill", "Export"],
+        )
+        self.assertEqual(window._saved_blot_files_btn.text(), "Saved Blots")
+        self.assertIn("Press Enter/Return", window._fill_help_btn.toolTip())
+
+    def test_saved_blot_files_open_in_a_dialog_and_return_the_list(self) -> None:
+        window = FigureModeWindow()
+        seen = []
+
+        def inspect_and_close() -> None:
+            dialog = self._app.activeModalWidget()
+            seen.append(dialog.isAncestorOf(window._blot_file_list))
+            seen.append(window._blot_file_open_btn.isVisibleTo(dialog))
+            dialog.reject()
+
+        QTimer.singleShot(0, inspect_and_close)
+        window._saved_blot_files_btn.click()
+
+        self.assertEqual(seen, [True, True])
+        # The list is handed back so the next opening works too.
+        self.assertTrue(window.isAncestorOf(window._blot_file_list))
+        self.assertTrue(window._grp5.isHidden())
+
+    def test_saved_blot_files_dialog_previews_the_selected_file(self) -> None:
+        old_dir = figure_mode_module.USER_BLOT_FILES_DIR
+        try:
+            with TemporaryDirectory() as tmp:
+                figure_mode_module.USER_BLOT_FILES_DIR = Path(tmp) / "blot_files"
+                window = FigureModeWindow()
+                window._project = TemplateEngine.build_project("normal_wb", 1, 3, 5)
+                window._write_blot_file("blot_three", "Three frames")
+                window._project = TemplateEngine.build_project("normal_wb", 1, 1, 4)
+                window._write_blot_file("blot_one", "One frame")
+                window._project = None
+                seen = []
+
+                def inspect_and_close() -> None:
+                    dialog = self._app.activeModalWidget()
+                    canvas = window._blot_file_preview_canvas
+                    seen.append(dialog.isAncestorOf(canvas))
+                    seen.append(canvas.isVisibleTo(dialog))
+                    # The newest file is selected and drawn with its frames.
+                    frames_first = len(canvas._blot_frames)
+                    items = [
+                        window._blot_file_list.item(i)
+                        for i in range(window._blot_file_list.count())
+                    ]
+                    other = next(
+                        item for item in items
+                        if item.data(Qt.ItemDataRole.UserRole)
+                        != window._current_blot_file_selection()
+                    )
+                    window._blot_file_list.setCurrentItem(other)
+                    self._app.processEvents()
+                    seen.append((frames_first, len(canvas._blot_frames)))
+                    dialog.reject()
+
+                QTimer.singleShot(0, inspect_and_close)
+                window._saved_blot_files_btn.click()
+
+                self.assertEqual(seen[:2], [True, True])
+                # One file has one frame, the other three; the preview follows
+                # the selection.
+                self.assertEqual(sorted(seen[2]), [1, 3])
+                self.assertIsNone(window._blot_file_preview_canvas)
+                # The real figure was not touched by previewing.
+                self.assertIsNone(window._project)
+        finally:
+            figure_mode_module.USER_BLOT_FILES_DIR = old_dir
+
     def test_new_overlay_text_is_selected_and_enables_font_controls(self) -> None:
         window = FigureModeWindow()
         detail_row_height = window._selection_detail_toolbar.height()
@@ -3364,7 +3549,7 @@ class FigureModeStructureTests(unittest.TestCase):
             0.95,
             delta=0.03,
         )
-        self.assertIn("background-color: #91BFA5", window._fit_center_btn.styleSheet())
+        self.assertIn("border:1px solid #C9D3CE", window._fit_center_btn.styleSheet())
 
     def test_layout_engine_does_not_render_panel_letters(self) -> None:
         project = TemplateEngine.build_project("multi_panel", 3, 2, 4)
@@ -3946,6 +4131,36 @@ class FigureModeStructureTests(unittest.TestCase):
         self.assertGreater(many_blots.canvas_height_pt, few_blots.canvas_height_pt)
         self.assertEqual(many_panels.canvas_width_pt, few_panels.canvas_width_pt)
         self.assertGreater(many_panels.canvas_height_pt, few_panels.canvas_height_pt)
+
+    def test_manual_roi_into_an_auto_fitted_frame_is_not_stretched(self) -> None:
+        window = FigureModeWindow()
+        window._manual_detect_radio.setChecked(True)
+        window._on_apply_template()
+        window._recompute_and_refresh(fit_view=False)
+        key, frame = next(iter(window._canvas._blot_frames.items()))
+        window._canvas._select_blot_frame(frame, additive=False)
+        slot = window._project.panels[0].blot_slots[0]
+        from gui.figure_mode_window import scene_to_pt
+
+        frame_width_pt = scene_to_pt(frame.rect().width())
+        # An earlier Auto-Fit left this frame tall.
+        slot.preserve_image_aspect = True
+        slot.display_height_pt = frame_width_pt / 2.0
+
+        with TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "manual_roi.png")
+            Image.fromarray(np.full((40, 80), 120, dtype=np.uint8)).save(path)
+            window.set_active_image_provider(
+                lambda: {"image_path": path, "roi": QRectF(2.0, 3.0, 60.0, 6.0)}
+            )
+            self.assertTrue(window.apply_roi_to_selected_slot())
+            self._app.processEvents()
+
+        self.assertEqual(slot.bounding_box, ImageBBox(2.0, 3.0, 60.0, 6.0))
+        self.assertTrue(slot.preserve_image_aspect)
+        # Height follows the ROI's 10:1 shape instead of the old 2:1 frame.
+        self.assertAlmostEqual(slot.display_height_pt, frame_width_pt / 10.0, places=4)
+        window.close()
 
     def test_apply_roi_to_selected_slot_can_rerender_repeatedly(self) -> None:
         window = FigureModeWindow()

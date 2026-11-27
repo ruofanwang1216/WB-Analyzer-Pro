@@ -1,9 +1,11 @@
 """Small sidebar widgets used by the WB figure workspace."""
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, Qt, Signal
+from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
+    QLayout,
+    QLayoutItem,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -191,7 +193,7 @@ class _CollapseGroup(QWidget):
             self._step_badge.setFixedSize(22, 22)
             self._step_badge.setStyleSheet(
                 "QLabel { background:#2F8A64; color:#FFFFFF; border-radius:11px; "
-                "font-weight:700; font-size:10px; }"
+                "font-weight:700; font-size:12px; }"
             )
             self._step_badge.setAttribute(
                 Qt.WidgetAttribute.WA_TransparentForMouseEvents,
@@ -201,7 +203,7 @@ class _CollapseGroup(QWidget):
 
         self._title_label = QLabel(title)
         self._title_label.setStyleSheet(
-            "font-weight:600; color:#24352E; font-size:11px; background:transparent;"
+            "font-weight:600; color:#24352E; font-size:13px; background:transparent;"
         )
         self._title_label.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents,
@@ -251,9 +253,20 @@ class _CollapseGroup(QWidget):
             self._toggle()
             event.accept()
 
+    def set_flat(self, flat: bool) -> None:
+        """Show only the body: the step panel supplies the title and paging."""
+        self._flat = bool(flat)
+        self._header.setVisible(not self._flat)
+        if self._flat:
+            self.layout().setContentsMargins(0, 0, 0, 0)
+            self._body_layout.setContentsMargins(0, 0, 0, 0)
+            self._body.setStyleSheet("QWidget { background-color:transparent; }")
+            self._body.setVisible(True)
+
     def set_expanded(self, expanded: bool) -> None:
         self._expanded = bool(expanded)
-        self._body.setVisible(self._expanded)
+        # A flat section is a whole page; it never folds away.
+        self._body.setVisible(self._expanded or getattr(self, "_flat", False))
         self._toggle_btn.setText("⌄" if self._expanded else "›")
         self._refresh_header_style()
 
@@ -280,17 +293,17 @@ class _InlineDisclosure(QWidget):
         self._header = QFrame()
         self._header.setObjectName("inlineDisclosureHeader")
         self._header.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._header.setFixedHeight(26)
+        self._header.setFixedHeight(30)
         self._header.setStyleSheet(
             "QFrame#inlineDisclosureHeader { background:#FFFFFF; "
-            "border:1px solid #D3DDD8; border-radius:6px; }"
+            "border:1px solid #C9D3CE; border-radius:15px; /* exact */ }"
         )
         header_layout = QHBoxLayout(self._header)
-        header_layout.setContentsMargins(7, 1, 4, 1)
+        header_layout.setContentsMargins(12, 1, 8, 1)
         header_layout.setSpacing(4)
         self._title_label = QLabel(title)
         self._title_label.setStyleSheet(
-            "font-size:10px; font-weight:500; color:#2F3D36; background:transparent;"
+            "font-size:13px; font-weight:500; color:#1C2622; background:transparent;"
         )
         self._title_label.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents,
@@ -351,3 +364,74 @@ class _TemplatePreviewCanvas(FigureCanvas):
         # This is a browser preview, not a second editing canvas. Consuming
         # wheel and trackpad gestures keeps its prescribed scale fixed.
         event.accept()
+
+
+class _FlowLayout(QLayout):
+    """Lays widgets out left to right and wraps them onto new lines."""
+
+    def __init__(self, parent=None, *, margin: int = 0, h_spacing: int = 6, v_spacing: int = 6) -> None:
+        super().__init__(parent)
+        self._items: list[QLayoutItem] = []
+        self._h_spacing = h_spacing
+        self._v_spacing = v_spacing
+        self.setContentsMargins(margin, margin, margin, margin)
+
+    def addItem(self, item: QLayoutItem) -> None:  # noqa: N802 - Qt API
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int):  # noqa: N802 - Qt API
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index: int):  # noqa: N802 - Qt API
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self):  # noqa: N802 - Qt API
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802 - Qt API
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802 - Qt API
+        return self._do_layout(QRect(0, 0, width, 0), apply=False)
+
+    def setGeometry(self, rect: QRect) -> None:  # noqa: N802 - Qt API
+        super().setGeometry(rect)
+        self._do_layout(rect, apply=True)
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt API
+        return self.minimumSize()
+
+    def minimumSize(self) -> QSize:  # noqa: N802 - Qt API
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        return size + QSize(
+            margins.left() + margins.right(), margins.top() + margins.bottom()
+        )
+
+    def _do_layout(self, rect: QRect, *, apply: bool) -> int:
+        margins = self.contentsMargins()
+        area = rect.adjusted(margins.left(), margins.top(), -margins.right(), -margins.bottom())
+        x, y, line_height = area.x(), area.y(), 0
+        for item in self._items:
+            widget = item.widget()
+            if widget is not None and widget.isHidden():
+                continue
+            hint = item.sizeHint()
+            if x > area.x() and x + hint.width() > area.right() + 1:
+                x = area.x()
+                y += line_height + self._v_spacing
+                line_height = 0
+            if apply:
+                item.setGeometry(QRect(QPoint(x, y), hint))
+            x += hint.width() + self._h_spacing
+            line_height = max(line_height, hint.height())
+        return y + line_height - rect.y() + margins.bottom()

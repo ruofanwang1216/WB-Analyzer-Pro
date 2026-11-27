@@ -7,6 +7,7 @@ quantification pipeline.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import math
 from typing import Any
 
@@ -17,6 +18,19 @@ from PIL import Image
 MAX_16BIT_VALUE = 65535
 MIN_TONE_VALUE = -MAX_16BIT_VALUE
 MAX_TONE_VALUE = MAX_16BIT_VALUE * 2
+MIN_GAMMA = 0.1
+MAX_GAMMA = 10.0
+
+# Image Lab clips 0.1 % of the pixels at each end when "Auto Scale" is
+# pressed.  Verified against the display settings stored in .scn documents.
+IMAGE_LAB_AUTO_TRIM = 0.001
+# ImageJ "Brightness/Contrast" constants (ij.plugin.frame.ContrastAdjuster).
+IMAGEJ_SLIDER_RANGE = 256
+
+# TIFF ImageDescription key used to carry the display settings an Image Lab
+# document was saved with.  The pixels themselves stay untouched.
+TIFF_IMAGE_DESCRIPTION_TAG = 270
+DISPLAY_SETTINGS_KEY = "wb_analyzer_display"
 
 
 @dataclass(frozen=True)
@@ -32,7 +46,10 @@ class ImageTransformParams:
         # displayed dynamic range instead of only being able to clip it inward.
         low = max(MIN_TONE_VALUE, min(MAX_16BIT_VALUE, int(round(self.low))))
         high = max(0, min(MAX_TONE_VALUE, int(round(self.high))))
-        gamma = max(0.1, min(4.0, float(self.gamma)))
+        gamma = float(self.gamma)
+        if not math.isfinite(gamma):
+            gamma = 1.0
+        gamma = max(MIN_GAMMA, min(MAX_GAMMA, gamma))
         if high <= low:
             high = min(MAX_16BIT_VALUE, low + 1)
             if high <= low:
@@ -65,6 +82,11 @@ class GeometryTransform:
     def is_identity(self) -> bool:
         value = self.sanitized()
         return not value.flip_x and not value.flip_y and value.rotation == 0.0
+
+    def is_axis_aligned(self) -> bool:
+        """True when the rotation is a multiple of 90 degrees (no resampling)."""
+        quarter_turns = self.sanitized().rotation / 90.0
+        return abs(quarter_turns - round(quarter_turns)) < 1e-9
 
     def rotated(self, angle_deg: float) -> "GeometryTransform":
         value = self.sanitized()
@@ -298,8 +320,18 @@ def transform_pixels_16_to_8(
 def apply_geometry_to_display(
     display_pixels: np.ndarray,
     transform: GeometryTransform,
+    *,
+    scale: int = 1,
 ) -> np.ndarray:
-    """Render an 8-bit preview through non-destructive geometry metadata."""
+    """Render an 8-bit preview through non-destructive geometry metadata.
+
+    ``scale`` renders the result on a grid that many times finer than the
+    source, using bilinear interpolation.  The view enlarges an unrotated
+    preview bilinearly as well, so a rotated image drawn this way looks the
+    same as before the rotation: neither softer nor sharper.  Use an odd
+    factor so the finer grid samples source pixel centres.  It only applies
+    when the geometry actually rotates.
+    """
     pixels = np.ascontiguousarray(np.asarray(display_pixels, dtype=np.uint8))
     if pixels.ndim != 2 or pixels.size == 0:
         raise ValueError("Display geometry requires a non-empty 2D image.")
@@ -312,6 +344,14 @@ def apply_geometry_to_display(
     height, width = pixels.shape
     matrix, output_size = value.affine(width, height)
     inverse = np.linalg.inv(matrix)
+    factor = max(1, int(scale))
+    resample = Image.Resampling.BICUBIC
+    if factor > 1 and not value.is_axis_aligned():
+        resample = Image.Resampling.BILINEAR
+        # Output pixel centre (i + 0.5) / factor is where the 1x canvas is
+        # sampled, so the finer grid covers exactly the same canvas area.
+        inverse = inverse @ np.diag((1.0 / factor, 1.0 / factor, 1.0))
+        output_size = (output_size[0] * factor, output_size[1] * factor)
     coefficients = (
         float(inverse[0, 0]),
         float(inverse[0, 1]),
@@ -325,7 +365,7 @@ def apply_geometry_to_display(
         output_size,
         Image.Transform.AFFINE,
         coefficients,
-        resample=Image.Resampling.BICUBIC,
+        resample=resample,
         fillcolor=fill_value,
     )
     return np.ascontiguousarray(np.asarray(image, dtype=np.uint8))
@@ -336,10 +376,13 @@ def auto_scale_range_16(
     trim_fraction: float = 0.001,
 ) -> tuple[int, int]:
     """
-    Compute a robust display range by trimming the lowest/highest 0.1% pixels.
+    Image Lab's "Auto Scale": with ``n = round(0.1 % of the pixels)``, Low is
+    the n-th darkest pixel value and High the n-th brightest.
 
-    Uses a 16-bit histogram, so runtime is O(N + 65536) rather than sorting all
-    pixels. The returned range is intended for preview display, not analysis.
+    This rule reproduces, to the exact value, the Low / High that Image Lab
+    stores in .scn documents after Auto Scale.  Uses a 16-bit histogram, so
+    runtime is O(N + 65536) rather than sorting all pixels.  The returned
+    range is intended for preview display, not analysis.
     """
     if pixels.size == 0:
         return 0, MAX_16BIT_VALUE
@@ -349,10 +392,11 @@ def auto_scale_range_16(
     trim_count = min(flat.size // 2, int(round(flat.size * max(0.0, trim_fraction))))
 
     cumulative_low = np.cumsum(hist)
-    low = int(np.searchsorted(cumulative_low, trim_count + 1, side="left"))
+    rank = max(1, trim_count)
+    low = int(np.searchsorted(cumulative_low, rank, side="left"))
 
     cumulative_high = np.cumsum(hist[::-1])
-    high_from_top = int(np.searchsorted(cumulative_high, trim_count + 1, side="left"))
+    high_from_top = int(np.searchsorted(cumulative_high, rank, side="left"))
     high = MAX_16BIT_VALUE - high_from_top
 
     if high <= low:
@@ -415,3 +459,183 @@ def image_array_to_raw_luminance(arr: np.ndarray) -> np.ndarray:
         if np.issubdtype(source.dtype, np.floating):
             return luminance.astype(source.dtype)
     raise ValueError(f"Unexpected image shape: {source.shape}")
+
+
+# ── Display defaults carried by the image file ──────────────────────────────
+
+
+def encode_display_settings(params: ImageTransformParams, *, source: str = "") -> str:
+    """Return the TIFF ImageDescription text that stores display settings."""
+    payload: dict[str, Any] = image_transform_to_dict(params)
+    if source:
+        payload["source"] = source
+    return json.dumps({DISPLAY_SETTINGS_KEY: payload}, separators=(",", ":"))
+
+
+def embedded_display_settings(img: Any) -> ImageTransformParams | None:
+    """Read display settings stored in a TIFF ImageDescription, if any."""
+    try:
+        tag_v2 = getattr(img, "tag_v2", None)
+        raw = tag_v2.get(TIFF_IMAGE_DESCRIPTION_TAG) if tag_v2 is not None else None
+        if isinstance(raw, (tuple, list)):
+            raw = raw[0] if raw else None
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="ignore")
+        if not isinstance(raw, str) or DISPLAY_SETTINGS_KEY not in raw:
+            return None
+        data = json.loads(raw.strip("\x00 \t\r\n")).get(DISPLAY_SETTINGS_KEY)
+        if not isinstance(data, dict):
+            return None
+        return ImageTransformParams(
+            low=int(float(data["low"])),
+            high=int(float(data["high"])),
+            gamma=float(data.get("gamma", 1.0)),
+            inverted=bool(data.get("inverted", True)),
+        ).sanitized()
+    except Exception:
+        return None
+
+
+def default_display_params(
+    img: Any,
+    pixels: np.ndarray | None = None,
+) -> ImageTransformParams:
+    """Choose how an image is first shown.
+
+    1. Settings stored with the file (an Image Lab document's own Low / High /
+       Gamma / Invert) win, so the image opens exactly as it looked there.
+    2. A 16-bit image without stored settings is auto-scaled the Image Lab
+       way; shown over 0..65535 it would usually be almost blank.
+    3. Everything else (8-bit, RGB) is shown over its full range.
+    """
+    embedded = embedded_display_settings(img)
+    if embedded is not None:
+        return embedded
+    inverted = default_inverted_for_pil_image(img, fallback=True)
+    if pixels is not None:
+        source = np.asarray(pixels)
+        if (
+            source.ndim == 2
+            and source.size
+            and np.issubdtype(source.dtype, np.unsignedinteger)
+            and source.dtype.itemsize == 2
+        ):
+            low, high = auto_scale_range_16(source)
+            return ImageTransformParams(low=low, high=high, inverted=inverted).sanitized()
+    return ImageTransformParams(inverted=inverted)
+
+
+# ── Histogram and saturation ────────────────────────────────────────────────
+
+
+def display_histogram(pixels: np.ndarray, bins: int = 256) -> tuple[np.ndarray, int, int]:
+    """Histogram of a 16-bit display source between its darkest and brightest value.
+
+    Returns ``(counts, data_min, data_max)``.  Like Image Lab, the x axis covers
+    the range present in the image rather than the full 16 bits.
+    """
+    source = np.asarray(pixels)
+    if source.size == 0:
+        return np.zeros(bins, dtype=np.int64), 0, MAX_16BIT_VALUE
+    flat = source.reshape(-1)
+    data_min = int(flat.min())
+    data_max = int(flat.max())
+    if data_max <= data_min:
+        counts = np.zeros(bins, dtype=np.int64)
+        counts[0] = flat.size
+        return counts, data_min, data_min + 1
+    counts, _ = np.histogram(flat, bins=bins, range=(data_min, data_max))
+    return counts.astype(np.int64), data_min, data_max
+
+
+def saturation_ceiling(pixels: np.ndarray) -> int:
+    """Largest value the pixel type can hold; pixels at it are saturated."""
+    dtype = np.asarray(pixels).dtype
+    if np.issubdtype(dtype, np.integer):
+        return int(np.iinfo(dtype).max)
+    return MAX_16BIT_VALUE
+
+
+def saturated_mask(pixels: np.ndarray) -> np.ndarray:
+    source = np.asarray(pixels)
+    if source.ndim == 3:
+        source = source[:, :, :3].max(axis=2)
+    return source >= saturation_ceiling(source)
+
+
+# ── ImageJ-compatible brightness / contrast ────────────────────────
+
+
+def imagej_adjust_brightness(
+    low: float,
+    high: float,
+    slider: float,
+    default_low: float,
+    default_high: float,
+) -> tuple[int, int]:
+    """Move the display window like ImageJ's Brightness slider (0..256)."""
+    span = float(default_high - default_low)
+    center = default_low + span * ((IMAGEJ_SLIDER_RANGE - float(slider)) / IMAGEJ_SLIDER_RANGE)
+    width = float(high - low)
+    return int(round(center - width / 2.0)), int(round(center + width / 2.0))
+
+
+def imagej_adjust_contrast(
+    low: float,
+    high: float,
+    slider: float,
+    default_low: float,
+    default_high: float,
+) -> tuple[int, int]:
+    """Change the display window width like ImageJ's Contrast slider (0..256)."""
+    center = low + (high - low) / 2.0
+    span = float(default_high - default_low)
+    mid = IMAGEJ_SLIDER_RANGE / 2.0
+    value = float(slider)
+    if value <= mid:
+        slope = value / mid
+    else:
+        slope = mid / max(1e-9, IMAGEJ_SLIDER_RANGE - value)
+    if slope <= 0:
+        return int(round(low)), int(round(high))
+    half = (0.5 * span) / slope
+    return int(round(center - half)), int(round(center + half))
+
+
+def imagej_slider_positions(
+    low: float,
+    high: float,
+    default_low: float,
+    default_high: float,
+) -> tuple[int, int]:
+    """Brightness and Contrast slider positions ImageJ shows for a window."""
+    span = max(1.0, float(default_high - default_low))
+    width = max(1.0, float(high - low))
+    mid = IMAGEJ_SLIDER_RANGE / 2.0
+    contrast = (span / width) * mid
+    if contrast > mid:
+        contrast = IMAGEJ_SLIDER_RANGE - (width / span) * mid
+    center = low + width / 2.0
+    brightness = IMAGEJ_SLIDER_RANGE - ((center - default_low) / span) * IMAGEJ_SLIDER_RANGE
+    clamp = lambda v: int(round(max(0.0, min(float(IMAGEJ_SLIDER_RANGE), v))))  # noqa: E731
+    return clamp(brightness), clamp(contrast)
+
+
+def bake_display_into_uint16(
+    pixels: np.ndarray,
+    params: ImageTransformParams,
+    *,
+    flip: bool = False,
+) -> np.ndarray:
+    """Return 16-bit pixels with the Low / High / Gamma stretch applied.
+
+    Used only when a display-adjusted TIFF is exported for other programs.
+    """
+    p = params.sanitized()
+    arr = np.asarray(pixels).astype(np.float64)
+    stretched = np.clip((arr - p.low) / max(1.0, float(p.high - p.low)), 0.0, 1.0)
+    if abs(p.gamma - 1.0) > 1e-6:
+        stretched = np.power(stretched, p.gamma)
+    if flip:
+        stretched = 1.0 - stretched
+    return np.rint(stretched * MAX_16BIT_VALUE).astype(np.uint16)

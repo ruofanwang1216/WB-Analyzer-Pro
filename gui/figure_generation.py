@@ -7,8 +7,18 @@ import math
 from pathlib import Path
 import re
 
-from PySide6.QtCore import Qt, Signal, QPoint, QRect, QSize, QTimer
-from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QPdfWriter, QRegion, QImage, QFont, QFontMetrics
+from PySide6.QtCore import Qt, Signal, QLineF, QMarginsF, QPoint, QPointF, QRect, QRectF, QSize, QSizeF, QTimer
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QFontMetrics,
+    QPageLayout,
+    QPageSize,
+    QPainter,
+    QPdfWriter,
+    QPen,
+)
 from PySide6.QtWidgets import (
     QCheckBox,
     QColorDialog,
@@ -39,11 +49,17 @@ import numpy as np
 import pandas as pd
 
 from config.settings import (
+    COLOR_ACCENT,
+    COLOR_ACCENT_DARK,
+    COLOR_ACCENT_LIGHT,
+    COLOR_BORDER,
     COLOR_BORDER_LIGHT,
+    COLOR_SURFACE,
     COLOR_RESULTS_HD,
     COLOR_TEXT,
     COLOR_TEXT_MUTED,
 )
+from gui import theming
 from utils.i18n import LANG_EN, LANG_ZH_CN, tr, tr_display
 
 
@@ -243,10 +259,15 @@ class _ColumnTableWidget(QTableWidget):
 
 class _PreviewScrollArea(QScrollArea):
     clicked = Signal()
+    resized = Signal()
 
     def mousePressEvent(self, event) -> None:
         self.clicked.emit()
         super().mousePressEvent(event)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.resized.emit()
 
 
 class _GroupHeaderView(QHeaderView):
@@ -273,23 +294,33 @@ class _GroupHeaderView(QHeaderView):
 
 @dataclass
 class FigureStyleConfig:
+    """Visual style of the quantification bar graph.
+
+    The defaults follow GraphPad Prism's "Column bar, mean with SD" look:
+    bold Arial, heavy black axes with outward ticks, gray bars with a black
+    outline, black SD error bars, 45 degree group labels.
+    """
+
     font_family: str = "Arial"
-    plot_width: int = 500
-    plot_height: int = 320
+    plot_width: int = 320
+    # Prism keeps each column the same width, so the x axis grows with the
+    # number of groups until the user sets a width by hand.
+    plot_width_auto: bool = True
+    plot_height: int = 340
     title: str = ""
-    title_font_size: int = 14
+    title_font_size: int = 16
     title_bold: bool = True
     title_alignment: str = "center"  # left, center, right
     title_offset_x: int = 0
     title_offset_y: int = 0
     x_title: str = ""
-    x_title_font_size: int = 12
-    x_title_bold: bool = False
+    x_title_font_size: int = 14
+    x_title_bold: bool = True
     x_title_offset_x: int = 0
     x_title_offset_y: int = 0
-    y_title: str = ""
-    y_title_font_size: int = 12
-    y_title_bold: bool = False
+    y_title: str = "Relative Protein Level"
+    y_title_font_size: int = 17
+    y_title_bold: bool = True
     y_title_offset_x: int = 0
     y_title_offset_y: int = 0
     y_auto: bool = True
@@ -297,7 +328,8 @@ class FigureStyleConfig:
     y_max: float | None = None
     y_major_interval: float | None = None
     y_minor_interval: float | None = None
-    tick_label_font_size: int = 10
+    tick_label_font_size: int = 16
+    tick_label_bold: bool = True
     frame_style: str = "left_bottom"  # no_frame, left_bottom, box_frame
     show_major_grid: bool = False
     major_grid_color: QColor = field(default_factory=lambda: QColor("#E0E0E0"))
@@ -308,22 +340,43 @@ class FigureStyleConfig:
     minor_grid_width: float = 0.8
     minor_grid_style: str = "dotted"  # solid, dashed, dotted
     show_x_tick_labels: bool = True
-    x_tick_rotation: int = 0
-    x_axis_thickness: float = 1.5
-    y_axis_thickness: float = 1.5
+    x_tick_rotation: int = 45
+    x_axis_thickness: float = 3.0
+    y_axis_thickness: float = 3.0
     show_minor_tick_labels: bool = False
-    bar_width: float = 0.60
+    bar_width: float = 0.62
+    bar_border_width: float = 3.0
+    bar_palette: str = "single"  # key of BAR_PALETTES, or "single"
     show_error: bool = True
-    error_thickness: float = 1.0
-    show_scatter: bool = True
+    error_thickness: float = 1.5
+    show_scatter: bool = False
     scatter_size: float = 6.0
     colors: dict[str, QColor] = field(
         default_factory=lambda: {
-            "bar": QColor("#808080"),
+            "bar": QColor("#A6A6A6"),
+            "border": QColor("#000000"),
             "error": QColor("#000000"),
             "scatter": QColor("#000000"),
         }
     )
+
+
+# Per-group bar fills. "prism" follows the light blue / indigo / crimson
+# scheme of a typical Prism figure; the others are common journal choices.
+BAR_PALETTES: dict[str, tuple[str, list[str]]] = {
+    "prism": ("Prism Colors", ["#7EA2F5", "#3A4BB5", "#A51C29", "#F2A541", "#5DAE8B", "#8C6BC0", "#E27D9E", "#9AA5B1"]),
+    "grayscale": ("Grayscale", ["#FFFFFF", "#BDBDBD", "#7A7A7A", "#3C3C3C", "#E3E3E3", "#9E9E9E", "#5C5C5C", "#1E1E1E"]),
+    "colorblind": ("Colorblind Safe", ["#56B4E9", "#E69F00", "#009E73", "#CC79A7", "#0072B2", "#D55E00", "#F0E442", "#999999"]),
+    "pastel": ("Soft Pastel", ["#A9C5EB", "#F4B6B0", "#B5DCC0", "#F7D59C", "#CDB8E0", "#9FD4D6", "#F2C1D9", "#CFCFCF"]),
+    "single": ("Single Color", []),
+}
+
+
+def bar_fill_color(cfg: "FigureStyleConfig", index: int) -> QColor:
+    palette = BAR_PALETTES.get(cfg.bar_palette, ("", []))[1]
+    if not palette:
+        return QColor(cfg.colors.get("bar", QColor("#A6A6A6")))
+    return QColor(palette[index % len(palette)])
 
 
 def _copy_style_config_into(target: FigureStyleConfig, source: FigureStyleConfig) -> None:
@@ -468,50 +521,7 @@ class FigureControlDialog(QDialog):
         return QColor(value)
 
     def _apply_defaults(self) -> None:
-        default = FigureStyleConfig()
-        self._cfg.font_family = default.font_family
-        self._cfg.plot_width = default.plot_width
-        self._cfg.plot_height = default.plot_height
-        self._cfg.title = default.title
-        self._cfg.title_font_size = default.title_font_size
-        self._cfg.title_bold = default.title_bold
-        self._cfg.title_alignment = default.title_alignment
-        self._cfg.title_offset_x = default.title_offset_x
-        self._cfg.title_offset_y = default.title_offset_y
-        self._cfg.x_title = default.x_title
-        self._cfg.x_title_font_size = default.x_title_font_size
-        self._cfg.x_title_offset_x = default.x_title_offset_x
-        self._cfg.x_title_offset_y = default.x_title_offset_y
-        self._cfg.y_title = default.y_title
-        self._cfg.y_title_font_size = default.y_title_font_size
-        self._cfg.y_title_offset_x = default.y_title_offset_x
-        self._cfg.y_title_offset_y = default.y_title_offset_y
-        self._cfg.y_auto = default.y_auto
-        self._cfg.y_min = default.y_min
-        self._cfg.y_max = default.y_max
-        self._cfg.y_major_interval = default.y_major_interval
-        self._cfg.y_minor_interval = default.y_minor_interval
-        self._cfg.tick_label_font_size = default.tick_label_font_size
-        self._cfg.frame_style = "left_bottom"  # always fixed
-        self._cfg.show_major_grid = default.show_major_grid
-        self._cfg.major_grid_color = self._copy_color(default.major_grid_color)
-        self._cfg.major_grid_width = default.major_grid_width
-        self._cfg.major_grid_style = default.major_grid_style
-        self._cfg.show_minor_grid = default.show_minor_grid
-        self._cfg.minor_grid_color = self._copy_color(default.minor_grid_color)
-        self._cfg.minor_grid_width = default.minor_grid_width
-        self._cfg.minor_grid_style = default.minor_grid_style
-        self._cfg.show_x_tick_labels = default.show_x_tick_labels
-        self._cfg.x_tick_rotation = default.x_tick_rotation
-        self._cfg.x_axis_thickness = default.x_axis_thickness
-        self._cfg.y_axis_thickness = default.y_axis_thickness
-        self._cfg.show_minor_tick_labels = default.show_minor_tick_labels
-        self._cfg.bar_width = default.bar_width
-        self._cfg.show_error = default.show_error
-        self._cfg.error_thickness = default.error_thickness
-        self._cfg.show_scatter = default.show_scatter
-        self._cfg.scatter_size = default.scatter_size
-        self._cfg.colors = {k: QColor(v) for k, v in default.colors.items()}
+        _copy_style_config_into(self._cfg, FigureStyleConfig())
 
     def _build_general_panel(self) -> QWidget:
         panel = QWidget()
@@ -520,11 +530,15 @@ class FigureControlDialog(QDialog):
         form.setSpacing(8)
 
         plot_width_spin = _DSpin()
-        plot_width_spin.setRange(240, 4000)
+        plot_width_spin.setRange(120, 4000)
         plot_width_spin.setDecimals(0)
         plot_width_spin.setValue(float(self._cfg.plot_width))
         plot_width_spin.valueChanged.connect(
-            lambda value: (setattr(self._cfg, "plot_width", int(value)), self._emit_changed())
+            lambda value: (
+                setattr(self._cfg, "plot_width", int(value)),
+                setattr(self._cfg, "plot_width_auto", False),
+                self._emit_changed(),
+            )
         )
         form.addRow("Plot Width", plot_width_spin)
 
@@ -841,6 +855,37 @@ class FigureControlDialog(QDialog):
         width_spin.valueChanged.connect(lambda value: (setattr(self._cfg, "bar_width", float(value)), self._emit_changed()))
         form.addRow("Bar Width", width_spin)
 
+        palette_combo = QComboBox()
+        for key, (label, _colors) in BAR_PALETTES.items():
+            palette_combo.addItem(label, key)
+        palette_index = palette_combo.findData(self._cfg.bar_palette)
+        palette_combo.setCurrentIndex(max(0, palette_index))
+        palette_combo.currentIndexChanged.connect(
+            lambda _i: (
+                setattr(self._cfg, "bar_palette", str(palette_combo.currentData())),
+                self._emit_changed(),
+            )
+        )
+        form.addRow("Bar Colors", palette_combo)
+        self._palette_combo = palette_combo
+
+        border_spin = _DSpin()
+        border_spin.setRange(0.0, 6.0)
+        border_spin.setSingleStep(0.5)
+        border_spin.setDecimals(1)
+        border_spin.setValue(float(self._cfg.bar_border_width))
+        border_spin.valueChanged.connect(
+            lambda value: (setattr(self._cfg, "bar_border_width", float(value)), self._emit_changed())
+        )
+        form.addRow("Bar Border", border_spin)
+
+        tick_bold_chk = QCheckBox("Bold axis labels")
+        tick_bold_chk.setChecked(self._cfg.tick_label_bold)
+        tick_bold_chk.toggled.connect(
+            lambda checked: (setattr(self._cfg, "tick_label_bold", bool(checked)), self._emit_changed())
+        )
+        form.addRow("", tick_bold_chk)
+
         err_chk = QCheckBox("Show error bars")
         err_chk.setChecked(self._cfg.show_error)
         err_chk.toggled.connect(lambda checked: (setattr(self._cfg, "show_error", bool(checked)), self._emit_changed()))
@@ -879,6 +924,7 @@ class FigureControlDialog(QDialog):
             form.addRow(label, btn)
 
         _mk_button("bar", "Bar Color")
+        _mk_button("border", "Border Color")
         _mk_button("error", "Error Color")
         _mk_button("scatter", "Scatter Color")
         return panel
@@ -911,14 +957,33 @@ class FigureControlDialog(QDialog):
             self._cfg.colors[key] = QColor(chosen)
         else:
             setattr(self._cfg, key, QColor(chosen))
+        if key == "bar" and self._cfg.bar_palette != "single":
+            # Choosing one bar colour means every bar uses it.
+            self._cfg.bar_palette = "single"
+            combo = getattr(self, "_palette_combo", None)
+            if combo is not None:
+                combo.blockSignals(True)
+                combo.setCurrentIndex(max(0, combo.findData("single")))
+                combo.blockSignals(False)
         self._update_color_button(key)
         self._emit_changed()
 
 
 class _PrismBarPlotWidget(QWidget):
+    """Column bar graph drawn in the GraphPad Prism look.
+
+    All geometry is computed in *figure units* (1 unit = 1 pt in the exported
+    PDF).  The on-screen widget is the figure scaled by ``display_scale``, so
+    zooming the preview never changes the figure's proportions.
+    """
+
     clicked = Signal()
     openControlPanel = Signal(str)
     styleEdited = Signal()
+
+    _TICK_LEN = 9.0
+    _TICK_GAP = 5.0
+    _EDGE = 14.0
 
     def __init__(
         self,
@@ -936,6 +1001,7 @@ class _PrismBarPlotWidget(QWidget):
         self._means = means
         self._errors = errors
         self._style_config = style_config or FigureStyleConfig()
+        self._display_scale = 1.0
         self._title_hit_rect = QRect()
         self._x_title_hit_rect = QRect()
         self._y_title_hit_rect = QRect()
@@ -952,30 +1018,30 @@ class _PrismBarPlotWidget(QWidget):
         self._x_handle_rects: list[QRect] = [QRect(), QRect()]  # left, right
         self._y_handle_rects: list[QRect] = [QRect(), QRect()]  # top, bottom
         self._plot_rect_cache: QRect = QRect()  # cached plot area for immediate handle calc
-        self.setMinimumSize(760, 460)
+        self.setMinimumSize(80, 80)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
 
-    def _update_handle_rects(self) -> None:
-        """Compute handle positions via a fresh compute_layout call.
+    # ------------------------------------------------------------------ scale
+    def set_display_scale(self, scale: float) -> None:
+        self._display_scale = max(0.05, float(scale))
+        self.update()
 
-        This avoids relying on _plot_rect_cache which may be stale (e.g. after a
-        zoom change or before the first repaint after widget creation).
-        """
-        # Replicate just enough of paintEvent to get the plot QRect.
-        peak_values: list[float] = []
-        for mean, err in zip(self._means, self._errors):
-            peak_values.append(max(0.0, mean + err))
-        for vals in self._grouped_values:
-            for v in vals:
-                peak_values.append(float(v))
-        y_min, y_max = self._resolve_y_range(peak_values)
-        y_range = max(1e-9, y_max - y_min)
-        major_ticks = self._generate_ticks(y_min, y_max, self._style_config.y_major_interval)
-        if not major_ticks:
-            ticks = 5
-            major_ticks = [y_min + ((y_range * i) / ticks) for i in range(ticks + 1)]
-        layout = self.compute_layout(self._style_config, self.size(), major_ticks)
+    def display_scale(self) -> float:
+        return self._display_scale
+
+    def _logical_size(self) -> QSize:
+        s = self._display_scale
+        return QSize(max(1, int(round(self.width() / s))), max(1, int(round(self.height() / s))))
+
+    def _to_logical(self, pos) -> QPoint:
+        s = self._display_scale
+        return QPoint(int(round(pos.x() / s)), int(round(pos.y() / s)))
+
+    def _update_handle_rects(self) -> None:
+        """Compute handle positions via a fresh compute_layout call."""
+        _y_min, _y_max, major_ticks, _minor = self._axis_ticks()
+        layout = self.compute_layout(self._style_config, self._logical_size(), major_ticks)
         p = layout["plot"]
         if p.isNull() or p.width() <= 10 or p.height() <= 10:
             return
@@ -986,11 +1052,12 @@ class _PrismBarPlotWidget(QWidget):
         self._y_handle_rects[1] = QRect(p.left() - _HS // 2,  p.bottom() - _HS // 2, _HS, _HS)
         self._plot_rect_cache = QRect(p)
 
+    # ------------------------------------------------------------------ mouse
     def mousePressEvent(self, event) -> None:
         self.clicked.emit()
 
         if event.button() == Qt.MouseButton.LeftButton:
-            pos = event.position().toPoint()
+            pos = self._to_logical(event.position())
 
             # 1. If handles are already visible, check for drag-start on a handle first.
             if self._axis_handle_mode == "x":
@@ -1068,7 +1135,7 @@ class _PrismBarPlotWidget(QWidget):
 
     def mouseMoveEvent(self, event) -> None:
         if self._axis_drag_active and self._axis_drag_start_pos is not None:
-            pos = event.position().toPoint()
+            pos = self._to_logical(event.position())
             if self._axis_handle_mode == "x":
                 delta = pos.x() - self._axis_drag_start_pos.x()
                 # right handle → drag right = wider; left handle → drag left = wider
@@ -1076,7 +1143,8 @@ class _PrismBarPlotWidget(QWidget):
                     new_size = max(80, self._axis_drag_start_size + delta)
                 else:
                     new_size = max(80, self._axis_drag_start_size - delta)
-                self._style_config.plot_width = float(new_size)
+                self._style_config.plot_width = int(new_size)
+                self._style_config.plot_width_auto = False
                 self.update()
                 self.styleEdited.emit()
             elif self._axis_handle_mode == "y":
@@ -1086,7 +1154,7 @@ class _PrismBarPlotWidget(QWidget):
                     new_size = max(80, self._axis_drag_start_size + delta)
                 else:
                     new_size = max(80, self._axis_drag_start_size - delta)
-                self._style_config.plot_height = float(new_size)
+                self._style_config.plot_height = int(new_size)
                 self.update()
                 self.styleEdited.emit()
             event.accept()
@@ -1104,7 +1172,7 @@ class _PrismBarPlotWidget(QWidget):
 
     def mouseDoubleClickEvent(self, event) -> None:
         self.clicked.emit()
-        pos = event.position().toPoint()
+        pos = self._to_logical(event.position())
         if self._title_hit_rect.contains(pos):
             self.openControlPanel.emit("general")
         elif self._y_axis_hit_rect.contains(pos):
@@ -1147,6 +1215,93 @@ class _PrismBarPlotWidget(QWidget):
         self.styleEdited.emit()
         event.accept()
 
+    _AUTO_WIDTH_PER_GROUP = 80
+
+    def apply_auto_width(self) -> None:
+        """Size the x axis from the number of groups while width is automatic."""
+        cfg = self._style_config
+        if cfg.plot_width_auto:
+            cfg.plot_width = max(160, self._AUTO_WIDTH_PER_GROUP * max(1, len(self._group_names)))
+
+    # ------------------------------------------------------------------ scale maths
+    @staticmethod
+    def _nice_interval(span: float, target: int = 5) -> float:
+        """Prism-like tick step: 1, 2, 2.5 or 5 × 10^n giving about `target` steps."""
+        if not math.isfinite(span) or span <= 0:
+            return 1.0
+        raw = span / max(1, target)
+        magnitude = 10 ** math.floor(math.log10(raw))
+        for step in (1.0, 2.0, 2.5, 5.0, 10.0):
+            if step * magnitude >= raw * 0.999:
+                return step * magnitude
+        return 10.0 * magnitude
+
+    def _data_values(self) -> list[float]:
+        cfg = self._style_config
+        values: list[float] = [0.0]
+        for mean, err in zip(self._means, self._errors):
+            values.append(float(mean))
+            if cfg.show_error:
+                values.extend((float(mean) + float(err), float(mean) - float(err)))
+        if cfg.show_scatter:
+            for vals in self._grouped_values:
+                values.extend(float(v) for v in vals)
+        return [v for v in values if math.isfinite(v)]
+
+    def _resolve_y_range(self, _peak_values: list[float] | None = None) -> tuple[float, float]:
+        y_min, y_max, _interval = self._resolve_axis()
+        return y_min, y_max
+
+    def _resolve_axis(self) -> tuple[float, float, float]:
+        cfg = self._style_config
+        values = self._data_values()
+        lo, hi = min(values), max(values)
+        if not cfg.y_auto:
+            min_v = 0.0 if cfg.y_min is None else float(cfg.y_min)
+            if cfg.y_max is None:
+                interval = cfg.y_major_interval or self._nice_interval(max(hi - min_v, 1e-9))
+                max_v = math.ceil(hi / interval - 1e-9) * interval
+            else:
+                max_v = float(cfg.y_max)
+            if max_v <= min_v:
+                min_v, max_v = 0.0, max(1.0, hi)
+            interval = cfg.y_major_interval or self._nice_interval(max_v - min_v)
+            return min_v, max_v, interval
+        if hi <= lo:
+            hi = lo + 1.0
+        interval = cfg.y_major_interval or self._nice_interval(hi - lo)
+        y_max = math.ceil(hi / interval - 1e-9) * interval if hi > 0 else 0.0
+        y_min = math.floor(lo / interval + 1e-9) * interval if lo < 0 else 0.0
+        if y_max <= y_min:
+            y_max = y_min + interval
+        return y_min, y_max, interval
+
+    def _axis_ticks(self) -> tuple[float, float, list[float], list[float]]:
+        cfg = self._style_config
+        y_min, y_max, interval = self._resolve_axis()
+        major = self._generate_ticks(y_min, y_max, interval)
+        if not major:
+            major = [y_min, y_max]
+        minor = self._generate_minor_ticks(y_min, y_max, cfg.y_minor_interval, major, interval)
+        return y_min, y_max, major, minor
+
+    @staticmethod
+    def _tick_labels(ticks: list[float]) -> list[str]:
+        if not ticks:
+            return []
+        decimals = 6
+        for d in range(0, 7):
+            if all(abs(round(t, d) - t) <= 1e-9 * max(1.0, abs(t)) for t in ticks):
+                decimals = d
+                break
+        labels = []
+        for t in ticks:
+            text = f"{t:.{decimals}f}"
+            if text.startswith("-") and float(text) == 0:
+                text = text[1:]
+            labels.append(text)
+        return labels
+
     @staticmethod
     def _axis_max(values: list[float]) -> float:
         if not values:
@@ -1166,30 +1321,6 @@ class _PrismBarPlotWidget(QWidget):
             nice = 10
         return nice * magnitude
 
-    def _resolve_y_range(self, peak_values: list[float]) -> tuple[float, float]:
-        cfg = self._style_config
-        if not cfg.y_auto:
-            auto_max = max(1.0, self._axis_max([v for v in peak_values if v > 0] or [1.0]) * 1.08)
-            min_v = 0.0 if cfg.y_min is None else float(cfg.y_min)
-            max_v = auto_max if cfg.y_max is None else float(cfg.y_max)
-            if max_v <= min_v:
-                min_v, max_v = 0.0, auto_max
-            return min_v, max_v
-        # Auto mode — include negatives
-        all_vals: list[float] = list(peak_values)
-        for mean, err in zip(self._means, self._errors):
-            all_vals.append(mean - err)
-        for vals in self._grouped_values:
-            all_vals.extend(vals)
-        if not all_vals:
-            return 0.0, 1.0
-        raw_max = max(all_vals)
-        raw_min = min(all_vals)
-        auto_max = self._axis_max([raw_max]) * 1.08 if raw_max > 0 else 0.0
-        auto_min = -self._axis_max([-raw_min]) * 1.08 if raw_min < 0 else 0.0
-        auto_max = max(auto_max, 1.0) if auto_min == 0.0 else auto_max
-        return auto_min, auto_max
-
     @staticmethod
     def _pen_style(name: str) -> Qt.PenStyle:
         if name == "dashed":
@@ -1203,13 +1334,14 @@ class _PrismBarPlotWidget(QWidget):
             return []
         ticks: list[float] = []
         eps = max(1e-12, abs(interval) * 1e-9)
-        start = math.ceil((y_min - eps) / interval) * interval
-        value = start
+        start = math.ceil((y_min - eps) / interval)
+        index = start
         guard = 0
-        while value <= y_max + eps:
+        while index * interval <= y_max + eps:
+            value = index * interval
             if value >= y_min - eps:
-                ticks.append(float(value))
-            value += interval
+                ticks.append(float(round(value, 12)))
+            index += 1
             guard += 1
             if guard > 2000:
                 break
@@ -1240,10 +1372,75 @@ class _PrismBarPlotWidget(QWidget):
         }.get(text_align, Qt.AlignmentFlag.AlignHCenter)
 
     def _font(self, size: int, bold: bool = False) -> QFont:
+        # Pixel sizes keep the figure identical on every screen DPI; in the
+        # exported PDF one pixel becomes one point.
         font = QFont(self._style_config.font_family or "Arial")
-        font.setPointSize(max(7, int(size)))
+        font.setPixelSize(max(6, int(size)))
         font.setBold(bool(bold))
         return font
+
+    # ------------------------------------------------------------------ layout
+    def _margins(self, config: FigureStyleConfig, major_ticks: list[float], plot_w: float) -> dict[str, float]:
+        tick_font = self._font(config.tick_label_font_size, config.tick_label_bold)
+        fm = QFontMetrics(tick_font)
+        labels = self._tick_labels(major_ticks) or ["0"]
+        max_y_label_w = max(fm.horizontalAdvance(label) for label in labels)
+        y_axis_w = float(config.y_axis_thickness)
+        x_axis_w = float(config.x_axis_thickness)
+
+        y_title_w = 0.0
+        if config.y_title.strip():
+            y_title_w = QFontMetrics(self._font(config.y_title_font_size, config.y_title_bold)).height() + 10.0
+
+        left = self._EDGE + y_title_w + max_y_label_w + self._TICK_GAP + self._TICK_LEN + y_axis_w / 2.0
+        title_h = 0.0
+        if config.title.strip():
+            title_h = QFontMetrics(self._font(config.title_font_size, config.title_bold)).height() + 10.0
+        top = self._EDGE + title_h + fm.height() / 2.0
+        right = 16.0
+
+        x_tick_h = 0.0
+        names = self._group_names
+        if config.show_x_tick_labels and names:
+            rot = max(0, min(90, int(config.x_tick_rotation)))
+            rad = math.radians(rot)
+            h = float(fm.height())
+            widths = [float(fm.horizontalAdvance(name)) for name in names]
+            slot = plot_w / max(1, len(names))
+            if rot == 0:
+                x_tick_h = h
+                overflow_left = max(w / 2.0 - (i + 0.5) * slot for i, w in enumerate(widths))
+                overflow_right = max((i + 0.5) * slot + w / 2.0 - plot_w for i, w in enumerate(widths))
+                right = max(right, overflow_right + self._EDGE)
+            else:
+                x_tick_h = max(widths) * math.sin(rad) + h * math.cos(rad)
+                overflow_left = max(
+                    w * math.cos(rad) + h * math.sin(rad) / 2.0 - (i + 0.5) * slot for i, w in enumerate(widths)
+                )
+            left = max(left, overflow_left + self._EDGE)
+
+        x_title_h = 0.0
+        if config.x_title.strip():
+            x_title_h = QFontMetrics(self._font(config.x_title_font_size, config.x_title_bold)).height() + 10.0
+
+        bottom = self._EDGE + x_axis_w / 2.0 + self._TICK_LEN + self._TICK_GAP + x_tick_h + x_title_h
+        return {
+            "left": math.ceil(left),
+            "top": math.ceil(top),
+            "right": math.ceil(right),
+            "bottom": math.ceil(bottom),
+            "y_label_w": float(max_y_label_w),
+            "x_tick_h": float(x_tick_h),
+        }
+
+    def preferred_size(self) -> QSize:
+        """Figure size (in figure units) that fits the plot area and all labels."""
+        cfg = self._style_config
+        _y_min, _y_max, major, _minor = self._axis_ticks()
+        plot_w = max(20, int(cfg.plot_width))
+        plot_h = max(20, int(cfg.plot_height))
+        m = self._margins(cfg, major, plot_w)
+        return QSize(int(m["left"] + plot_w + m["right"]), int(m["top"] + plot_h + m["bottom"]))
 
     def compute_layout(
         self,
@@ -1252,53 +1449,17 @@ class _PrismBarPlotWidget(QWidget):
         major_ticks: list[float] | None = None,
     ) -> dict[str, QRect]:
         major_ticks = major_ticks or []
-        tick_font = self._font(config.tick_label_font_size, False)
-        tick_metrics = QFontMetrics(tick_font)
-        y_labels = [f"{tick:.2f}" for tick in major_ticks] if major_ticks else ["0.00"]
-        max_y_label_width = max([tick_metrics.horizontalAdvance(label) for label in y_labels] + [16])
-
-        y_title_space = 0
-        if config.y_title.strip():
-            y_title_metrics = QFontMetrics(self._font(config.y_title_font_size, config.y_title_bold))
-            y_title_space = y_title_metrics.height() + 20
-
-        title_height = 0
-        if config.title.strip():
-            title_height = QFontMetrics(self._font(config.title_font_size, config.title_bold)).height() + 8
-
-        max_x_label = ""
-        if self._group_names:
-            max_x_label = max(self._group_names, key=len)
-        x_tick_metrics = QFontMetrics(self._font(config.tick_label_font_size, False))
-        x_tick_h = 0
-        if config.show_x_tick_labels and self._group_names:
-            rot_deg = int(config.x_tick_rotation)
-            if rot_deg == 0:
-                x_tick_h = x_tick_metrics.height() + 8
-            else:
-                # For arbitrary angles: vertical space = |label_w * sin(θ)| + |text_h * cos(θ)|
-                rad = math.radians(abs(rot_deg))
-                label_w = x_tick_metrics.horizontalAdvance(max_x_label)
-                label_h = x_tick_metrics.height()
-                x_tick_h = int(abs(label_w * math.sin(rad)) + abs(label_h * math.cos(rad))) + 8
-
-        x_title_h = 0
-        if config.x_title.strip():
-            x_title_h = QFontMetrics(self._font(config.x_title_font_size, config.x_title_bold)).height() + 10
-
-        left_margin = 16 + y_title_space + max_y_label_width + 8 + 6
-        top_margin = 12 + title_height
-        bottom_margin = 14 + x_tick_h + x_title_h
-        right_margin = 16
-
-        available_w = max(20, size.width() - left_margin - right_margin)
-        available_h = max(20, size.height() - top_margin - bottom_margin)
         desired_w = max(20, int(config.plot_width))
         desired_h = max(20, int(config.plot_height))
+        m = self._margins(config, major_ticks, desired_w)
+        left, top, right, bottom = int(m["left"]), int(m["top"]), int(m["right"]), int(m["bottom"])
+
+        available_w = max(20, size.width() - left - right)
+        available_h = max(20, size.height() - top - bottom)
         plot_w = min(available_w, desired_w)
         plot_h = min(available_h, desired_h)
-        plot_left = left_margin + max(0, (available_w - plot_w) // 2)
-        plot_top = top_margin + max(0, (available_h - plot_h) // 2)
+        plot_left = left + max(0, (available_w - plot_w) // 2)
+        plot_top = top + max(0, (available_h - plot_h) // 2)
 
         plot = QRect(plot_left, plot_top, plot_w, plot_h)
         if plot.width() < 20 or plot.height() < 20:
@@ -1311,27 +1472,30 @@ class _PrismBarPlotWidget(QWidget):
                 "y_axis_hit_rect": QRect(),
             }
 
-        title_rect = QRect(plot.left(), 4, plot.width(), max(18, title_height))
+        title_h = QFontMetrics(self._font(config.title_font_size, config.title_bold)).height()
+        title_rect = QRect(plot.left(), int(self._EDGE), plot.width(), max(18, title_h))
         title_rect.translate(int(config.title_offset_x), int(config.title_offset_y))
 
-        x_title_rect = QRect(
-            plot.left(),
-            plot.bottom() + 6 + x_tick_h,
-            plot.width(),
-            max(18, x_title_h),
+        x_label_bottom = (
+            plot.bottom() + config.x_axis_thickness / 2.0 + self._TICK_LEN + self._TICK_GAP + m["x_tick_h"]
         )
+        x_title_h = QFontMetrics(self._font(config.x_title_font_size, config.x_title_bold)).height()
+        x_title_rect = QRect(plot.left(), int(x_label_bottom + 6), plot.width(), max(18, x_title_h))
         x_title_rect.translate(int(config.x_title_offset_x), int(config.x_title_offset_y))
 
-        y_axis_x = plot.left()
-        y_label_left = y_axis_x - 6 - 8 - max_y_label_width
         y_title_metrics = QFontMetrics(self._font(config.y_title_font_size, config.y_title_bold))
-        y_title_center_x = y_label_left - 20 - max(8, y_title_metrics.height() // 2)
+        y_label_left = (
+            plot.left() - config.y_axis_thickness / 2.0 - self._TICK_LEN - self._TICK_GAP - m["y_label_w"]
+        )
+        text_h = y_title_metrics.height()
+        text_w = y_title_metrics.horizontalAdvance(config.y_title)
+        y_title_center_x = y_label_left - 10 - text_h / 2.0
         y_title_center_y = plot.center().y()
         y_title_rect = QRect(
-            int(y_title_center_x - max(8, y_title_metrics.height() // 2)),
-            int(y_title_center_y - max(10, y_title_metrics.horizontalAdvance(config.y_title) // 2)),
-            max(16, y_title_metrics.height()),
-            max(20, y_title_metrics.horizontalAdvance(config.y_title)),
+            int(y_title_center_x - text_h / 2.0),
+            int(y_title_center_y - max(10, text_w // 2)),
+            max(16, text_h),
+            max(20, text_w),
         )
         y_title_rect.translate(int(config.y_title_offset_x), int(config.y_title_offset_y))
 
@@ -1344,259 +1508,250 @@ class _PrismBarPlotWidget(QWidget):
             "y_axis_hit_rect": QRect(0, plot.top(), max(1, plot.left() + 10), plot.height()),
         }
 
+    # ------------------------------------------------------------------ painting
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         painter.fillRect(self.rect(), QColor("#FFFFFF"))
+        painter.scale(self._display_scale, self._display_scale)
+        self.paint_figure(painter, self._logical_size(), editing=True)
+        painter.end()
 
-        peak_values: list[float] = []
-        for mean, err in zip(self._means, self._errors):
-            peak_values.append(max(0.0, mean + err))
-        for vals in self._grouped_values:
-            for v in vals:
-                peak_values.append(float(v))
-        y_min, y_max = self._resolve_y_range(peak_values)
+    def paint_figure(self, painter: QPainter, size: QSize, *, editing: bool = False) -> None:
+        """Draw the whole figure into `painter` using figure units."""
+        cfg = self._style_config
+        y_min, y_max, major_ticks, minor_ticks = self._axis_ticks()
         y_range = max(1e-9, y_max - y_min)
 
-        major_ticks = self._generate_ticks(y_min, y_max, self._style_config.y_major_interval)
-        if not major_ticks:
-            ticks = 5
-            major_ticks = [y_min + ((y_range * i) / ticks) for i in range(ticks + 1)]
-
-        minor_ticks = self._generate_minor_ticks(
-            y_min,
-            y_max,
-            self._style_config.y_minor_interval,
-            major_ticks,
-            self._style_config.y_major_interval,
-        )
-
-        layout = self.compute_layout(self._style_config, self.size(), major_ticks)
+        layout = self.compute_layout(cfg, size, major_ticks)
         plot = layout["plot"]
         if plot.isNull() or plot.width() <= 10 or plot.height() <= 10:
             return
 
-        axis_color = QColor("#333333")
-        x_axis_y = plot.bottom()
-        y_axis_x = plot.left()
-        tick_len = 6
-        tick_label_gap = 8
-        y_label_font = self._font(self._style_config.tick_label_font_size, False)
-        y_label_metrics = QFontMetrics(y_label_font)
+        ink = QColor("#000000")
+        left = float(plot.left())
+        right = float(plot.right())
+        top = float(plot.top())
+        bottom = float(plot.bottom())
+        y_axis_w = max(0.5, float(cfg.y_axis_thickness))
+        x_axis_w = max(0.5, float(cfg.x_axis_thickness))
 
         def y_to_px(value: float) -> float:
             clamped = max(y_min, min(float(value), y_max))
-            return plot.bottom() - ((clamped - y_min) / y_range) * plot.height()
+            return bottom - ((clamped - y_min) / y_range) * (bottom - top)
 
-        if self._style_config.show_minor_grid and minor_ticks:
-            minor_color = QColor(self._style_config.minor_grid_color)
+        def flat_pen(color: QColor, width: float) -> QPen:
+            pen = QPen(color, width)
+            pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+            return pen
+
+        # Grid lines sit behind everything else.
+        if cfg.show_minor_grid and minor_ticks:
+            minor_color = QColor(cfg.minor_grid_color)
             minor_color.setAlpha(150)
-            minor_pen = QPen(
-                minor_color,
-                max(0.1, float(self._style_config.minor_grid_width)),
-            )
-            minor_pen.setStyle(self._pen_style(self._style_config.minor_grid_style))
+            minor_pen = QPen(minor_color, max(0.1, float(cfg.minor_grid_width)))
+            minor_pen.setStyle(self._pen_style(cfg.minor_grid_style))
             painter.setPen(minor_pen)
             for tick_val in minor_ticks:
                 y = y_to_px(tick_val)
-                painter.drawLine(plot.left(), int(y), plot.right(), int(y))
-
-        if self._style_config.show_major_grid:
-            major_pen = QPen(
-                self._style_config.major_grid_color,
-                max(0.1, float(self._style_config.major_grid_width)),
-            )
-            major_pen.setStyle(self._pen_style(self._style_config.major_grid_style))
+                painter.drawLine(QLineF(left, y, right, y))
+        if cfg.show_major_grid:
+            major_pen = QPen(cfg.major_grid_color, max(0.1, float(cfg.major_grid_width)))
+            major_pen.setStyle(self._pen_style(cfg.major_grid_style))
             painter.setPen(major_pen)
             for tick_val in major_ticks:
                 y = y_to_px(tick_val)
-                painter.drawLine(plot.left(), int(y), plot.right(), int(y))
+                painter.drawLine(QLineF(left, y, right, y))
 
-        y_ax_pen = QPen(axis_color, max(0.5, float(self._style_config.y_axis_thickness)))
-        y_ax_pen.setStyle(Qt.PenStyle.SolidLine)
-        x_ax_pen = QPen(axis_color, max(0.5, float(self._style_config.x_axis_thickness)))
-        x_ax_pen.setStyle(Qt.PenStyle.SolidLine)
-        frame_style = self._style_config.frame_style
-        if frame_style == "box_frame":
-            painter.setPen(x_ax_pen)
-            painter.drawRect(plot)
-        elif frame_style == "left_bottom":
-            painter.setPen(y_ax_pen)
-            painter.drawLine(plot.left(), plot.top(), plot.left(), plot.bottom())
-            painter.setPen(x_ax_pen)
-            painter.drawLine(plot.left(), plot.bottom(), plot.right(), plot.bottom())
+        n_groups = len(self._group_names)
+        slot_w = (right - left) / max(n_groups, 1)
+        bar_w = slot_w * max(0.1, min(0.95, float(cfg.bar_width)))
+        baseline = y_to_px(max(y_min, min(0.0, y_max)))
+        border_w = max(0.0, float(cfg.bar_border_width))
+        border_color = QColor(cfg.colors.get("border", ink))
+        error_color = QColor(cfg.colors.get("error", ink))
+        scatter_color = QColor(cfg.colors.get("scatter", ink))
 
-        # Draw zero baseline if range spans y=0
-        if y_min < 0 < y_max:
-            zero_y = int(y_to_px(0.0))
-            zero_pen = QPen(axis_color, max(0.5, float(self._style_config.x_axis_thickness)))
-            zero_pen.setStyle(Qt.PenStyle.SolidLine)
-            painter.setPen(zero_pen)
-            painter.drawLine(plot.left(), zero_y, plot.right(), zero_y)
-
-        painter.setFont(y_label_font)
-        painter.setPen(QPen(axis_color, 1.0))
-        for tick_val in major_ticks:
-            y = y_to_px(tick_val)
-            painter.drawLine(int(y_axis_x), int(y), int(y_axis_x - tick_len), int(y))
-            label = f"{tick_val:.2f}"
-            label_w = y_label_metrics.horizontalAdvance(label)
-            text_x = int(y_axis_x - tick_len - tick_label_gap - label_w)
-            painter.drawText(text_x, int(y + (y_label_metrics.ascent() / 2.0)), label)
-        for tick_val in minor_ticks:
-            y = y_to_px(tick_val)
-            painter.drawLine(int(y_axis_x), int(y), int(y_axis_x - max(2, int(tick_len * 0.55))), int(y))
-
-        if self._style_config.show_minor_tick_labels and minor_ticks:
-            minor_label_font = self._font(max(6, int(self._style_config.tick_label_font_size) - 2), False)
-            minor_label_metrics = QFontMetrics(minor_label_font)
-            painter.setFont(minor_label_font)
-            painter.setPen(QPen(axis_color, 0.8))
-            for tick_val in minor_ticks:
-                y = y_to_px(tick_val)
-                label = f"{tick_val:.2f}"
-                label_w = minor_label_metrics.horizontalAdvance(label)
-                text_x = int(y_axis_x - 3 - label_w)
-                painter.drawText(text_x, int(y + (minor_label_metrics.ascent() / 2.0)), label)
-
-        if not self._group_names:
-            return
-
-        slot_w = plot.width() / max(len(self._group_names), 1)
-        bar_w = slot_w * max(0.1, min(0.95, float(self._style_config.bar_width)))
-
-        # Bars, error bars, replicate points.
+        # Bars, error bars and replicate points.
         self._bar_hit_rects = []
-        for idx, name in enumerate(self._group_names):
-            cx = plot.left() + (idx + 0.5) * slot_w
-            mean = float(self._means[idx])
-            err = float(self._errors[idx])
+        centers: list[float] = []
+        for idx in range(n_groups):
+            cx = left + (idx + 0.5) * slot_w
+            centers.append(cx)
+            mean = float(self._means[idx]) if idx < len(self._means) else 0.0
+            err = float(self._errors[idx]) if idx < len(self._errors) else 0.0
             bar_top = y_to_px(mean)
-            baseline_px = y_to_px(max(y_min, 0.0))
-            bar_bottom = baseline_px
-            bar_left = cx - (bar_w / 2)
+            rect = QRectF(cx - bar_w / 2.0, min(bar_top, baseline), bar_w, abs(baseline - bar_top))
+            painter.setBrush(QBrush(bar_fill_color(cfg, idx)))
+            painter.setPen(flat_pen(border_color, border_w) if border_w > 0 else Qt.PenStyle.NoPen)
+            painter.drawRect(rect)
+            self._bar_hit_rects.append(rect.toAlignedRect())
 
-            painter.setPen(QPen(QColor("#4D5F6D"), 1.0))
-            painter.setBrush(QBrush(self._style_config.colors.get("bar", QColor("#808080"))))
-            bar_rect_top = int(min(bar_top, bar_bottom))
-            bar_rect_height = int(abs(bar_bottom - bar_top))
-            painter.drawRect(int(bar_left), bar_rect_top, int(bar_w), bar_rect_height)
-            self._bar_hit_rects.append(
-                QRect(int(bar_left), bar_rect_top, int(max(1, bar_w)), int(max(1, bar_rect_height)))
-            )
-
-            # Error bars (mean ± SD).
-            if self._style_config.show_error and err > 0:
-                y_low = y_to_px(max(y_min, mean - err))
+            if cfg.show_error and err > 0:
+                y_low = y_to_px(mean - err)
                 y_high = y_to_px(mean + err)
-                painter.setPen(
-                    QPen(
-                        self._style_config.colors.get("error", QColor("#2D3B46")),
-                        max(0.5, float(self._style_config.error_thickness)),
-                    )
-                )
-                painter.drawLine(int(cx), int(y_low), int(cx), int(y_high))
-                cap = max(4, int(bar_w * 0.18))
-                painter.drawLine(int(cx - cap), int(y_low), int(cx + cap), int(y_low))
-                painter.drawLine(int(cx - cap), int(y_high), int(cx + cap), int(y_high))
+                err_w = max(0.5, float(cfg.error_thickness))
+                painter.setPen(flat_pen(error_color, err_w))
+                painter.drawLine(QLineF(cx, y_low, cx, y_high))
+                cap = max(4.0, bar_w * 0.22)
+                painter.drawLine(QLineF(cx - cap, y_high, cx + cap, y_high))
+                painter.drawLine(QLineF(cx - cap, y_low, cx + cap, y_low))
 
-            points = self._grouped_values[idx]
-            if self._style_config.show_scatter and points:
+            points = self._grouped_values[idx] if idx < len(self._grouped_values) else []
+            if cfg.show_scatter and points:
                 if len(points) == 1:
                     offsets = [0.0]
                 else:
-                    spread = bar_w * 0.34
+                    spread = bar_w * 0.42
                     offsets = np.linspace(-spread / 2.0, spread / 2.0, num=len(points)).tolist()
-                painter.setPen(QPen(self._style_config.colors.get("scatter", QColor("#1F2A32")), 1.0))
-                painter.setBrush(QBrush(QColor("#FDFDFD")))
-                point_d = max(2.0, float(self._style_config.scatter_size))
+                point_d = max(2.0, float(cfg.scatter_size))
+                painter.setPen(QPen(scatter_color, 0.8))
+                painter.setBrush(QBrush(scatter_color))
                 for off, val in zip(offsets, points):
-                    px = cx + off
-                    py = y_to_px(val)
-                    painter.drawEllipse(
-                        int(px - (point_d / 2.0)),
-                        int(py - (point_d / 2.0)),
-                        int(point_d),
-                        int(point_d),
-                    )
+                    painter.drawEllipse(QPointF(cx + off, y_to_px(val)), point_d / 2.0, point_d / 2.0)
 
-            painter.setPen(QPen(axis_color, 1.0))
-            painter.drawLine(int(cx), int(x_axis_y), int(cx), int(x_axis_y + tick_len))
+        # Axes are drawn over the bars so the bar bases merge into the x axis.
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        frame_style = cfg.frame_style
+        if frame_style == "box_frame":
+            painter.setPen(flat_pen(ink, x_axis_w))
+            painter.drawRect(QRectF(left, top, right - left, bottom - top))
+        elif frame_style == "left_bottom":
+            painter.setPen(flat_pen(ink, y_axis_w))
+            painter.drawLine(QLineF(left, top, left, bottom + x_axis_w / 2.0))
+            painter.setPen(flat_pen(ink, x_axis_w))
+            painter.drawLine(QLineF(left - y_axis_w / 2.0, bottom, right, bottom))
+        if y_min < 0 < y_max:
+            zero_y = y_to_px(0.0)
+            painter.setPen(flat_pen(ink, x_axis_w))
+            painter.drawLine(QLineF(left, zero_y, right, zero_y))
 
-            if self._style_config.show_x_tick_labels:
-                tick_font = self._font(self._style_config.tick_label_font_size, False)
-                painter.setFont(tick_font)
-                painter.setPen(QPen(axis_color, 1.0))
-                label_rect = QRect(int(cx - (slot_w / 2)), int(x_axis_y + tick_len + 2), int(slot_w), 48)
-                rotation = int(self._style_config.x_tick_rotation)
+        # Y ticks (outward) and labels.
+        tick_font = self._font(cfg.tick_label_font_size, cfg.tick_label_bold)
+        tick_metrics = QFontMetrics(tick_font)
+        tick_x0 = left - y_axis_w / 2.0
+        painter.setPen(flat_pen(ink, y_axis_w))
+        for tick_val in major_ticks:
+            y = y_to_px(tick_val)
+            painter.drawLine(QLineF(tick_x0, y, tick_x0 - self._TICK_LEN, y))
+        for tick_val in minor_ticks:
+            y = y_to_px(tick_val)
+            painter.drawLine(QLineF(tick_x0, y, tick_x0 - self._TICK_LEN * 0.55, y))
+        painter.setFont(tick_font)
+        painter.setPen(QPen(ink, 1.0))
+        label_right = tick_x0 - self._TICK_LEN - self._TICK_GAP
+        label_h = float(tick_metrics.height())
+        for tick_val, label in zip(major_ticks, self._tick_labels(major_ticks)):
+            y = y_to_px(tick_val)
+            painter.drawText(
+                QRectF(label_right - 400.0, y - label_h / 2.0, 400.0, label_h),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                label,
+            )
+        if cfg.show_minor_tick_labels and minor_ticks:
+            minor_font = self._font(max(6, int(cfg.tick_label_font_size) - 2), cfg.tick_label_bold)
+            minor_h = float(QFontMetrics(minor_font).height())
+            painter.setFont(minor_font)
+            for tick_val, label in zip(minor_ticks, self._tick_labels(minor_ticks)):
+                y = y_to_px(tick_val)
+                painter.drawText(
+                    QRectF(label_right - 400.0, y - minor_h / 2.0, 400.0, minor_h),
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                    label,
+                )
+
+        # X ticks (outward, one per column) and group labels.
+        tick_y0 = bottom + x_axis_w / 2.0
+        painter.setPen(flat_pen(ink, x_axis_w))
+        for cx in centers:
+            painter.drawLine(QLineF(cx, tick_y0, cx, tick_y0 + self._TICK_LEN))
+        if cfg.show_x_tick_labels and n_groups:
+            painter.setFont(tick_font)
+            painter.setPen(QPen(ink, 1.0))
+            rotation = max(0, min(90, int(cfg.x_tick_rotation)))
+            rad = math.radians(rotation)
+            label_top = tick_y0 + self._TICK_LEN + self._TICK_GAP
+            for cx, name in zip(centers, self._group_names):
+                text_w = float(tick_metrics.horizontalAdvance(name)) + 2.0
                 if rotation == 0:
                     painter.drawText(
-                        label_rect,
+                        QRectF(cx - max(slot_w, text_w) / 2.0, label_top, max(slot_w, text_w), label_h),
                         Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
                         name,
                     )
                 else:
+                    # Prism style: the end of the label sits under its tick and
+                    # the text runs down to the left.
                     painter.save()
-                    anchor = QPoint(int(cx), int(x_axis_y + tick_len + 2))
-                    painter.translate(anchor)
+                    painter.translate(QPointF(cx, label_top + label_h * math.sin(rad) / 2.0))
                     painter.rotate(-rotation)
-                    painter.drawText(QRect(-int(slot_w / 2), -8, int(slot_w), 32), Qt.AlignmentFlag.AlignLeft, name)
+                    painter.drawText(
+                        QRectF(-text_w, -label_h / 2.0, text_w, label_h),
+                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                        name,
+                    )
                     painter.restore()
 
-        if self._style_config.x_title.strip():
-            x_font = self._font(self._style_config.x_title_font_size, self._style_config.x_title_bold)
-            painter.setFont(x_font)
-            painter.setPen(QPen(axis_color, 1.0))
+        if cfg.x_title.strip():
+            painter.setFont(self._font(cfg.x_title_font_size, cfg.x_title_bold))
+            painter.setPen(QPen(ink, 1.0))
             painter.drawText(
                 layout["x_title_rect"],
                 Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
-                self._style_config.x_title,
+                cfg.x_title,
             )
             self._x_title_hit_rect = layout["x_title_rect"].adjusted(-6, -4, 6, 4)
         else:
             self._x_title_hit_rect = QRect()
 
-        if self._style_config.y_title.strip():
-            y_font = self._font(self._style_config.y_title_font_size, self._style_config.y_title_bold)
+        if cfg.y_title.strip():
+            y_font = self._font(cfg.y_title_font_size, cfg.y_title_bold)
+            y_metrics = QFontMetrics(y_font)
+            span = max(float(plot.height()), float(y_metrics.horizontalAdvance(cfg.y_title)) + 10.0)
             painter.save()
             painter.setFont(y_font)
-            painter.setPen(QPen(axis_color, 1.0))
+            painter.setPen(QPen(ink, 1.0))
             y_title_rect = layout["y_title_rect"]
-            anchor_x = y_title_rect.center().x()
-            anchor_y = y_title_rect.center().y()
-            painter.translate(anchor_x, anchor_y)
+            painter.translate(QPointF(y_title_rect.center().x() + 0.5, y_title_rect.center().y() + 0.5))
             painter.rotate(-90)
             painter.drawText(
-                QRect(-plot.height() // 2, -14, plot.height(), 24),
+                QRectF(-span / 2.0, -y_metrics.height() / 2.0, span, float(y_metrics.height())),
                 Qt.AlignmentFlag.AlignCenter,
-                self._style_config.y_title,
+                cfg.y_title,
             )
             painter.restore()
             self._y_title_hit_rect = y_title_rect.adjusted(-6, -4, 6, 4)
         else:
             self._y_title_hit_rect = QRect()
 
-        title_text = self._style_config.title.strip()
+        title_text = cfg.title.strip()
         if title_text:
-            title_font = self._font(self._style_config.title_font_size, self._style_config.title_bold)
-            painter.setFont(title_font)
-            painter.setPen(QPen(axis_color, 1.0))
-            title_align = self._align_for(self._style_config.title_alignment)
+            painter.setFont(self._font(cfg.title_font_size, cfg.title_bold))
+            painter.setPen(QPen(ink, 1.0))
             title_rect = layout["title_rect"]
-            painter.drawText(title_rect, title_align | Qt.AlignmentFlag.AlignVCenter, title_text)
+            painter.drawText(
+                title_rect,
+                self._align_for(cfg.title_alignment) | Qt.AlignmentFlag.AlignVCenter,
+                title_text,
+            )
             self._title_hit_rect = title_rect.adjusted(-8, -4, 8, 4)
         else:
             self._title_hit_rect = QRect()
 
         self._y_axis_hit_rect = layout["y_axis_hit_rect"]
         self._x_axis_hit_rect = layout["x_axis_hit_rect"]
-        self._plot_rect_cache = QRect(plot)  # keep for synchronous handle rect calculation
+        self._plot_rect_cache = QRect(plot)
 
-        # --- Draw axis resize handles (Prism-style) ---
-        _HS = 8  # handle size in pixels
+        if not editing:
+            return
+
+        # --- Axis resize handles and text selection (screen only) ---
+        _HS = 8
         _handle_pen = QPen(QColor("#4A6A8A"), 1.5)
         _handle_brush = QBrush(QColor("#B8D0E8"))
-        if self._axis_handle_mode == "x" and not plot.isNull():
+        if self._axis_handle_mode == "x":
             lx, rx, ay = plot.left(), plot.right(), plot.bottom()
             self._x_handle_rects[0] = QRect(lx - _HS // 2, ay - _HS // 2, _HS, _HS)
             self._x_handle_rects[1] = QRect(rx - _HS // 2, ay - _HS // 2, _HS, _HS)
@@ -1604,7 +1759,7 @@ class _PrismBarPlotWidget(QWidget):
             painter.setBrush(_handle_brush)
             for r in self._x_handle_rects:
                 painter.drawRect(r)
-        elif self._axis_handle_mode == "y" and not plot.isNull():
+        elif self._axis_handle_mode == "y":
             ax, ty, by = plot.left(), plot.top(), plot.bottom()
             self._y_handle_rects[0] = QRect(ax - _HS // 2, ty - _HS // 2, _HS, _HS)
             self._y_handle_rects[1] = QRect(ax - _HS // 2, by - _HS // 2, _HS, _HS)
@@ -1684,6 +1839,51 @@ class _FiguresDialog(QDialog):
         self._refresh_note()
 
 
+_BTN_SECONDARY_STYLE = (
+    "QPushButton {"
+    f"background-color: {COLOR_SURFACE};"
+    f"border: 1px solid {COLOR_BORDER};"
+    "border-radius: 8px;"
+    "color: #3B4A43;"
+    "padding: 6px 12px;"
+    "font-size: 12px;"
+    "}"
+    "QPushButton:hover {"
+    f"background-color: {COLOR_ACCENT_LIGHT};"
+    f"border-color: {COLOR_ACCENT};"
+    "}"
+)
+_BTN_PRIMARY_STYLE = (
+    "QPushButton {"
+    f"background-color: {COLOR_ACCENT};"
+    f"border: 1px solid {COLOR_ACCENT};"
+    "border-radius: 8px;"
+    "color: #FEFEFE;"
+    "padding: 6px 14px;"
+    "font-size: 12px;"
+    "font-weight: 600;"
+    "}"
+    "QPushButton:hover {"
+    f"background-color: {COLOR_ACCENT_DARK};"
+    "}"
+)
+_SIZE_SPIN_STYLE = (
+    "QSpinBox {"
+    f"background-color: {COLOR_SURFACE};"
+    f"border: 1px solid {COLOR_BORDER};"
+    "border-radius: 6px;"
+    "padding: 3px 6px;"
+    "font-size: 13px;"
+    "font-weight: 600;"
+    "min-width: 34px;"
+    "max-width: 46px;"
+    "}"
+    # A plain number pill: type, scroll or use the arrow keys to change it.
+    "QSpinBox::up-button { subcontrol-origin: border; width: 0px; }"
+    "QSpinBox::down-button { subcontrol-origin: border; width: 0px; }"
+)
+
+
 class ColumnTableWindow(QMainWindow):
     """Editable Prism-style column table window."""
     panelFocusRequested = Signal(str)
@@ -1711,6 +1911,9 @@ class ColumnTableWindow(QMainWindow):
         self._editing_group_index: int | None = None
         self._table_zoom_factor = 1.0
         self._figure_zoom_factor = 1.0
+        # While True the figure preview is re-fitted whenever its panel changes
+        # size; zooming by hand turns it off, Fit turns it back on.
+        self._figure_fit_mode = True
         self._preview_plot: _PrismBarPlotWidget | None = None
         self._preview_plot_base_size: tuple[int, int] | None = None
         self._preview_scroll_area: _PreviewScrollArea | None = None
@@ -1719,6 +1922,18 @@ class ColumnTableWindow(QMainWindow):
         self._figure_style_last_snapshot: FigureStyleConfig = _clone_style_config(self._figure_style_config)
         self._figure_style_before_dialog: FigureStyleConfig | None = None
         self._figure_control_dialog: FigureControlDialog | None = None
+        # Workspace conveniences, switched on by the main window: results
+        # flow into the table and the chart redraws without extra clicks.
+        self._auto_figure_enabled = False
+        self._auto_fill_checkbox: QCheckBox | None = None
+        self._auto_fill_checked = True
+        self._samples_spin: QSpinBox | None = None
+        self._replicates_spin: QSpinBox | None = None
+        self._suppress_item_changed = False
+        self._auto_figure_timer = QTimer(self)
+        self._auto_figure_timer.setSingleShot(True)
+        self._auto_figure_timer.setInterval(250)
+        self._auto_figure_timer.timeout.connect(self.auto_generate_figure)
         self.setWindowTitle("Column Table")
         self.resize(840, 520)
         self._build_ui()
@@ -1754,9 +1969,9 @@ class ColumnTableWindow(QMainWindow):
             top_row = rep_index * self._ROWS_PER_REPLICATE
             labels = (
                 (top_row, 0, tr("Replicate {number}", self._language, number=rep_index + 1)),
-                (top_row, 1, tr("Target band", self._language)),
-                (top_row + 1, 1, tr("Loading control", self._language)),
-                (top_row + 2, 1, tr("Normalized result", self._language)),
+                (top_row, 1, tr("Target", self._language)),
+                (top_row + 1, 1, tr("Loading", self._language)),
+                (top_row + 2, 1, tr("Ratio", self._language)),
             )
             for row, column, text in labels:
                 item = self._table.item(row, column)
@@ -1765,35 +1980,55 @@ class ColumnTableWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         central = QWidget(self)
+        central.setObjectName("column_table_root")
+        central.setStyleSheet(
+            "QWidget#column_table_root { background-color: transparent; }"
+            "QWidget#column_table_root QLabel { background: transparent; }"
+            "QWidget#column_table_root QCheckBox { background: transparent; "
+            "font-size: 12px; color: #3B4A43; }"
+        )
         root = QVBoxLayout(central)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(6)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(8)
 
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.setSpacing(6)
         title = QLabel("Column Table")
-        title.setStyleSheet("font-size: 13px; font-weight: 700; color: #2F3C45;")
+        title.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {COLOR_TEXT};")
         top_row.addWidget(title)
         top_row.addStretch(1)
+
+        # Table size is edited in place; no setup dialog needed.
+        groups_label = QLabel("Groups")
+        groups_label.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
+        top_row.addWidget(groups_label)
+        samples_spin = QSpinBox()
+        samples_spin.setObjectName("columnTableGroupsSpin")
+        samples_spin.setRange(1, 24)
+        samples_spin.setValue(self._samples)
+        samples_spin.setStyleSheet(_SIZE_SPIN_STYLE)
+        samples_spin.setToolTip("Number of sample groups (columns)")
+        samples_spin.valueChanged.connect(self._on_size_spin_changed)
+        top_row.addWidget(samples_spin)
+        self._samples_spin = samples_spin
+        replicates_label = QLabel("Replicates")
+        replicates_label.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
+        top_row.addWidget(replicates_label)
+        replicates_spin = QSpinBox()
+        replicates_spin.setObjectName("columnTableReplicatesSpin")
+        replicates_spin.setRange(1, 12)
+        replicates_spin.setValue(self._replicates)
+        replicates_spin.setStyleSheet(_SIZE_SPIN_STYLE)
+        replicates_spin.setToolTip("Number of replicates (row blocks)")
+        replicates_spin.valueChanged.connect(self._on_size_spin_changed)
+        top_row.addWidget(replicates_spin)
+        self._replicates_spin = replicates_spin
+
         self._negative_btn = QPushButton("Select Negative Control")
         self._negative_btn.setObjectName("selectNegativeControlButton")
-        self._negative_btn.setStyleSheet(
-            "QPushButton {"
-            "background-color: #E6EEF3;"
-            "border: 1px solid #BACAD5;"
-            "border-radius: 6px;"
-            "color: #385161;"
-            "padding: 5px 10px;"
-            "font-size: 11px;"
-            "font-weight: 600;"
-            "}"
-            "QPushButton:hover {"
-            "background-color: #DCE7EE;"
-            "}"
-        )
+        self._negative_btn.setStyleSheet(_BTN_SECONDARY_STYLE)
         self._negative_btn.clicked.connect(self._on_select_negative_control_clicked)
-        top_row.addWidget(self._negative_btn)
         root.addLayout(top_row)
 
         total_rows = self._replicates * self._ROWS_PER_REPLICATE
@@ -1805,20 +2040,22 @@ class ColumnTableWindow(QMainWindow):
         table.horizontalHeader().setStretchLastSection(False)
         table.setStyleSheet(
             "QTableWidget#prism_table {"
-            "background-color: #F7FAFC;"
+            f"background-color: {COLOR_SURFACE};"
             f"gridline-color: {COLOR_BORDER_LIGHT};"
-            "border: 1px solid #D0DEE7;"
-            "border-radius: 6px;"
-            "font-size: 12px;"
-            "color: #2E3B45;"
+            f"border: 1px solid {COLOR_BORDER_LIGHT};"
+            "border-radius: 8px;"
+            "font-size: 13px;"
+            f"color: {COLOR_TEXT};"
             "}"
             "QHeaderView::section {"
             f"background-color: {COLOR_RESULTS_HD};"
-            "color: #5A6F7F;"
-            "font-size: 11px;"
-            "font-weight: 700;"
+            f"color: {COLOR_TEXT};"
+            "font-size: 12px;"
+            "font-weight: 600;"
             "padding: 6px;"
-            "border: 1px solid #D0DEE7;"
+            "border: none;"
+            f"border-right: 1px solid {COLOR_BORDER_LIGHT};"
+            f"border-bottom: 1px solid {COLOR_BORDER_LIGHT};"
             "}"
             "QTableWidget::item {"
             "padding: 4px 8px;"
@@ -1845,25 +2082,25 @@ class ColumnTableWindow(QMainWindow):
             replicate_item = QTableWidgetItem(f"Replicate {rep_index + 1}")
             replicate_item.setFlags(replicate_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             replicate_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            replicate_item.setBackground(Qt.GlobalColor.white)
+            replicate_item.setBackground(theming.color("#FFFFFF"))
             table.setItem(top_row, 0, replicate_item)
 
-            target_item = QTableWidgetItem("Target band")
+            target_item = QTableWidgetItem("Target")
             target_item.setFlags(target_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             target_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            target_item.setBackground(Qt.GlobalColor.white)
+            target_item.setBackground(theming.color("#FFFFFF"))
             table.setItem(top_row, 1, target_item)
 
-            control_item = QTableWidgetItem("Loading control")
+            control_item = QTableWidgetItem("Loading")
             control_item.setFlags(control_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             control_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            control_item.setBackground(Qt.GlobalColor.white)
+            control_item.setBackground(theming.color("#FFFFFF"))
             table.setItem(bottom_row, 1, control_item)
 
-            normalized_item = QTableWidgetItem("Normalized result")
+            normalized_item = QTableWidgetItem("Ratio")
             normalized_item.setFlags(normalized_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             normalized_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            normalized_item.setBackground(QColor("#EEF5F0"))
+            normalized_item.setBackground(theming.color("#EEF5F0"))
             table.setItem(normalized_row, 1, normalized_item)
 
             for c in range(2, total_cols):
@@ -1878,7 +2115,7 @@ class ColumnTableWindow(QMainWindow):
                 normalized_data = QTableWidgetItem("")
                 normalized_data.setFlags(normalized_data.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 normalized_data.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                normalized_data.setBackground(QColor("#EEF5F0"))
+                normalized_data.setBackground(theming.color("#EEF5F0"))
                 table.setItem(normalized_row, c, normalized_data)
 
             # Keep the pair visually grouped.
@@ -1893,63 +2130,45 @@ class ColumnTableWindow(QMainWindow):
         table.deleteRequested.connect(self._on_delete_requested)
         root.addWidget(table, 1)
         self._table = table
+        theming.on_change(self._retint_table_for_theme)
         self._apply_table_zoom()
 
+        table.itemChanged.connect(self._on_table_item_changed)
+
+        # Two short rows so nothing is clipped when the panel is narrow.
+        options_row = QHBoxLayout()
+        options_row.setContentsMargins(0, 0, 0, 0)
+        options_row.setSpacing(8)
         bottom_row = QHBoxLayout()
         bottom_row.setContentsMargins(0, 0, 0, 0)
         bottom_row.setSpacing(8)
+        auto_fill = QCheckBox("Auto-fill after Analyze")
+        auto_fill.setObjectName("columnTableAutoFillCheck")
+        auto_fill.setToolTip(
+            "After each Analyze, write the lane values into the highlighted row "
+            "and move on to the next empty row."
+        )
+        auto_fill.setChecked(self._auto_fill_checked)
+        auto_fill.toggled.connect(self._on_auto_fill_toggled)
+        auto_fill.setVisible(self._auto_figure_enabled)
+        options_row.addWidget(auto_fill)
+        self._auto_fill_checkbox = auto_fill
+        options_row.addStretch(1)
+        options_row.addWidget(self._negative_btn)
+        root.addLayout(options_row)
         bottom_row.addStretch(1)
         reset_btn = QPushButton("Reset")
-        reset_btn.setStyleSheet(
-            "QPushButton {"
-            "background-color: #F1E6E6;"
-            "border: 1px solid #D6B8B8;"
-            "border-radius: 7px;"
-            "color: #7A4242;"
-            "padding: 5px 12px;"
-            "font-size: 11px;"
-            "font-weight: 600;"
-            "}"
-            "QPushButton:hover {"
-            "background-color: #EBDADA;"
-            "}"
-        )
+        reset_btn.setStyleSheet(_BTN_SECONDARY_STYLE)
         reset_btn.clicked.connect(self._on_reset_table_clicked)
         bottom_row.addWidget(reset_btn)
-        export_table_btn = QPushButton("Export Table")
-        export_table_btn.setStyleSheet(
-            "QPushButton {"
-            "background-color: #E6EEF3;"
-            "border: 1px solid #BACAD5;"
-            "border-radius: 7px;"
-            "color: #385161;"
-            "padding: 5px 12px;"
-            "font-size: 11px;"
-            "font-weight: 600;"
-            "}"
-            "QPushButton:hover {"
-            "background-color: #DCE7EE;"
-            "}"
-        )
+        export_table_btn = QPushButton("Export")
+        export_table_btn.setStyleSheet(_BTN_SECONDARY_STYLE)
         export_table_btn.clicked.connect(self._on_export_table_clicked)
         bottom_row.addWidget(export_table_btn)
-        figures_btn = QPushButton("Figures Generation")
+        figures_btn = QPushButton("Plot")
         figures_btn.setObjectName("figuresGenerationButton")
         self._figures_btn = figures_btn
-        figures_btn.setStyleSheet(
-            "QPushButton {"
-            "background-color: #C2D3C8;"
-            "border: 1px solid #9EB3A8;"
-            "border-radius: 7px;"
-            "color: #2C4A3D;"
-            "padding: 5px 12px;"
-            "font-size: 11px;"
-            "font-weight: 600;"
-            "}"
-            "QPushButton:hover {"
-            "background-color: #B4C8BB;"
-            "}"
-        )
+        figures_btn.setStyleSheet(_BTN_PRIMARY_STYLE)
         figures_btn.clicked.connect(self._on_figures_generation_clicked)
         bottom_row.addWidget(figures_btn)
         root.addLayout(bottom_row)
@@ -2017,15 +2236,21 @@ class ColumnTableWindow(QMainWindow):
         baseline_mean: float,
     ) -> QWidget:
         panel = QWidget()
+        panel.setObjectName("figure_preview_root")
+        panel.setStyleSheet("QWidget#figure_preview_root { background: transparent; }")
         root = QVBoxLayout(panel)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(6)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(8)
         control_name = self._group_names[self._negative_control_group_index] if self._negative_control_group_index is not None else "N/A"
         note = QLabel(
-            f"Normalization baseline: {control_name} "
-            f"(mean Target/Loading = {baseline_mean:.4g})"
+            tr(
+                "Baseline group: {name} (mean target ÷ loading = {value})",
+                self._language,
+                name=self._display_group_name(control_name),
+                value=f"{baseline_mean:.4g}",
+            )
         )
-        note.setStyleSheet("font-size: 11px; color: #4D6171;")
+        note.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED}; background: transparent;")
         root.addWidget(note)
         scroll = _PreviewScrollArea(panel)
         scroll.setWidgetResizable(False)
@@ -2033,8 +2258,18 @@ class ColumnTableWindow(QMainWindow):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.clicked.connect(lambda: self.panelFocusRequested.emit("figure"))
+        scroll.resized.connect(self._on_preview_viewport_resized)
+        # The well matches the image well; the figure page itself stays white
+        # because that page is exactly what gets exported.
+        scroll.setObjectName("figure_preview_well")
+        scroll.setFrameShape(scroll.Shape.NoFrame)
+        scroll.setStyleSheet(
+            "QScrollArea#figure_preview_well {"
+            f" background-color: {theming.WELL_SOURCE}; border: none; border-radius: 12px; }}"
+        )
+        scroll.viewport().setStyleSheet("background: transparent;")
         plot = _PrismBarPlotWidget(
-            group_names=list(self._group_names),
+            group_names=[self._display_group_name(name) for name in self._group_names],
             grouped_values=grouped_values,
             means=means,
             errors=errors,
@@ -2044,10 +2279,10 @@ class ColumnTableWindow(QMainWindow):
         plot.clicked.connect(lambda: self.panelFocusRequested.emit("figure"))
         plot.openControlPanel.connect(self._on_plot_open_control_panel)
         plot.styleEdited.connect(self._on_style_config_changed)
-        base_w = max(760, 210 * max(1, len(self._group_names)))
-        base_h = 460
+        plot.apply_auto_width()
+        preferred = plot.preferred_size()
         self._preview_plot = plot
-        self._preview_plot_base_size = (base_w, base_h)
+        self._preview_plot_base_size = (preferred.width(), preferred.height())
         self._preview_scroll_area = scroll
         self._apply_figure_zoom()
         scroll.setWidget(plot)
@@ -2056,20 +2291,7 @@ class ColumnTableWindow(QMainWindow):
         button_row.setContentsMargins(0, 0, 0, 0)
         button_row.addStretch(1)
         export_figure_btn = QPushButton("Export Figure")
-        export_figure_btn.setStyleSheet(
-            "QPushButton {"
-            "background-color: #E6EEF3;"
-            "border: 1px solid #BACAD5;"
-            "border-radius: 7px;"
-            "color: #385161;"
-            "padding: 5px 12px;"
-            "font-size: 11px;"
-            "font-weight: 600;"
-            "}"
-            "QPushButton:hover {"
-            "background-color: #DCE7EE;"
-            "}"
-        )
+        export_figure_btn.setStyleSheet(_BTN_SECONDARY_STYLE)
         export_figure_btn.clicked.connect(self._on_export_figure_clicked)
         button_row.addWidget(export_figure_btn)
         root.addLayout(button_row)
@@ -2086,23 +2308,22 @@ class ColumnTableWindow(QMainWindow):
         self._figure_control_dialog = None
 
     def _sync_plot_widget_size(self) -> None:
-        """Resize the figure canvas so the desired plot_width/plot_height always fits.
+        """Resize the figure canvas to the figure's own size (plot area plus labels).
 
-        compute_layout clamps the plot area to (widget_size - margins).  When the
-        user sets plot_height to 600 but the widget is only 460 px tall nothing
-        visible happens.  This method grows (or shrinks) the underlying widget so
-        the requested dimensions are never clipped.
-        The horizontal margin is ~200 px (y-title + y-labels + padding + right pad).
-        The vertical margin is ~150 px (title + x-labels + x-title + padding).
+        The plot widget draws in figure units scaled by the zoom factor, so the
+        canvas is simply the preferred figure size times the zoom.
         """
         if self._preview_plot is None or self._preview_plot_base_size is None:
             return
-        cfg = self._figure_style_config
-        needed_w = max(600, int(cfg.plot_width) + 200)
-        needed_h = max(400, int(cfg.plot_height) + 150)
-        if self._preview_plot_base_size != (needed_w, needed_h):
-            self._preview_plot_base_size = (needed_w, needed_h)
-            self._apply_figure_zoom()
+        self._preview_plot.apply_auto_width()
+        preferred = self._preview_plot.preferred_size()
+        needed = (preferred.width(), preferred.height())
+        if self._preview_plot_base_size != needed:
+            self._preview_plot_base_size = needed
+            if self._figure_fit_mode:
+                self._fit_figure_to_viewport()
+            else:
+                self._apply_figure_zoom()
 
     def _on_style_config_changed(self, *, push_history: bool = True) -> None:
         if push_history:
@@ -2203,7 +2424,7 @@ class ColumnTableWindow(QMainWindow):
     def _apply_figure_zoom(self) -> None:
         if self._preview_plot is None or self._preview_plot_base_size is None:
             return
-        scale = max(0.1, min(2.8, self._figure_zoom_factor))
+        scale = max(0.1, min(4.0, self._figure_zoom_factor))
         self._figure_zoom_factor = scale
         bw, bh = self._preview_plot_base_size
         target_w, target_h = int(bw * scale), int(bh * scale)
@@ -2211,7 +2432,7 @@ class ColumnTableWindow(QMainWindow):
         # previous (larger) minimum and a Fit View request cannot shrink it.
         self._preview_plot.setMinimumSize(target_w, target_h)
         self._preview_plot.resize(target_w, target_h)
-        self._preview_plot.update()
+        self._preview_plot.set_display_scale(scale)
 
     def zoom_table(self, zoom_in: bool) -> None:
         self._table_zoom_factor *= 1.12 if zoom_in else 1.0 / 1.12
@@ -2219,6 +2440,7 @@ class ColumnTableWindow(QMainWindow):
         self.panelFocusRequested.emit("table")
 
     def zoom_figure_preview(self, zoom_in: bool) -> None:
+        self._figure_fit_mode = False
         self._figure_zoom_factor *= 1.12 if zoom_in else 1.0 / 1.12
         self._apply_figure_zoom()
         self.panelFocusRequested.emit("figure")
@@ -2238,19 +2460,32 @@ class ColumnTableWindow(QMainWindow):
         self.panelFocusRequested.emit("table")
 
     def fit_figure_preview(self) -> None:
+        self._figure_fit_mode = True
+        if self._fit_figure_to_viewport():
+            self.panelFocusRequested.emit("figure")
+
+    def _on_preview_viewport_resized(self) -> None:
+        if self._figure_fit_mode:
+            self._fit_figure_to_viewport()
+
+    def _fit_figure_to_viewport(self) -> bool:
+        """Scale the figure so it fills the panel's width or height."""
         if self._preview_scroll_area is None or self._preview_plot_base_size is None:
-            return
-        viewport = self._preview_scroll_area.viewport().size()
+            return False
+        try:
+            viewport = self._preview_scroll_area.viewport().size()
+        except RuntimeError:
+            self._preview_scroll_area = None
+            return False
         if viewport.width() <= 0 or viewport.height() <= 0:
-            return
+            return False
         bw, bh = self._preview_plot_base_size
-        # Leave a small frame around the plot so the initial preview is clearly
-        # contained within, rather than touching or spilling past the viewport.
-        scale_w = max(0.1, float(viewport.width() - 24) / float(max(1, bw)))
-        scale_h = max(0.1, float(viewport.height() - 24) / float(max(1, bh)))
+        # A thin frame keeps the white page visibly inside the well.
+        scale_w = max(0.1, float(viewport.width() - 8) / float(max(1, bw)))
+        scale_h = max(0.1, float(viewport.height() - 8) / float(max(1, bh)))
         self._figure_zoom_factor = min(scale_w, scale_h)
         self._apply_figure_zoom()
-        self.panelFocusRequested.emit("figure")
+        return True
 
     def table_to_dataframe(self) -> pd.DataFrame:
         rows: list[dict[str, str]] = []
@@ -2260,9 +2495,9 @@ class ColumnTableWindow(QMainWindow):
             normalized_row = top_row + 2
             rep_name = f"Replicate {rep_index + 1}"
             for row_idx in (top_row, bottom_row, normalized_row):
-                band_item = self._table.item(row_idx, 1) if self._table is not None else None
                 default_type = "Target band" if row_idx == top_row else ("Loading control" if row_idx == bottom_row else "Normalized result")
-                band_type = band_item.text() if band_item is not None else default_type
+                # The table shows short row labels; exports keep the full wording.
+                band_type = tr(default_type, self._language)
                 row_data: dict[str, str] = {
                     "Replicate": rep_name,
                     "Band Type": band_type,
@@ -2300,59 +2535,43 @@ class ColumnTableWindow(QMainWindow):
         return self._preview_plot is not None
 
     def export_current_figure_pdf(self, path: Path) -> bool:
+        """Write the figure as a vector PDF whose page is exactly the figure.
+
+        One figure unit becomes one point, so text and lines stay editable and
+        sharp in Illustrator or when placed in a manuscript.
+        """
         if self._preview_plot is None:
             return False
+        size = self._preview_plot.preferred_size()
+        if size.width() <= 0 or size.height() <= 0:
+            return False
+        resolution = 300
         writer = QPdfWriter(str(path))
-        writer.setResolution(300)
+        writer.setResolution(resolution)
+        writer.setPageSize(
+            QPageSize(
+                QSizeF(float(size.width()), float(size.height())),
+                QPageSize.Unit.Point,
+                "WB figure",
+                QPageSize.SizeMatchPolicy.ExactMatch,
+            )
+        )
+        writer.setPageMargins(QMarginsF(0, 0, 0, 0), QPageLayout.Unit.Point)
         painter = QPainter()
         try:
             if not painter.begin(writer):
                 return False
-
-            page_rect = writer.pageLayout().paintRectPixels(writer.resolution())
-            if page_rect.width() <= 0 or page_rect.height() <= 0:
-                return False
-
-            src_w = max(1, self._preview_plot.width())
-            src_h = max(1, self._preview_plot.height())
-
-            pixmap = self._preview_plot.grab()
-            image: QImage | None = None
-            if pixmap.isNull():
-                # Fallback: explicit render with a fully-specified PySide6 signature.
-                image = QImage(src_w, src_h, QImage.Format.Format_ARGB32_Premultiplied)
-                image.fill(Qt.GlobalColor.white)
-                img_painter = QPainter()
-                try:
-                    if not img_painter.begin(image):
-                        return False
-                    self._preview_plot.render(
-                        img_painter,
-                        QPoint(0, 0),
-                        QRegion(QRect(0, 0, src_w, src_h)),
-                        QWidget.RenderFlag.DrawWindowBackground | QWidget.RenderFlag.DrawChildren,
-                    )
-                finally:
-                    if img_painter.isActive():
-                        img_painter.end()
-
-            draw_source_w = max(1, pixmap.width() if image is None else image.width())
-            draw_source_h = max(1, pixmap.height() if image is None else image.height())
-            scale = min(page_rect.width() / draw_source_w, page_rect.height() / draw_source_h)
-            draw_w = max(1, int(draw_source_w * scale))
-            draw_h = max(1, int(draw_source_h * scale))
-            offset_x = page_rect.x() + (page_rect.width() - draw_w) // 2
-            offset_y = page_rect.y() + (page_rect.height() - draw_h) // 2
-            target_rect = QRect(offset_x, offset_y, draw_w, draw_h)
-
-            painter.fillRect(page_rect, Qt.GlobalColor.white)
-            if image is None:
-                painter.drawPixmap(target_rect, pixmap, pixmap.rect())
-            else:
-                painter.drawImage(target_rect, image, image.rect())
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+            factor = resolution / 72.0
+            painter.scale(factor, factor)
+            painter.fillRect(QRectF(0, 0, size.width(), size.height()), Qt.GlobalColor.white)
+            self._preview_plot.paint_figure(painter, size, editing=False)
             return True
         except Exception:
             try:
+                if painter.isActive():
+                    painter.end()
                 if path.exists():
                     path.unlink()
             except Exception:
@@ -2382,6 +2601,19 @@ class ColumnTableWindow(QMainWindow):
             QMessageBox.critical(self, "Export Table Error", str(exc))
 
     def _on_reset_table_clicked(self) -> None:
+        if self._auto_figure_enabled:
+            # In the workspace the size is edited in place, so Reset only
+            # clears the values (after asking, since it cannot be undone).
+            if self._table_has_data():
+                answer = QMessageBox.question(
+                    self,
+                    tr("Reset", self._language),
+                    tr("Clear every value in the data table?", self._language),
+                )
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+            self._reset_to_column_table(self._samples, self._replicates)
+            return
         chooser = FigureTypeDialog(self)
         chooser.set_language(self._language)
         if chooser.exec() != QDialog.DialogCode.Accepted:
@@ -2444,7 +2676,7 @@ class ColumnTableWindow(QMainWindow):
 
         if self._figure_preview_host is not None:
             placeholder = QLabel("Generated figure preview will appear here.")
-            placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding: 10px;")
+            placeholder.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px; padding: 10px;")
             placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._replace_host_widget(self._figure_preview_host, placeholder)
 
@@ -2500,6 +2732,8 @@ class ColumnTableWindow(QMainWindow):
             self._refresh_row_and_column_highlights()
             self._set_hint(f"Negative control selected: {self._group_names[group_index]}")
             self.tutorialEvent.emit("negative_control_selected")
+            if self._auto_figure_enabled:
+                self.auto_generate_figure()
 
     def _on_group_rename_requested(self, group_index: int) -> None:
         self._begin_inline_header_edit(group_index)
@@ -2565,10 +2799,10 @@ class ColumnTableWindow(QMainWindow):
             if item is None:
                 item = QTableWidgetItem("")
                 self._table.setHorizontalHeaderItem(col, item)
-            item.setText(self._group_names[group_index])
+            item.setText(self._display_group_name(self._group_names[group_index]))
             if group_index == self._negative_control_group_index:
-                item.setData(Qt.ItemDataRole.BackgroundRole, QColor(250, 222, 230))
-                item.setData(Qt.ItemDataRole.ForegroundRole, QColor("#743448"))
+                item.setData(Qt.ItemDataRole.BackgroundRole, theming.color(QColor(250, 222, 230)))
+                item.setData(Qt.ItemDataRole.ForegroundRole, theming.color("#743448"))
             else:
                 item.setData(Qt.ItemDataRole.BackgroundRole, None)
                 item.setData(Qt.ItemDataRole.ForegroundRole, None)
@@ -2628,6 +2862,10 @@ class ColumnTableWindow(QMainWindow):
             self.set_active_target_row(row)
             self._clear_row_data_cells(row)
 
+    def _retint_table_for_theme(self) -> None:
+        if self._table is not None:
+            theming.retint_items(self._table)
+
     def _set_cell_background(self, row: int, col: int, color: QColor | None) -> None:
         if self._table is None:
             return
@@ -2639,9 +2877,9 @@ class ColumnTableWindow(QMainWindow):
     def _refresh_row_and_column_highlights(self) -> None:
         if self._table is None:
             return
-        row_color = QColor(220, 235, 226)
-        col_color = QColor(253, 236, 240)
-        both_color = QColor(248, 221, 229)
+        row_color = theming.color(QColor(220, 235, 226))
+        col_color = theming.color(QColor(253, 236, 240))
+        both_color = theming.color(QColor(248, 221, 229))
         neg_col = None if self._negative_control_group_index is None else 2 + self._negative_control_group_index
         for row in range(self._table.rowCount()):
             for col in range(1, self._table.columnCount()):
@@ -2678,6 +2916,18 @@ class ColumnTableWindow(QMainWindow):
         row_kind = self._active_target_row % self._ROWS_PER_REPLICATE
         band_type = ("Target band", "Loading control", "Normalized result")[row_kind]
         return f"Replicate {replicate_idx} — {band_type}"
+
+    def active_target_description_localized(self) -> str:
+        if self._active_target_row is None:
+            return ""
+        replicate_idx = (self._active_target_row // self._ROWS_PER_REPLICATE) + 1
+        row_kind = self._active_target_row % self._ROWS_PER_REPLICATE
+        band_type = ("Target band", "Loading control", "Normalized result")[row_kind]
+        return (
+            tr("Replicate {number}", self._language, number=replicate_idx)
+            + " — "
+            + tr(band_type, self._language)
+        )
 
     def autofill_active_row(self, values: list[str]) -> int:
         if self._table is None or self._active_target_row is None:
@@ -2820,39 +3070,195 @@ class ColumnTableWindow(QMainWindow):
         summary_df = pd.DataFrame(summary_rows)
         return detail_df, summary_df
 
-    def _on_figures_generation_clicked(self) -> None:
+    # ── Workspace conveniences ────────────────────────────────────────────────
+
+    def set_auto_figure_enabled(self, enabled: bool) -> None:
+        """Let results flow into the table and redraw the chart automatically."""
+        self._auto_figure_enabled = bool(enabled)
+        if self._auto_fill_checkbox is not None:
+            self._auto_fill_checkbox.setVisible(self._auto_figure_enabled)
+
+    def auto_fill_enabled(self) -> bool:
+        return self._auto_figure_enabled and self._auto_fill_checked
+
+    def _on_auto_fill_toggled(self, checked: bool) -> None:
+        self._auto_fill_checked = bool(checked)
+
+    def table_dimensions(self) -> tuple[int, int]:
+        return self._samples, self._replicates
+
+    def _data_rows(self) -> list[int]:
+        if self._table is None:
+            return []
+        return [
+            row
+            for row in range(self._table.rowCount())
+            if row % self._ROWS_PER_REPLICATE != 2
+        ]
+
+    def _row_is_empty(self, row: int) -> bool:
+        if self._table is None:
+            return True
+        for col in range(2, self._table.columnCount()):
+            item = self._table.item(row, col)
+            if item is not None and item.text().strip():
+                return False
+        return True
+
+    def _table_has_data(self) -> bool:
+        return any(not self._row_is_empty(row) for row in self._data_rows())
+
+    def _next_empty_data_row(self, after: int = -1) -> int | None:
+        rows = self._data_rows()
+        ordered = [r for r in rows if r > after] + [r for r in rows if r <= after]
+        for row in ordered:
+            if self._row_is_empty(row):
+                return row
+        return None
+
+    def autofill_next(self, values: list[str]) -> tuple[str, int] | None:
+        """Write one analysis run into the table and advance to the next row.
+
+        The highlighted row is used when there is one (the user clicked it,
+        or the previous run advanced to it); otherwise the first empty row.
+        Returns (row description, values written), or None when nothing fit.
+        """
+        if self._table is None or not values:
+            return None
+        if not self._table_has_data() and len(values) != self._samples:
+            # First run decides the number of groups: one column per lane.
+            self.resize_table(min(max(len(values), 1), 24), self._replicates)
+        row = self._active_target_row
+        if row is None:
+            row = self._next_empty_data_row()
+        if row is None or self._table is None:
+            return None
+        self.set_active_target_row(row)
+        description = self.active_target_description_localized()
+        written = self.autofill_active_row(values)
+        if written <= 0:
+            return None
+        next_row = self._next_empty_data_row(after=row)
+        if next_row is not None and next_row != row:
+            self.set_active_target_row(next_row)
+        else:
+            self._active_target_row = None
+            self._refresh_row_and_column_highlights()
+        self.auto_generate_figure()
+        return description, written
+
+    def resize_table(self, samples: int, replicates: int) -> None:
+        """Change the table size in place, keeping every value that still fits."""
+        samples = max(1, int(samples))
+        replicates = max(1, int(replicates))
+        if self._table is None or (samples == self._samples and replicates == self._replicates):
+            return
+        kept: dict[tuple[int, int, int], str] = {}
+        for rep_index in range(self._replicates):
+            for kind in (0, 1):
+                row = rep_index * self._ROWS_PER_REPLICATE + kind
+                for group in range(self._samples):
+                    item = self._table.item(row, 2 + group)
+                    text = item.text().strip() if item is not None else ""
+                    if text:
+                        kept[(rep_index, kind, group)] = text
+        names = list(self._group_names)
+        negative = self._negative_control_group_index
+        had_figure = self.has_generated_figure()
+        style = _clone_style_config(self._figure_style_config)
+
+        self._reset_to_column_table(samples, replicates)
+        _copy_style_config_into(self._figure_style_config, style)
+        self._figure_style_last_snapshot = _clone_style_config(self._figure_style_config)
+
+        for index, name in enumerate(names[: self._samples]):
+            self._group_names[index] = name
+        if negative is not None and negative < self._samples:
+            self._negative_control_group_index = negative
+        self._suppress_item_changed = True
+        try:
+            for (rep_index, kind, group), text in kept.items():
+                if rep_index >= self._replicates or group >= self._samples:
+                    continue
+                row = rep_index * self._ROWS_PER_REPLICATE + kind
+                item = self._table.item(row, 2 + group)
+                if item is not None:
+                    item.setText(text)
+        finally:
+            self._suppress_item_changed = False
+        self._refresh_table_language()
+        self._refresh_header_visuals()
+        self._refresh_row_and_column_highlights()
+        if had_figure or self._auto_figure_enabled:
+            self.auto_generate_figure()
+
+    def _on_size_spin_changed(self, _value: int) -> None:
+        if self._samples_spin is None or self._replicates_spin is None:
+            return
+        samples = self._samples_spin.value()
+        replicates = self._replicates_spin.value()
+        # Rebuilding destroys the spin box that is emitting; do it afterwards.
+        QTimer.singleShot(0, lambda: self.resize_table(samples, replicates))
+
+    def _on_table_item_changed(self, item: QTableWidgetItem) -> None:
+        if self._suppress_item_changed or not self._auto_figure_enabled:
+            return
+        if item.column() < 2 or item.row() % self._ROWS_PER_REPLICATE == 2:
+            return
+        self._auto_figure_timer.start()
+
+    def auto_generate_figure(self) -> bool:
+        """Redraw the chart from the table without any message boxes."""
+        if self._table is None:
+            return False
+        return bool(self._on_figures_generation_clicked(silent=True))
+
+    def _on_figures_generation_clicked(self, _checked: bool = False, *, silent: bool = False) -> bool:
+        if silent and self._negative_control_group_index is None:
+            # Until the user chooses otherwise the first group is the baseline.
+            ratios = self._collect_target_loading_ratios()
+            if not ratios or not ratios[0]:
+                return False
+            self._negative_control_group_index = 0
+            self._refresh_header_visuals()
+            self._refresh_row_and_column_highlights()
+        def _warn(title: str, message: str) -> None:
+            if not silent:
+                QMessageBox.warning(self, title, message)
+
         if self._negative_control_group_index is None:
-            QMessageBox.warning(
-                self,
+            _warn(
                 "Negative Control Required",
                 "Please click 'Select Negative Control' and choose one group header first.",
             )
-            return
+            return False
 
         ratios_by_group = self._collect_target_loading_ratios()
         if not ratios_by_group:
-            QMessageBox.warning(self, "No Data", "No valid Target/Loading values were found.")
-            return
+            _warn("No Data", "No valid Target/Loading values were found.")
+            return False
 
         control_ratios = ratios_by_group[self._negative_control_group_index]
         if not control_ratios:
-            QMessageBox.warning(
-                self,
+            _warn(
                 "Invalid Negative Control",
                 "The selected negative control group has no valid Target/Loading values.",
             )
-            return
+            return False
 
         baseline_mean = float(np.mean(control_ratios))
         if baseline_mean == 0:
-            QMessageBox.warning(
-                self,
+            _warn(
                 "Invalid Baseline",
                 "Negative control baseline mean is zero and cannot be used for normalization.",
             )
-            return
+            return False
 
-        self._populate_normalized_result_rows(baseline_mean)
+        self._suppress_item_changed = True
+        try:
+            self._populate_normalized_result_rows(baseline_mean)
+        finally:
+            self._suppress_item_changed = False
 
         normalized_by_group: list[list[float]] = []
         for group_vals in ratios_by_group:
@@ -2873,8 +3279,8 @@ class ColumnTableWindow(QMainWindow):
                 errors.append(0.0)
 
         if not any(len(vals) > 0 for vals in normalized_by_group):
-            QMessageBox.warning(self, "No Data", "No groups contain valid data for plotting.")
-            return
+            _warn("No Data", "No groups contain valid data for plotting.")
+            return False
 
         if self._figure_preview_host is not None:
             preview = self._build_figure_preview_widget(
@@ -2884,12 +3290,15 @@ class ColumnTableWindow(QMainWindow):
                 baseline_mean=baseline_mean,
             )
             self._replace_host_widget(self._figure_preview_host, preview)
+            _translate_widget_tree(preview, self._language)
             # Geometry is only reliable after the new preview has entered the
             # layout, so fit on the next event-loop turn.
             QTimer.singleShot(0, self.fit_figure_preview)
             self.tutorialEvent.emit("figure_generated")
-            return
+            return True
 
+        if silent:
+            return False
         dialog = _FiguresDialog(
             group_names=list(self._group_names),
             grouped_values=normalized_by_group,
@@ -2911,3 +3320,4 @@ class ColumnTableWindow(QMainWindow):
         dialog.raise_()
         dialog.activateWindow()
         self.tutorialEvent.emit("figure_generated")
+        return True

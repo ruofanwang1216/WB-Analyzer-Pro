@@ -7,8 +7,8 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 from PIL import Image
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtWidgets import QApplication, QToolButton
 
 from gui.main_window import MainWindow
 from gui.figure_generation import ColumnTableWindow
@@ -41,13 +41,22 @@ class MainWindowHomePageTests(unittest.TestCase):
 
         self.assertIs(window._mode_container.currentWidget(), window._main_splitter)
         self.assertTrue(window._home_mode_active)
-        self.assertTrue(window._files_panel_collapsed)
+        # Home shows the file sidebar and an import hint; nothing else yet.
+        self.assertFalse(window._files_panel_collapsed)
+        self.assertFalse(window._files_list.isHidden())
+        self.assertFalse(window._empty_state.isHidden())
+        self.assertTrue(window._viewer_container.isHidden())
+        # Home carries one line of text and no status prompt.
+        self.assertNotIn("1.", window._empty_state.text())
+        self.assertEqual(window._status_bar.currentMessage(), "")
         self.assertTrue(window._param_panel_host.isHidden())
         self.assertTrue(window._figure_workspace.isHidden())
         self.assertTrue(window._results_dock.isHidden())
         self.assertTrue(window._open_toolbar_action.isVisible())
         self.assertTrue(window._workspace_toolbar_action.isVisible())
-        self.assertFalse(window._analyze_toolbar_action.isVisible())
+        self.assertTrue(window._image_panels[0].analyze_btn.isHidden())
+        self.assertFalse(window._figure_generation_btn.isChecked())
+        self.assertFalse(window._wb_plot_generation_btn.isChecked())
         self.assertLess(
             window._open_toolbar_btn.geometry().left(),
             window._workspace_toolbar_group.geometry().left(),
@@ -59,75 +68,130 @@ class MainWindowHomePageTests(unittest.TestCase):
         self.assertFalse(window._act_open.icon().isNull())
         self.assertEqual(
             window._open_toolbar_btn.toolButtonStyle(),
-            Qt.ToolButtonStyle.ToolButtonTextBesideIcon,
+            Qt.ToolButtonStyle.ToolButtonTextOnly,
         )
         self.assertFalse(hasattr(window, "_act_export_all"))
         self.assertFalse(hasattr(window, "_act_reset"))
 
     def test_top_tools_open_their_existing_workspaces(self) -> None:
         densitometry = self._make_window()
-        with patch("gui.main_window.FigureTypeDialog.exec", return_value=0):
+        with (
+            patch("gui.main_window.FigureTypeDialog.exec") as type_dialog,
+            patch("gui.main_window.ColumnSetupDialog.exec") as setup_dialog,
+        ):
             densitometry._on_figure_generation_clicked()
+        # The workspace opens ready to use: no dialogs, table already there.
+        type_dialog.assert_not_called()
+        setup_dialog.assert_not_called()
         self.assertFalse(densitometry._home_mode_active)
-        self.assertTrue(densitometry._files_panel_collapsed)
+        self.assertFalse(densitometry._files_panel_collapsed)
         self.assertFalse(densitometry._figure_workspace.isHidden())
         self.assertFalse(densitometry._param_panel_host.isHidden())
         self.assertFalse(densitometry._results_dock.isHidden())
+        self.assertFalse(densitometry._image_panels[0].analyze_btn.isHidden())
+        self.assertIsNotNone(densitometry._embedded_column_table)
+        self.assertEqual(
+            densitometry._embedded_column_table.table_dimensions(), (3, 3)
+        )
+        self.assertTrue(densitometry._figure_generation_btn.isChecked())
+        self.assertFalse(densitometry._wb_plot_generation_btn.isChecked())
 
         wb_figure = self._make_window()
         wb_figure._on_wb_plot_mode()
         self.assertFalse(wb_figure._home_mode_active)
-        self.assertTrue(wb_figure._files_panel_collapsed)
+        self.assertTrue(wb_figure._wb_plot_generation_btn.isChecked())
+        self.assertFalse(wb_figure._figure_generation_btn.isChecked())
         self.assertFalse(wb_figure._figure_workspace.isHidden())
         self.assertIs(
             wb_figure._figure_workspace_stack.currentWidget(),
             wb_figure._wb_plot_workspace_host,
         )
 
-    def test_roi_settings_share_left_side_with_uploaded_files(self) -> None:
+    def test_lane_settings_sit_under_the_file_list(self) -> None:
         window = self._make_window()
+        window.resize(1200, 800)
+        window.show()
+        self._app.processEvents()
         window._on_densitometry_mode()
 
         self.assertIs(window._main_splitter.widget(0), window._files_panel)
-        self.assertIs(window._main_splitter.widget(1), window._param_panel_host)
-        self.assertIs(window._main_splitter.widget(2), window._workspace_splitter)
-        self.assertTrue(window._files_panel_collapsed)
-        self.assertTrue(window._files_list.isHidden())
+        self.assertIs(window._main_splitter.widget(1), window._workspace_splitter)
+        self.assertIs(window._param_panel_host.parentWidget(), window._files_panel)
+        # Files and lane settings are on screen together.
+        self.assertFalse(window._files_panel_collapsed)
+        self.assertFalse(window._files_list.isHidden())
         self.assertFalse(window._param_panel_host.isHidden())
         self.assertFalse(hasattr(window.param_panel, "_rotate_group"))
+        full_width = window._files_panel.width()
+
+        window._set_files_panel_collapsed(True)
+        self._app.processEvents()
+
+        # Folding the file list keeps the lane tools: only the list goes.
+        self.assertTrue(window._files_list.isHidden())
+        self.assertFalse(hasattr(window, "_files_drop_hint"))
+        self.assertFalse(window._param_panel_host.isHidden())
+        self.assertFalse(window._files_title.isHidden())
+        self.assertEqual(window._files_panel.width(), full_width)
+        # Here the list folds up, so the arrow points down to bring it back.
+        self.assertEqual(window._files_toggle_btn.property("arrow"), "down")
+        # With the list gone the lane settings move up under the header.
+        self.assertLess(
+            window._param_panel_host.mapTo(window._files_panel, QPoint()).y(), 80
+        )
 
         window._set_files_panel_collapsed(False)
-
         self.assertFalse(window._files_list.isHidden())
+        self.assertEqual(window._files_toggle_btn.property("arrow"), "up")
+
+    def test_collapsed_sidebar_is_a_rail_only_where_it_holds_just_files(self) -> None:
+        window = self._make_window()
+        window.resize(1200, 800)
+        window.show()
+        self._app.processEvents()
+        rail = window._files_panel_collapsed_width
+
+        window._set_files_panel_collapsed(True)
+        self._app.processEvents()
+        self.assertEqual(window._files_panel.width(), rail)  # Home
+
+        window._on_densitometry_mode()
+        self._app.processEvents()
+        self.assertGreater(window._files_panel.width(), rail)
+        self.assertFalse(window._param_panel_host.isHidden())
+
+        window._on_wb_plot_mode()
+        self._app.processEvents()
+        self.assertEqual(window._files_panel.width(), rail)
         self.assertTrue(window._param_panel_host.isHidden())
 
-    def test_tool_switches_preserve_uploaded_files_panel_state(self) -> None:
+    def test_tool_switches_preserve_sidebar_state(self) -> None:
         window = self._make_window()
         window._on_densitometry_mode()
-        self.assertTrue(window._files_panel_collapsed)
-
-        window._set_files_panel_collapsed(False)
-        window._on_wb_plot_mode()
-        self.assertFalse(window._files_panel_collapsed)
-
-        window._show_home_page()
         self.assertFalse(window._files_panel_collapsed)
 
         window._set_files_panel_collapsed(True)
-        window._on_densitometry_mode()
+        window._on_wb_plot_mode()
         self.assertTrue(window._files_panel_collapsed)
+
+        window._show_home_page()
+        self.assertTrue(window._files_panel_collapsed)
+
+        window._set_files_panel_collapsed(False)
+        window._on_densitometry_mode()
+        self.assertFalse(window._files_panel_collapsed)
         self.assertFalse(window._param_panel_host.isHidden())
 
     def test_saved_uploaded_files_panel_state_is_restored_on_startup(self) -> None:
-        expanded = self._make_window({"files_panel_collapsed": False})
+        expanded = self._make_window({"sidebar_collapsed": False})
         self.assertFalse(expanded._files_panel_collapsed)
         self.assertFalse(expanded._files_list.isHidden())
 
-        collapsed = self._make_window({"files_panel_collapsed": True})
+        collapsed = self._make_window({"sidebar_collapsed": True})
         self.assertTrue(collapsed._files_panel_collapsed)
         self.assertTrue(collapsed._files_list.isHidden())
 
-    def test_import_on_home_loads_same_viewer_without_opening_a_tool(self) -> None:
+    def test_import_on_home_opens_the_quantify_workspace(self) -> None:
         window = self._make_window()
         with tempfile.TemporaryDirectory() as tmpdir:
             image_path = Path(tmpdir) / "home-import.tif"
@@ -141,45 +205,99 @@ class MainWindowHomePageTests(unittest.TestCase):
             ):
                 window._upload_files()
 
-        self.assertTrue(window._home_mode_active)
+        # Importing from Home lands in the Quantify workspace, ready to analyze.
+        self.assertFalse(window._home_mode_active)
         self.assertIs(window._mode_container.currentWidget(), window._main_splitter)
         self.assertEqual(window._slot_states[0]["path"], str(image_path.resolve()))
-        self.assertTrue(window._param_panel_host.isHidden())
-        self.assertTrue(window._figure_workspace.isHidden())
-        self.assertTrue(window._results_dock.isHidden())
+        self.assertFalse(window._param_panel_host.isHidden())
+        self.assertFalse(window._figure_workspace.isHidden())
+        self.assertFalse(window._results_dock.isHidden())
+        self.assertFalse(window._image_panels[0].analyze_btn.isHidden())
+        self.assertIsNotNone(window._embedded_column_table)
+        self.assertTrue(window._figure_generation_btn.isChecked())
+
+    def test_top_tabs_have_room_for_their_text_when_selected(self) -> None:
+        from PySide6.QtGui import QFont, QFontMetrics
+
+        window = self._make_window()
+        window.resize(1200, 800)
+        window.show()
+        for language in (LANG_EN, LANG_ZH_CN):
+            window._set_language(language, persist=False)
+            for select in (window._on_figure_generation_clicked, window._on_wb_plot_mode):
+                select()
+                self._app.processEvents()
+                for button in (window._figure_generation_btn, window._wb_plot_generation_btn):
+                    font = QFont(button.font())
+                    font.setPixelSize(14)
+                    font.setBold(True)
+                    needed = QFontMetrics(font).horizontalAdvance(
+                        button.text().replace("&&", "&")
+                    )
+                    # Text plus the 16px padding on each side fits the button.
+                    self.assertGreaterEqual(button.width(), needed + 32, button.text())
+        window.close()
+
+    def test_drop_down_lists_show_every_entry_in_full(self) -> None:
+        window = self._make_window()
+        window.resize(1300, 850)
+        window.show()
+        self._app.processEvents()
+        window._on_wb_plot_mode()
+        figure = window._figure_mode_window
+        combos = {
+            "language": window._language_combo,
+            "align boxes": figure._align_text_boxes_combo,
+        }
+        for name, combo in combos.items():
+            combo.setEnabled(True)
+            combo.showPopup()
+            self._app.processEvents()
+            view = combo.view()
+            viewport = view.viewport().rect()
+            for row in range(combo.count()):
+                rect = view.visualRect(combo.model().index(row, 0))
+                self.assertGreaterEqual(rect.top(), viewport.top(), name)
+                self.assertLessEqual(rect.bottom(), viewport.bottom(), name)
+                text_width = view.fontMetrics().horizontalAdvance(combo.itemText(row))
+                self.assertLessEqual(text_width + 16, viewport.width(), (name, combo.itemText(row)))
+            combo.hidePopup()
+            self._app.processEvents()
+        window.close()
 
     def test_home_controls_switch_between_english_and_chinese(self) -> None:
         window = self._make_window()
 
         window._set_language(LANG_ZH_CN, persist=False)
         self.assertEqual(window._act_open.text(), "导入图像")
-        self.assertEqual(window._figure_generation_btn.text(), "灰度定量图生成")
-        self.assertEqual(window._wb_plot_generation_btn.text(), "Western blot 图像排版")
+        self.assertEqual(window._figure_generation_btn.text(), "① 定量与作图")
+        self.assertEqual(window._wb_plot_generation_btn.text(), "② 图像排版")
         self.assertEqual(window._language_combo.currentData(), LANG_ZH_CN)
 
         window._set_language(LANG_EN, persist=False)
         self.assertEqual(window._act_open.text(), "Import Images")
-        self.assertEqual(
-            window._figure_generation_btn.text(),
-            "Densitometry Figure Generation",
-        )
-        self.assertEqual(
-            window._wb_plot_generation_btn.text(),
-            "WB Plot Figure Generation",
-        )
+        self.assertEqual(window._figure_generation_btn.text(), "① Quantify && Plot")
+        self.assertEqual(window._wb_plot_generation_btn.text(), "② Figure Layout")
 
     def test_image_rotation_menu_uses_compact_icon_actions(self) -> None:
         window = self._make_window()
         panel = window._image_panels[0]
 
         action_texts = [action.text() for action in panel.rotate_menu.actions()]
-        self.assertEqual(action_texts, ["Horizontal", "Vertical", "", "Custom", "", "Undo"])
+        self.assertEqual(action_texts, [
+            "Auto Straighten", "", "Horizontal", "Vertical", "", "Custom", "", "Undo",
+        ])
+        self.assertEqual(
+            panel.rotate_btn.popupMode(),
+            QToolButton.ToolButtonPopupMode.MenuButtonPopup,
+        )
         self.assertFalse(panel.flip_horizontal_action.icon().isNull())
         self.assertFalse(panel.flip_vertical_action.icon().isNull())
         self.assertFalse(panel.rotate_custom_action.icon().isNull())
         self.assertEqual(panel.rotate_custom_action.toolTip(), "Press Enter/Return to apply")
 
         window._set_language(LANG_ZH_CN, persist=False)
+        self.assertEqual(panel.auto_straighten_action.text(), "自动调正")
         self.assertEqual(panel.flip_horizontal_action.text(), "水平")
         self.assertEqual(panel.flip_vertical_action.text(), "垂直")
         self.assertEqual(panel.rotate_custom_action.text(), "自定义")
@@ -195,9 +313,9 @@ class MainWindowHomePageTests(unittest.TestCase):
         figure = before_entry._figure_mode_window
         self.assertEqual(figure._grp1.title_text(), "步骤 1：选择布局")
         self.assertEqual(figure._grp4.title_text(), "步骤 2：填充印迹图框")
-        self.assertEqual(figure._saved_templates_btn.text(), "已保存模板   ›")
+        self.assertEqual(figure._saved_templates_btn.text(), "已保存模板")
         self.assertEqual(figure._annot_undo_btn.text(), "撤销")
-        self.assertEqual(figure._fit_center_btn.text(), "适配并居中")
+        self.assertEqual(figure._fit_center_btn.text(), "适应")
 
         after_entry = self._make_window()
         after_entry._on_wb_plot_mode()
@@ -209,7 +327,7 @@ class MainWindowHomePageTests(unittest.TestCase):
         self.assertEqual(figure._grp6.title_text(), "导出图形")
         self.assertEqual(figure._export_pdf_btn.toolTip(), "将图形导出为 PDF")
         self.assertEqual(figure._align_text_boxes_combo.currentText(), "对齐文本框")
-        self.assertEqual(after_entry._status_bar.currentMessage(), "已进入 WB Figure 排版。")
+        self.assertEqual(after_entry._status_bar.currentMessage(), "已进入图像排版。")
 
         after_entry._language_combo.setCurrentIndex(
             after_entry._language_combo.findData(LANG_EN)
@@ -226,7 +344,7 @@ class MainWindowHomePageTests(unittest.TestCase):
         figure = window._figure_mode_window
         self.assertEqual(figure._language, LANG_ZH_CN)
         self.assertEqual(figure._grp1.title_text(), "步骤 1：选择布局")
-        self.assertEqual(figure._saved_templates_btn.text(), "已保存模板   ›")
+        self.assertEqual(figure._saved_templates_btn.text(), "已保存模板")
         self.assertEqual(figure._annot_undo_btn.text(), "撤销")
 
     def test_language_switch_refreshes_all_created_tools_in_both_directions(self) -> None:
@@ -239,13 +357,13 @@ class MainWindowHomePageTests(unittest.TestCase):
             window._language_combo.findData(LANG_ZH_CN)
         )
 
-        self.assertEqual(table.windowTitle(), "列式数据表")
+        self.assertEqual(table.windowTitle(), "数据表")
         self.assertEqual(window.param_panel._roi_group.title(), "ROI 设置")
         self.assertEqual(window.results_panel._title.text(), "定量结果")
         self.assertEqual(window._figure_mode_window._grp1.title_text(), "步骤 1：选择布局")
         self.assertEqual(window._figure_mode_window._annot_undo_btn.text(), "撤销")
-        self.assertEqual(window._status_bar.currentMessage(), "已进入 WB Figure 排版。")
-        self.assertEqual(window._files_toggle_btn.toolTip(), "展开已上传文件面板")
+        self.assertEqual(window._status_bar.currentMessage(), "已进入图像排版。")
+        self.assertEqual(window._files_toggle_btn.toolTip(), "收起已上传文件面板")
 
         window._language_combo.setCurrentIndex(
             window._language_combo.findData(LANG_EN)
@@ -257,7 +375,7 @@ class MainWindowHomePageTests(unittest.TestCase):
         self.assertEqual(window._figure_mode_window._grp1.title_text(), "Step 1: Choose Layout")
         self.assertEqual(window._figure_mode_window._annot_undo_btn.text(), "Undo")
         self.assertEqual(window._status_bar.currentMessage(), "Opened WB Figure Layout workspace.")
-        self.assertEqual(window._files_toggle_btn.toolTip(), "Expand Uploaded Files panel")
+        self.assertEqual(window._files_toggle_btn.toolTip(), "Collapse Uploaded Files panel")
 
     def test_one_tool_translation_failure_does_not_block_other_tools(self) -> None:
         window = self._make_window()

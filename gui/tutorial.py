@@ -754,8 +754,22 @@ class TutorialController(QObject):
         self._sync_roi_hint(step.key)
         self._sync_table_drag_hint(step.key)
         self._sync_roi_enter_prompt(step.key)
+        self._reveal_step_target(step)
         self._position_overlays()
         self._panel.raise_()
+
+    def _reveal_step_target(self, step: _Step) -> None:
+        """Open the Figure Layout step page that holds this step's control."""
+        figure = getattr(self._host, "_figure_mode_window", None)
+        if figure is None or self._mode != "wb_figure":
+            return
+        try:
+            target = step.target()
+        except Exception:
+            return
+        widget = target[0] if isinstance(target, tuple) else target
+        if isinstance(widget, QWidget):
+            figure.reveal_widget(widget)
 
     def _clear_roi_hints(self) -> None:
         for image_panel in self._host._image_panels:
@@ -1032,7 +1046,7 @@ class TutorialController(QObject):
                 _Step(
                     "create_column_table",
                     "Create the column table first",
-                    "Click Densitometry Figure Generation. The tutorial opens Column Setup directly with Samples = 3 and Replicates = 2. Confirm it before drawing any ROI.",
+                    "Click ① Quantify & Plot at the top. The tutorial opens Column Setup with Samples = 3 and Replicates = 2. Confirm it before drawing any box.",
                     lambda: host._figure_generation_btn,
                     True,
                 ),
@@ -1051,137 +1065,61 @@ class TutorialController(QObject):
                     True,
                 ),
                 _Step(
-                    "loading_left_lane_roi",
-                    "Loading Control: left lane ROI",
-                    "The Loading Control image is selected. Drag a close-fitting ROI around the left group of three lanes, following the animated rectangle without leaving excess blank space.",
-                    canvas_target,
-                ),
-                _Step(
-                    "loading_left_band_roi",
-                    "Loading Control: first band ROI",
-                    "Draw the small band ROI around only the first band in the left group, following the animated rectangle.",
-                    canvas_target,
-                ),
-                _Step(
-                    "analyze_loading_left",
-                    "Measure Loading Control replicate 1",
-                    "Click Analyze to measure the first three loading-control lanes.",
-                    lambda: host._analyze_toolbar_btn,
-                    True,
-                ),
-                _Step(
-                    "loading_right_lane_roi",
-                    "Loading Control: right lane ROI",
-                    "Now drag a close-fitting ROI around only the right group of three lanes.",
-                    canvas_target,
-                ),
-                _Step(
-                    "loading_right_band_roi",
-                    "Loading Control: first band ROI",
-                    "Draw the small band ROI around only the first band in the right group.",
-                    canvas_target,
-                ),
-                _Step(
-                    "analyze_loading_right",
-                    "Measure Loading Control replicate 2",
-                    "Click Analyze to measure the second three loading-control lanes.",
-                    lambda: host._analyze_toolbar_btn,
-                    True,
-                ),
-                _Step(
                     "target_left_lane_roi",
-                    "Target Protein: left lane ROI",
-                    "The Target Protein image is now selected. Drag a close-fitting ROI around its left group of three lanes.",
-                    canvas_target,
-                ),
-                _Step(
-                    "target_left_band_roi",
-                    "Target Protein: first band ROI",
-                    "Draw the small band ROI around only the first band in the left group.",
+                    "Target Protein: box the left bands",
+                    "The Target Protein image is selected. Drag one box around the left group of three bands, following the animated rectangle. The moment you let go, a box appears on each band. You can drag any box to adjust it.",
                     canvas_target,
                 ),
                 _Step(
                     "analyze_target_left",
                     "Measure Target Protein replicate 1",
-                    "Click Analyze to measure the first three target-protein lanes.",
+                    "Click Analyze on this image, or press Enter/Return. The three values go straight into the Target band row of Replicate 1 in the Column Table.",
+                    lambda: host._analyze_toolbar_btn,
+                    True,
+                ),
+                _Step(
+                    "loading_left_lane_roi",
+                    "Loading Control: box the left bands",
+                    "The Loading Control image is selected. Drag one box around the left group of three bands. A box appears on each band as soon as you let go.",
+                    canvas_target,
+                ),
+                _Step(
+                    "analyze_loading_left",
+                    "Measure Loading Control replicate 1",
+                    "Click Analyze on this image, or press Enter/Return. The three values go straight into the Loading control row of Replicate 1 in the Column Table.",
                     lambda: host._analyze_toolbar_btn,
                     True,
                 ),
                 _Step(
                     "target_right_lane_roi",
-                    "Target Protein: right lane ROI",
-                    "Drag a close-fitting ROI around only the right group of three target-protein lanes.",
-                    canvas_target,
-                ),
-                _Step(
-                    "target_right_band_roi",
-                    "Target Protein: first band ROI",
-                    "Draw the small band ROI around only the first band in the right group.",
+                    "Target Protein: box the right bands",
+                    "The Target Protein image is selected. Drag one box around the right group of three bands. A box appears on each band as soon as you let go.",
                     canvas_target,
                 ),
                 _Step(
                     "analyze_target_right",
                     "Measure Target Protein replicate 2",
-                    "Click Analyze to measure the second three target-protein lanes.",
+                    "Click Analyze on this image, or press Enter/Return. The three values go straight into the Target band row of Replicate 2 in the Column Table.",
                     lambda: host._analyze_toolbar_btn,
                     True,
                 ),
                 _Step(
-                    "select_loading_r1_row",
-                    "Choose Loading Control replicate 1",
-                    "In the Column Table, click the Loading control row under Replicate 1. This row will receive Run 1.",
-                    lambda: column_row_target(1),
+                    "loading_right_lane_roi",
+                    "Loading Control: box the right bands",
+                    "The Loading Control image is selected. Drag one box around the right group of three bands. A box appears on each band as soon as you let go.",
+                    canvas_target,
+                ),
+                _Step(
+                    "analyze_loading_right",
+                    "Measure Loading Control replicate 2",
+                    "Click Analyze on this image, or press Enter/Return. The three values go straight into the Loading control row of Replicate 2 in the Column Table.",
+                    lambda: host._analyze_toolbar_btn,
                     True,
-                ),
-                _Step(
-                    "autofill_loading_r1",
-                    "Fill Loading Control replicate 1",
-                    "In the Results Mean row, drag across the three Run 1 values as demonstrated, then press Enter/Return to fill the selected Column Table row.",
-                    lambda: results_run_target(1),
-                ),
-                _Step(
-                    "select_loading_r2_row",
-                    "Choose Loading Control replicate 2",
-                    "Click the Loading control row under Replicate 2. This row will receive Run 2.",
-                    lambda: column_row_target(4),
-                    True,
-                ),
-                _Step(
-                    "autofill_loading_r2",
-                    "Fill Loading Control replicate 2",
-                    "Drag across the three Run 2 Mean values, then press Enter/Return.",
-                    lambda: results_run_target(2),
-                ),
-                _Step(
-                    "select_target_r1_row",
-                    "Choose Target Band replicate 1",
-                    "Click the Target band row under Replicate 1. This row will receive Run 3.",
-                    lambda: column_row_target(0),
-                    True,
-                ),
-                _Step(
-                    "autofill_target_r1",
-                    "Fill Target Band replicate 1",
-                    "Drag across the three Run 3 Mean values, then press Enter/Return.",
-                    lambda: results_run_target(3),
-                ),
-                _Step(
-                    "select_target_r2_row",
-                    "Choose Target Band replicate 2",
-                    "Click the Target band row under Replicate 2. This row will receive Run 4.",
-                    lambda: column_row_target(3),
-                    True,
-                ),
-                _Step(
-                    "autofill_target_r2",
-                    "Fill Target Band replicate 2",
-                    "Drag across the three Run 4 Mean values, then press Enter/Return. All four input rows in the 3 × 2 Column Table will now be complete.",
-                    lambda: results_run_target(4),
                 ),
                 _Step(
                     "select_negative_control",
                     "Choose a normalization control",
-                    "Click Select Negative Control above the Column Table.",
+                    "The chart was drawn automatically, using the first group as the baseline. To choose the baseline yourself, click Select Negative Control under the Column Table.",
                     lambda: (
                         None
                         if host._embedded_column_table is None
@@ -1192,25 +1130,14 @@ class TutorialController(QObject):
                 _Step(
                     "select_control_group",
                     "Select Group A as the control",
-                    "Click the Group A column header. It will become the negative-control baseline for normalization.",
+                    "Click the Group A column header. The chart is redrawn at once, normalized to Group A.",
                     lambda: control_group_target(0),
-                    True,
-                ),
-                _Step(
-                    "generate_figure",
-                    "Generate the densitometry figure",
-                    "Click Figures Generation. The completed table will be normalized to Group A and the figure preview will be generated.",
-                    lambda: (
-                        None
-                        if host._embedded_column_table is None
-                        else host._embedded_column_table._figures_btn
-                    ),
                     True,
                 ),
                 _Step(
                     "complete",
                     "Densitometry tutorial complete",
-                    "All four analysis runs have been entered, Group A was selected as the control, and the normalized figure was generated. Click Done to return to the fresh Home page.",
+                    "All four runs were measured and filled into the table, Group A was selected as the control, and the normalized figure was generated. Click Done to return to the fresh Home page.",
                     no_target,
                 ),
             ]
@@ -1253,7 +1180,7 @@ class TutorialController(QObject):
             _Step(
                 "frame_template",
                 "Create the blot frames",
-                "Click Create Blot Frame Template. Tutorial defaults are Panels = 1, Blot Frames = 2, and Lanes = 3, matching the supplied setup screenshot.",
+                "Click New Blot Frames. Tutorial defaults are Panels = 1, Blot Frames = 2, and Lanes = 3, matching the supplied setup screenshot.",
                 lambda: figure_target("step1PrimaryButton"),
                 True,
             ),
@@ -1267,7 +1194,7 @@ class TutorialController(QObject):
             _Step(
                 "condition_template",
                 "Create the blot conditions",
-                "Click Create Blot Condition Template. Tutorial defaults are one condition row and one evenly divided Group Level 1.",
+                "Click Add Conditions. Tutorial defaults are one condition row and one evenly divided Group Level 1.",
                 lambda: figure_target("step1SecondaryButton"),
                 True,
             ),
